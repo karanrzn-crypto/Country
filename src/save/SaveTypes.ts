@@ -2,7 +2,9 @@ import type { IdGeneratorState } from '../core/IdGenerator';
 import type { GameState } from '../state/GameState';
 
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+/** Version that introduced the strategic map slice (Part 1). */
+export const SAVE_VERSION_MAP_SLICE = 2;
 
 export interface SaveMeta {
   readonly version: number;

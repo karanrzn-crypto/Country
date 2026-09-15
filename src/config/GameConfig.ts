@@ -103,6 +103,30 @@ const CONFIG_SCHEMA: FieldSchema = {
         autoSaveIntervalTicks: { type: 'number', min: 0, max: 8760, integer: true },
         storageKeyPrefix: { type: 'string', minLength: 1 }
       }
+    },
+    map: {
+      type: 'object',
+      fields: {
+        enabled: { type: 'boolean' },
+        seed: { type: 'number', integer: true },
+        columns: { type: 'number', min: 8, max: 128, integer: true },
+        rows: { type: 'number', min: 8, max: 128, integer: true },
+        cellSize: { type: 'number', min: 1, max: 1000 },
+        jitterAmplitude: { type: 'number', min: 0, max: 0.49 },
+        borderDepth: { type: 'number', min: 0, max: 6, integer: true },
+        borderAmplitude: { type: 'number', min: 0, max: 0.4 },
+        countryCount: { type: 'number', min: 2, max: 64, integer: true },
+        provincesPerCountryMin: { type: 'number', min: 1, max: 24, integer: true },
+        provincesPerCountryMax: { type: 'number', min: 1, max: 48, integer: true },
+        citiesPerProvinceMax: { type: 'number', min: 1, max: 12, integer: true },
+        minCountryCells: { type: 'number', min: 1, max: 4096, integer: true },
+        minProvinceCells: { type: 'number', min: 1, max: 1024, integer: true },
+        minViewHeight: { type: 'number', min: 1 },
+        maxViewHeight: { type: 'number', min: 1 },
+        panSpeedFractionPerSecond: { type: 'number', min: 0.05, max: 5 },
+        cityLabelMaxViewHeight: { type: 'number', min: 1 },
+        pickRadiusFraction: { type: 'number', min: 0.001, max: 0.2 }
+      }
     }
   }
 };
@@ -122,6 +146,17 @@ export function resolveConfig(overrides?: DeepPartial<GameConfig>): GameConfig {
   if (world.simulatedRadius < world.activeRadius) {
     throw new ConfigError(
       `config.world.simulatedRadius (${world.simulatedRadius}) must be >= activeRadius (${world.activeRadius})`
+    );
+  }
+  const map = merged.map;
+  if (map.provincesPerCountryMax < map.provincesPerCountryMin) {
+    throw new ConfigError(
+      `config.map.provincesPerCountryMax (${map.provincesPerCountryMax}) must be >= provincesPerCountryMin (${map.provincesPerCountryMin})`
+    );
+  }
+  if (map.maxViewHeight <= map.minViewHeight) {
+    throw new ConfigError(
+      `config.map.maxViewHeight (${map.maxViewHeight}) must be > minViewHeight (${map.minViewHeight})`
     );
   }
   return merged;

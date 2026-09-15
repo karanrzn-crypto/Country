@@ -17,6 +17,7 @@ import type { DiplomacySlice } from './slices/diplomacySlice';
 import type { WarSlice } from './slices/warSlice';
 import type { EnvironmentSlice } from './slices/environmentSlice';
 import type { PlayerSlice } from './slices/playerSlice';
+import type { MapSlice } from './slices/mapSlice';
 
 export interface GameState {
   world: WorldSlice;
@@ -30,6 +31,7 @@ export interface GameState {
   war: WarSlice;
   environment: EnvironmentSlice;
   player: PlayerSlice;
+  map: MapSlice;
 }
 
 /** Slice keys in canonical order (save serialization + state hashing). */
@@ -44,5 +46,6 @@ export const STATE_SLICE_KEYS: readonly (keyof GameState)[] = [
   'diplomacy',
   'war',
   'environment',
-  'player'
+  'player',
+  'map'
 ] as const;

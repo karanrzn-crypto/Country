@@ -10,6 +10,7 @@ import type { IdGenerator } from '../core/IdGenerator';
 import type { DataRegistry } from '../data/DataRegistry';
 import { createUnitFromType } from '../military/spawnUnit';
 import { buildWorldSlice } from './slices/worldSlice';
+import { createDefaultMapSlice } from './slices/mapSlice';
 import type { GameState } from './GameState';
 import { validateGameStateOrThrow } from './validate';
 
@@ -111,7 +112,8 @@ export function createInitialState(data: DataRegistry, config: GameConfig, ids: 
       mode: null,
       focusChunkId: null,
       selection: []
-    }
+    },
+    map: createDefaultMapSlice(config.map.columns, config.map.rows, config.map.cellSize)
   };
 
   validateGameStateOrThrow(state);

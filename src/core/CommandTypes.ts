@@ -21,4 +21,25 @@ export type GameCommand =
     }
   | { readonly type: 'save.save'; readonly slot: string; readonly label?: string }
   | { readonly type: 'save.load'; readonly slot: string }
-  | { readonly type: 'debug.command'; readonly name: string; readonly args?: Readonly<Record<string, unknown>> };
+  | { readonly type: 'debug.command'; readonly name: string; readonly args?: Readonly<Record<string, unknown>> }
+  // —— strategic map (Part 1) ——
+  | {
+      readonly type: 'map.select';
+      readonly countryId?: string | null;
+      readonly provinceId?: string | null;
+      readonly cityId?: string | null;
+    }
+  | { readonly type: 'map.pick'; readonly x: number; readonly z: number }
+  | { readonly type: 'map.clearSelection' }
+  | { readonly type: 'map.setLayerVisible'; readonly layer: string; readonly visible: boolean }
+  | { readonly type: 'map.setCamera'; readonly x?: number; readonly z?: number; readonly viewHeight?: number }
+  | { readonly type: 'map.panBy'; readonly dx: number; readonly dz: number }
+  | {
+      readonly type: 'map.zoomBy';
+      readonly factor: number;
+      /** Optional world point kept under the cursor while zooming. */
+      readonly anchorX?: number;
+      readonly anchorZ?: number;
+    }
+  | { readonly type: 'map.focusCountry'; readonly countryId: string }
+  | { readonly type: 'map.setViewport'; readonly width: number; readonly height: number };

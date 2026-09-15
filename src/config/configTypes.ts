@@ -72,6 +72,38 @@ export interface SaveConfig {
   readonly storageKeyPrefix: string;
 }
 
+/** Strategic political map (Part 1) — generation + camera tuning. */
+export interface MapConfig {
+  /** When true the browser view renders the strategic map instead of chunk planes. */
+  readonly enabled: boolean;
+  /** Independent generation seed (deterministic; sim RNG stays untouched). */
+  readonly seed: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly cellSize: number;
+  /** Lattice jitter as a fraction of cellSize (< 0.5 keeps every quad simple). */
+  readonly jitterAmplitude: number;
+  /** Fractal subdivision depth per border edge (2^depth segments). */
+  readonly borderDepth: number;
+  /** Max perpendicular offset per subdivision step, as a fraction of edge length. */
+  readonly borderAmplitude: number;
+  readonly countryCount: number;
+  readonly provincesPerCountryMin: number;
+  readonly provincesPerCountryMax: number;
+  readonly citiesPerProvinceMax: number;
+  readonly minCountryCells: number;
+  readonly minProvinceCells: number;
+  /** Camera zoom bounds: visible world height (smaller = closer). */
+  readonly minViewHeight: number;
+  readonly maxViewHeight: number;
+  /** Keyboard pan speed as a fraction of the viewport width per second. */
+  readonly panSpeedFractionPerSecond: number;
+  /** City labels become visible below this view height. */
+  readonly cityLabelMaxViewHeight: number;
+  /** Click pick radius as a fraction of the visible height. */
+  readonly pickRadiusFraction: number;
+}
+
 export interface GameConfig {
   readonly debug: DebugConfig;
   readonly sim: SimConfig;
@@ -82,6 +114,7 @@ export interface GameConfig {
   readonly combat: CombatConfig;
   readonly performance: PerformanceConfig;
   readonly save: SaveConfig;
+  readonly map: MapConfig;
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
@@ -110,5 +143,26 @@ export const DEFAULT_CONFIG: GameConfig = {
     projectileSpeedChunksPerTick: 2
   },
   performance: { targetFps: 60, autoQuality: true, fpsSampleWindow: 120 },
-  save: { autoSaveIntervalTicks: 0, storageKeyPrefix: 'country' }
+  save: { autoSaveIntervalTicks: 0, storageKeyPrefix: 'country' },
+  map: {
+    enabled: true,
+    seed: 20260916,
+    columns: 30,
+    rows: 20,
+    cellSize: 10,
+    jitterAmplitude: 0.3,
+    borderDepth: 3,
+    borderAmplitude: 0.12,
+    countryCount: 10,
+    provincesPerCountryMin: 3,
+    provincesPerCountryMax: 5,
+    citiesPerProvinceMax: 3,
+    minCountryCells: 10,
+    minProvinceCells: 2,
+    minViewHeight: 26,
+    maxViewHeight: 260,
+    panSpeedFractionPerSecond: 0.85,
+    cityLabelMaxViewHeight: 95,
+    pickRadiusFraction: 0.03
+  }
 };

@@ -206,6 +206,30 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         focusChunkId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selection: { type: 'array', items: { type: 'string' } }
       }
+    },
+    map: {
+      type: 'object',
+      fields: {
+        selectedCountryId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedProvinceId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedCityId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        layerVisibility: { type: 'record', values: { type: 'boolean' } },
+        camera: {
+          type: 'object',
+          fields: {
+            x: { type: 'number' },
+            z: { type: 'number' },
+            viewHeight: { type: 'number', min: 0.0001 }
+          }
+        },
+        viewport: {
+          type: 'object',
+          fields: {
+            width: { type: 'number', min: 1 },
+            height: { type: 'number', min: 1 }
+          }
+        }
+      }
     }
   }
 };

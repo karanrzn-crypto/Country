@@ -17,6 +17,12 @@ import { STATE_SLICE_KEYS } from '../state/GameState';
 import type { GameState } from '../state/GameState';
 import { DataRegistry } from '../data/DataRegistry';
 import { WorldManager } from '../world/WorldManager';
+import { generateStrategicMap } from '../world/map/MapGenerator';
+import { pickAt, clampCamera } from '../world/map/MapQueries';
+import { isKnownMapLayer } from '../world/map/MapLayers';
+import { MapCameraController } from '../world/map/MapCameraController';
+import type { StrategicMapModel } from '../world/map/MapTypes';
+import { clearMapSelection, setMapSelection } from '../state/slices/mapSlice';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
 import { AssetManager } from '../assets/AssetManager';
@@ -91,6 +97,7 @@ export class Game {
   private time!: TimeSystem;
   private state!: GameState;
   private world!: WorldManager;
+  private mapModel!: StrategicMapModel;
   private assets!: AssetManager;
   private context!: SystemContext;
   private playerModeSystem!: PlayerModeSystem;
@@ -125,6 +132,12 @@ export class Game {
     this.time = new TimeSystem(this.config.time, this.events);
     this.state = createInitialState(this.data, this.config, this.ids);
     this.world = new WorldManager(this.state.world, this.events, this.config.world);
+    // Static political map (Part 1) — deterministic, immutable, renderer-free.
+    const mapGeneration = generateStrategicMap(this.config.map);
+    this.mapModel = mapGeneration.model;
+    for (const warning of mapGeneration.warnings) {
+      this.logger.warn(`map: ${warning}`);
+    }
     this.assets = new AssetManager(new AssetRegistry(), new AssetCache(), this.events, this.logger.child('assets'));
     this.assets.registerLoader(new GeneratedAssetLoader());
     this.playerModeSystem = new PlayerModeSystem(this.data.playerModeList, this.events);
@@ -152,6 +165,7 @@ export class Game {
       profiler: this.profiler,
       data: this.data,
       world: this.world,
+      map: this.mapModel,
       assets: this.assets,
       perf: this.perf,
       commands: this.commands,
@@ -176,6 +190,7 @@ export class Game {
       phase: 'state',
       update: (ctx) => ctx.world.streamTick()
     });
+    this.addSystem(new MapCameraController(this.events));
 
     this.simEngine = new SimulationEngine(createDefaultSimulationSystems(this.config), this.logger.child('sim'));
     this.addSystem(this.simEngine);
@@ -215,8 +230,21 @@ export class Game {
     this.playerModeSystem.setMode(this.state, 'president');
 
     this.events.emit('game.ready', { tick: this.time.tick });
+    this.events.emit('map.generated', {
+      seed: this.mapModel.seed,
+      continentName: this.mapModel.continentName,
+      countryCount: this.mapModel.stats.countries,
+      provinceCount: this.mapModel.stats.provinces,
+      cityCount: this.mapModel.stats.cities,
+      warnings: mapGeneration.warnings
+    });
     this.logger.info(
       `Game initialized: world "${this.state.world.worldId}", ${Object.keys(this.state.world.chunks).length} chunks, seed ${this.rng.getState()}`
+    );
+    this.logger.info(
+      `Strategic map "${this.mapModel.continentName}": ${this.mapModel.stats.countries} countries, ` +
+        `${this.mapModel.stats.provinces} provinces, ${this.mapModel.stats.cities} cities ` +
+        `(${this.mapModel.stats.coastalCountries} coastal, ${this.mapModel.stats.landlockedCountries} landlocked)`
     );
   }
 
@@ -428,6 +456,146 @@ export class Game {
     this.combatSystem.setEnabled(!this.combatSystem.isEnabled);
   }
 
+  // —— strategic map API (Part 1) — the ONLY mutation path for the map slice ——
+
+  mapSelect(ids: { countryId?: string | null; provinceId?: string | null; cityId?: string | null }): void {
+    this.assertInitialized();
+    const map = this.state.map;
+    const countryId = ids.countryId ?? null;
+    const provinceId = ids.provinceId ?? null;
+    const cityId = ids.cityId ?? null;
+    if (cityId !== null) {
+      const city = this.mapModel.cities[cityId];
+      if (city === undefined) {
+        this.logger.warn(`mapSelect: unknown city "${cityId}"`);
+        return;
+      }
+      setMapSelection(map, {
+        cityId: city.id,
+        provinceId: city.provinceId,
+        countryId: city.countryId
+      });
+    } else if (provinceId !== null) {
+      const province = this.mapModel.provinces[provinceId];
+      if (province === undefined) {
+        this.logger.warn(`mapSelect: unknown province "${provinceId}"`);
+        return;
+      }
+      setMapSelection(map, { provinceId: province.id, countryId: province.countryId });
+    } else if (countryId !== null) {
+      if (this.mapModel.countries[countryId] === undefined) {
+        this.logger.warn(`mapSelect: unknown country "${countryId}"`);
+        return;
+      }
+      setMapSelection(map, { countryId });
+    } else {
+      clearMapSelection(map);
+    }
+    this.emitSelectionChanged();
+  }
+
+  /** Pointer pick: resolves the top-most entity at a world position. */
+  mapPick(x: number, z: number): void {
+    this.assertInitialized();
+    const radius = this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight;
+    const result = pickAt(this.mapModel, { x, z }, radius);
+    if (result.cityId === null && result.provinceId === null && result.countryId === null) {
+      this.mapClearSelection();
+      return;
+    }
+    this.mapSelect({ cityId: result.cityId, provinceId: result.provinceId, countryId: result.countryId });
+  }
+
+  mapClearSelection(): void {
+    this.assertInitialized();
+    clearMapSelection(this.state.map);
+    this.emitSelectionChanged();
+  }
+
+  mapSetLayerVisible(layer: string, visible: boolean): void {
+    this.assertInitialized();
+    if (!isKnownMapLayer(layer)) {
+      this.logger.warn(`mapSetLayerVisible: unknown layer "${layer}"`);
+      return;
+    }
+    this.state.map.layerVisibility[layer] = visible;
+    this.events.emit('map.layerVisibilityChanged', { layer, visible });
+  }
+
+  mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void {
+    this.assertInitialized();
+    const camera = this.state.map.camera;
+    const aspect = this.state.map.viewport.width / this.state.map.viewport.height;
+    const clamped = clampCamera(
+      {
+        x: view.x ?? camera.x,
+        z: view.z ?? camera.z,
+        viewHeight: view.viewHeight ?? camera.viewHeight,
+        aspect
+      },
+      this.mapModel.bounds,
+      this.config.map.minViewHeight,
+      this.config.map.maxViewHeight
+    );
+    camera.x = clamped.x;
+    camera.z = clamped.z;
+    camera.viewHeight = clamped.viewHeight;
+    this.events.emit('map.cameraChanged', {
+      x: camera.x,
+      z: camera.z,
+      viewHeight: camera.viewHeight
+    });
+  }
+
+  mapPanBy(dx: number, dz: number): void {
+    this.assertInitialized();
+    const camera = this.state.map.camera;
+    this.mapSetCamera({ x: camera.x + dx, z: camera.z + dz });
+  }
+
+  mapZoomBy(factor: number, anchor?: { x: number; z: number }): void {
+    this.assertInitialized();
+    const camera = this.state.map.camera;
+    if (anchor === undefined) {
+      this.mapSetCamera({ viewHeight: camera.viewHeight * factor });
+      return;
+    }
+    // Zoom-to-cursor: keep the anchor world point at the same screen spot.
+    const newViewHeight = camera.viewHeight * factor;
+    const ratio = newViewHeight / camera.viewHeight;
+    const x = anchor.x + (camera.x - anchor.x) * ratio;
+    const z = anchor.z + (camera.z - anchor.z) * ratio;
+    this.mapSetCamera({ x, z, viewHeight: newViewHeight });
+  }
+
+  mapFocusCountry(countryId: string): void {
+    this.assertInitialized();
+    const country = this.mapModel.countries[countryId];
+    if (country === undefined) {
+      this.logger.warn(`mapFocusCountry: unknown country "${countryId}"`);
+      return;
+    }
+    this.mapSetCamera({ x: country.labelPoint.x, z: country.labelPoint.z, viewHeight: 70 });
+  }
+
+  mapSetViewport(width: number, height: number): void {
+    this.assertInitialized();
+    if (!(width > 0 && height > 0)) return;
+    this.state.map.viewport.width = width;
+    this.state.map.viewport.height = height;
+    // Re-clamp: the visible world rectangle changed with the aspect ratio.
+    this.mapSetCamera({});
+  }
+
+  private emitSelectionChanged(): void {
+    const map = this.state.map;
+    this.events.emit('map.selectionChanged', {
+      countryId: map.selectedCountryId,
+      provinceId: map.selectedProvinceId,
+      cityId: map.selectedCityId
+    });
+  }
+
   stateHash(): number {
     this.assertInitialized();
     return hashValue(this.state);
@@ -485,6 +653,10 @@ export class Game {
 
   get gameWorld(): WorldManager {
     return this.world;
+  }
+
+  get strategicMap(): StrategicMapModel {
+    return this.mapModel;
   }
 
   get gameRng(): Random {

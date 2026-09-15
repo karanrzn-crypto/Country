@@ -6,6 +6,7 @@ import type { Random } from '../utils/Random';
 import type { Logger } from '../utils/Logger';
 import type { Profiler } from '../debug/Profiler';
 import type { WorldManager } from '../world/WorldManager';
+import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { AssetManager } from '../assets/AssetManager';
 import type { DataRegistry } from '../data/DataRegistry';
 import type { PerformanceManager } from '../perf/PerformanceManager';
@@ -39,6 +40,8 @@ export interface SystemContext {
   readonly profiler: Profiler;
   readonly data: DataRegistry;
   readonly world: WorldManager;
+  /** Static, immutable political map generated per seed (Part 1). */
+  readonly map: StrategicMapModel;
   readonly assets: AssetManager;
   readonly perf: PerformanceManager;
   readonly commands: CommandBus;

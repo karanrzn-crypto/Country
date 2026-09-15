@@ -19,13 +19,22 @@ export interface CoreGameApi {
   selectEntities(entityIds: readonly EntityId[]): void;
   saveToSlot(slot: string, label?: string): void;
   loadFromSlot(slot: string): void;
+  mapSelect(ids: { countryId?: string | null; provinceId?: string | null; cityId?: string | null }): void;
+  mapPick(x: number, z: number): void;
+  mapClearSelection(): void;
+  mapSetLayerVisible(layer: string, visible: boolean): void;
+  mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void;
+  mapPanBy(dx: number, dz: number): void;
+  mapZoomBy(factor: number, anchor?: { x: number; z: number }): void;
+  mapFocusCountry(countryId: string): void;
+  mapSetViewport(width: number, height: number): void;
   readonly ui: UIManager | null;
   readonly bus: EventBus;
   readonly log: Logger;
   readonly commandBus: CommandBus;
 }
 
-/** Registers the standard command set (game, player, ui, save). */
+/** Registers the standard command set (game, player, ui, save, map). */
 export function registerCoreCommandHandlers(game: CoreGameApi): void {
   const bus = game.commandBus;
   bus.register('game.togglePause', () => game.togglePause());
@@ -38,4 +47,20 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('ui.notify', (cmd) => game.ui?.notify(cmd.level, cmd.title, cmd.message));
   bus.register('save.save', (cmd) => game.saveToSlot(cmd.slot, cmd.label));
   bus.register('save.load', (cmd) => game.loadFromSlot(cmd.slot));
+  bus.register('map.select', (cmd) =>
+    game.mapSelect({ countryId: cmd.countryId, provinceId: cmd.provinceId, cityId: cmd.cityId })
+  );
+  bus.register('map.pick', (cmd) => game.mapPick(cmd.x, cmd.z));
+  bus.register('map.clearSelection', () => game.mapClearSelection());
+  bus.register('map.setLayerVisible', (cmd) => game.mapSetLayerVisible(cmd.layer, cmd.visible));
+  bus.register('map.setCamera', (cmd) => game.mapSetCamera({ x: cmd.x, z: cmd.z, viewHeight: cmd.viewHeight }));
+  bus.register('map.panBy', (cmd) => game.mapPanBy(cmd.dx, cmd.dz));
+  bus.register('map.zoomBy', (cmd) =>
+    game.mapZoomBy(
+      cmd.factor,
+      cmd.anchorX !== undefined && cmd.anchorZ !== undefined ? { x: cmd.anchorX, z: cmd.anchorZ } : undefined
+    )
+  );
+  bus.register('map.focusCountry', (cmd) => game.mapFocusCountry(cmd.countryId));
+  bus.register('map.setViewport', (cmd) => game.mapSetViewport(cmd.width, cmd.height));
 }

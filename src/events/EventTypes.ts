@@ -86,6 +86,23 @@ export interface GameEventMap {
   'player.selectionChanged': { readonly entityIds: readonly EntityId[] };
   'player.focusChunkChanged': { readonly chunkId: string };
 
+  // —— strategic map (Part 1) ——
+  'map.generated': {
+    readonly seed: number;
+    readonly continentName: string;
+    readonly countryCount: number;
+    readonly provinceCount: number;
+    readonly cityCount: number;
+    readonly warnings: readonly string[];
+  };
+  'map.selectionChanged': {
+    readonly countryId: string | null;
+    readonly provinceId: string | null;
+    readonly cityId: string | null;
+  };
+  'map.layerVisibilityChanged': { readonly layer: string; readonly visible: boolean };
+  'map.cameraChanged': { readonly x: number; readonly z: number; readonly viewHeight: number };
+
   // —— ui ——
   'ui.notification': { readonly level: 'info' | 'warn' | 'error'; readonly title: string; readonly message: string };
   'ui.screenChanged': { readonly opened: string | null; readonly closed: string | null };
