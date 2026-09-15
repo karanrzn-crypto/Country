@@ -1,0 +1,54 @@
+# ============ Dependencies ============
+node_modules/
+.pnpm-store/
+
+# ============ Build output ============
+dist/
+dist-ssr/
+build/
+out/
+
+# ============ Test & coverage ============
+coverage/
+.nyc_output/
+.vitest/
+
+# ============ Tooling caches ============
+.vite/
+*.tsbuildinfo
+.eslintcache
+
+# ============ Environment & secrets ============
+# NEVER commit tokens, credentials or local env files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials*.json
+secrets*.json
+
+# ============ Logs ============
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ============ Editor / IDE ============
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.sublime-*
+
+# ============ OS files ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Local-only files ============
+*.local

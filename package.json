@@ -1,0 +1,30 @@
+{
+  "name": "country",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Country — hybrid 2.5D/3D grand strategy game. Phase 0: renderer-agnostic foundation.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "headless": "tsx src/headless.ts",
+    "check:circular": "dpdm --exit-code circular:1 --no-warning src/main.ts src/headless.ts",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:circular"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.0",
+    "@types/three": "^0.186.0",
+    "dpdm": "^4.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}
