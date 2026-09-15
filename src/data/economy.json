@@ -1,0 +1,46 @@
+{
+  "resources": [
+    { "id": "food", "name": "Food", "weight": 1 },
+    { "id": "steel", "name": "Steel", "weight": 3 },
+    { "id": "oil", "name": "Oil", "weight": 2 },
+    { "id": "electronics", "name": "Electronics", "weight": 4 }
+  ],
+  "factoryTypes": [
+    {
+      "id": "farm",
+      "name": "Farm",
+      "inputs": {},
+      "outputs": { "food": 10 },
+      "cyclesPerDay": 1,
+      "workforce": 200
+    },
+    {
+      "id": "oil_derrick",
+      "name": "Oil Derrick",
+      "inputs": {},
+      "outputs": { "oil": 6 },
+      "cyclesPerDay": 1,
+      "workforce": 100
+    },
+    {
+      "id": "steel_mill",
+      "name": "Steel Mill",
+      "inputs": { "oil": 2 },
+      "outputs": { "steel": 5 },
+      "cyclesPerDay": 2,
+      "workforce": 400
+    },
+    {
+      "id": "electronics_plant",
+      "name": "Electronics Plant",
+      "inputs": { "steel": 1, "oil": 1 },
+      "outputs": { "electronics": 2 },
+      "cyclesPerDay": 1,
+      "workforce": 300
+    }
+  ],
+  "startingStockpiles": {
+    "resources": { "food": 50, "steel": 40, "oil": 30, "electronics": 10 },
+    "equipment": { "rifle": 200, "at_rifle": 20, "tank_gun": 10, "tank_armor_kit": 10, "ifv_gun": 12, "heli_gun": 4, "artillery_battery": 4 }
+  }
+}

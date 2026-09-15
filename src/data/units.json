@@ -1,0 +1,42 @@
+{
+  "infantry_squad": {
+    "id": "infantry_squad",
+    "name": "Infantry Squad",
+    "category": "infantry",
+    "soldiers": 10,
+    "organizationMax": 60,
+    "supplyUsePerDay": 1.0,
+    "speedKmh": 4,
+    "equipment": { "rifle": 8, "at_rifle": 1 }
+  },
+  "motorized_infantry": {
+    "id": "motorized_infantry",
+    "name": "Motorized Infantry",
+    "category": "infantry",
+    "soldiers": 30,
+    "organizationMax": 70,
+    "supplyUsePerDay": 2.5,
+    "speedKmh": 40,
+    "equipment": { "rifle": 24, "ifv_gun": 3 }
+  },
+  "tank_platoon": {
+    "id": "tank_platoon",
+    "name": "Tank Platoon",
+    "category": "vehicle",
+    "soldiers": 12,
+    "organizationMax": 80,
+    "supplyUsePerDay": 6,
+    "speedKmh": 45,
+    "equipment": { "tank_gun": 4, "tank_armor_kit": 4 }
+  },
+  "attack_helicopter_flight": {
+    "id": "attack_helicopter_flight",
+    "name": "Attack Helicopter Flight",
+    "category": "aircraft",
+    "soldiers": 6,
+    "organizationMax": 50,
+    "supplyUsePerDay": 8,
+    "speedKmh": 250,
+    "equipment": { "heli_gun": 2 }
+  }
+}

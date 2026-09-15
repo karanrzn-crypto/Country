@@ -1,0 +1,98 @@
+{
+  "id": "demo-country",
+  "name": "Demo Republic",
+  "countries": [
+    { "id": "republic", "name": "Demo Republic" },
+    { "id": "neighbor", "name": "Neighbor State" }
+  ],
+  "provinces": [
+    { "id": "north_province", "name": "North Province", "countryId": "republic" },
+    { "id": "south_province", "name": "South Province", "countryId": "republic" },
+    { "id": "border_province", "name": "Border Province", "countryId": "neighbor" }
+  ],
+  "cities": [
+    { "id": "capital", "name": "Capital City", "provinceId": "north_province", "population": 1200000 },
+    { "id": "port_city", "name": "Port City", "provinceId": "south_province", "population": 640000 },
+    { "id": "border_town", "name": "Border Town", "provinceId": "border_province", "population": 210000 }
+  ],
+  "regions": [
+    {
+      "id": "region_capital",
+      "name": "Capital Region",
+      "provinceId": "north_province",
+      "capitalCityId": "capital",
+      "gridX": 1,
+      "gridZ": 0,
+      "chunkCountX": 2,
+      "chunkCountZ": 2,
+      "infrastructure": 5,
+      "population": 900000,
+      "neighbors": ["region_west", "region_south"]
+    },
+    {
+      "id": "region_west",
+      "name": "Western Fields",
+      "provinceId": "north_province",
+      "gridX": 0,
+      "gridZ": 0,
+      "chunkCountX": 2,
+      "chunkCountZ": 2,
+      "infrastructure": 3,
+      "population": 240000,
+      "neighbors": ["region_capital", "region_south"]
+    },
+    {
+      "id": "region_south",
+      "name": "Southern Coast",
+      "provinceId": "south_province",
+      "capitalCityId": "port_city",
+      "gridX": 1,
+      "gridZ": 1,
+      "chunkCountX": 2,
+      "chunkCountZ": 2,
+      "infrastructure": 4,
+      "population": 410000,
+      "neighbors": ["region_capital", "region_west", "region_border"]
+    },
+    {
+      "id": "region_border",
+      "name": "Border Marches",
+      "provinceId": "border_province",
+      "capitalCityId": "border_town",
+      "gridX": 1,
+      "gridZ": 2,
+      "chunkCountX": 2,
+      "chunkCountZ": 2,
+      "infrastructure": 2,
+      "population": 150000,
+      "neighbors": ["region_south"]
+    }
+  ],
+  "factories": [
+    { "id": "farm_capital", "typeId": "farm", "regionId": "region_capital" },
+    { "id": "farm_west", "typeId": "farm", "regionId": "region_west" },
+    { "id": "farm_border", "typeId": "farm", "regionId": "region_border" },
+    { "id": "oil_south", "typeId": "oil_derrick", "regionId": "region_south" },
+    { "id": "mill_capital", "typeId": "steel_mill", "regionId": "region_capital" },
+    { "id": "electronics_capital", "typeId": "electronics_plant", "regionId": "region_capital" }
+  ],
+  "startingUnits": [
+    { "typeId": "infantry_squad", "countryId": "republic", "regionId": "region_capital" },
+    { "typeId": "tank_platoon", "countryId": "republic", "regionId": "region_south" },
+    { "typeId": "infantry_squad", "countryId": "neighbor", "regionId": "region_border" },
+    { "typeId": "motorized_infantry", "countryId": "neighbor", "regionId": "region_border" }
+  ],
+  "startingCharacters": [
+    { "id": "leader_republic", "name": "President Ada", "role": "leader", "countryId": "republic" },
+    { "id": "commander_republic", "name": "Gen. Rostam", "role": "commander", "countryId": "republic" },
+    { "id": "leader_neighbor", "name": "Chancellor Vosk", "role": "leader", "countryId": "neighbor" },
+    { "id": "commander_neighbor", "name": "Gen. Kiril", "role": "commander", "countryId": "neighbor" }
+  ],
+  "relations": [
+    { "a": "republic", "b": "neighbor", "value": -45 }
+  ],
+  "startingStockpiles": {
+    "resources": { "food": 50, "steel": 40, "oil": 30, "electronics": 10 },
+    "equipment": { "rifle": 200, "at_rifle": 20, "tank_gun": 10, "tank_armor_kit": 10, "ifv_gun": 12, "heli_gun": 4, "artillery_battery": 4 }
+  }
+}

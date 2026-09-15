@@ -1,0 +1,25 @@
+{
+  "keyboard": {
+    "KeyW": "moveNorth",
+    "ArrowUp": "moveNorth",
+    "KeyS": "moveSouth",
+    "ArrowDown": "moveSouth",
+    "KeyA": "moveWest",
+    "ArrowLeft": "moveWest",
+    "KeyD": "moveEast",
+    "ArrowRight": "moveEast",
+    "KeyQ": "zoomOut",
+    "KeyE": "zoomIn",
+    "Space": "togglePause",
+    "Digit1": "speed1",
+    "Digit2": "speed2",
+    "Digit3": "speed3",
+    "F3": "toggleDebug",
+    "KeyM": "toggleMap",
+    "Escape": "ui.back"
+  },
+  "gamepad": {
+    "8": "togglePause",
+    "9": "toggleDebug"
+  }
+}

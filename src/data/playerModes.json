@@ -1,0 +1,26 @@
+{
+  "president": {
+    "id": "president",
+    "name": "President",
+    "camera": "strategic",
+    "transitions": ["commander"]
+  },
+  "commander": {
+    "id": "commander",
+    "name": "Commander",
+    "camera": "tactical",
+    "transitions": ["president", "soldier", "aircraft"]
+  },
+  "soldier": {
+    "id": "soldier",
+    "name": "Soldier",
+    "camera": "ground",
+    "transitions": ["commander"]
+  },
+  "aircraft": {
+    "id": "aircraft",
+    "name": "Aircraft Pilot",
+    "camera": "aircraft",
+    "transitions": ["commander"]
+  }
+}

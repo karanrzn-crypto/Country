@@ -1,0 +1,84 @@
+{
+  "offensive": {
+    "id": "offensive",
+    "name": "Offensive",
+    "kind": "strategic",
+    "priority": 70,
+    "conditions": [
+      { "metric": "strength_ratio", "op": ">=", "value": 1.3 },
+      { "metric": "supply_ratio", "op": ">=", "value": 0.6 }
+    ],
+    "tags": ["aggressive"]
+  },
+  "defensive": {
+    "id": "defensive",
+    "name": "Defensive",
+    "kind": "strategic",
+    "priority": 40,
+    "conditions": [
+      { "metric": "under_threat", "op": "==", "value": 1 }
+    ],
+    "tags": ["defensive"]
+  },
+  "encirclement": {
+    "id": "encirclement",
+    "name": "Encirclement",
+    "kind": "strategic",
+    "priority": 80,
+    "conditions": [
+      { "metric": "strength_ratio", "op": ">=", "value": 1.6 },
+      { "metric": "mobility_ratio", "op": ">=", "value": 1.2 }
+    ],
+    "tags": ["aggressive", "maneuver"]
+  },
+  "attrition": {
+    "id": "attrition",
+    "name": "Attrition",
+    "kind": "strategic",
+    "priority": 50,
+    "conditions": [
+      { "metric": "industrial_ratio", "op": ">=", "value": 1.4 }
+    ],
+    "tags": ["defensive", "industrial"]
+  },
+  "air_assault": {
+    "id": "air_assault",
+    "name": "Air Assault",
+    "kind": "strategic",
+    "priority": 75,
+    "conditions": [
+      { "metric": "air_superiority", "op": ">=", "value": 1.5 }
+    ],
+    "tags": ["aggressive", "air"]
+  },
+  "defensive_withdrawal": {
+    "id": "defensive_withdrawal",
+    "name": "Defensive Withdrawal",
+    "kind": "strategic",
+    "priority": 60,
+    "conditions": [
+      { "metric": "strength_ratio", "op": "<", "value": 0.7 },
+      { "metric": "under_threat", "op": "==", "value": 1 }
+    ],
+    "tags": ["defensive"]
+  },
+  "counterattack": {
+    "id": "counterattack",
+    "name": "Counterattack",
+    "kind": "strategic",
+    "priority": 65,
+    "conditions": [
+      { "metric": "reserve_ratio", "op": ">=", "value": 0.5 },
+      { "metric": "under_threat", "op": "==", "value": 1 }
+    ],
+    "tags": ["aggressive", "reactive"]
+  },
+  "consolidate": {
+    "id": "consolidate",
+    "name": "Consolidate",
+    "kind": "strategic",
+    "priority": 20,
+    "conditions": [],
+    "tags": ["neutral"]
+  }
+}
