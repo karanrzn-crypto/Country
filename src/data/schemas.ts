@@ -126,6 +126,40 @@ export const INPUT_BINDINGS_SCHEMA: FieldSchema = {
   }
 };
 
+const colorField: FieldSchema = { type: 'string', minLength: 4, pattern: '^#[0-9a-fA-F]{6}$' };
+
+export const MAP_THEME_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    oceanColor: colorField,
+    oceanTone: colorField,
+    landColor: colorField,
+    countryPalette: { type: 'array', minLength: 8, items: colorField },
+    selectedTint: colorField,
+    selectedOpacity: { type: 'number', min: 0, max: 1 },
+    provinceFill: colorField,
+    provinceFillOpacity: { type: 'number', min: 0, max: 1 },
+    coastStroke: colorField,
+    countryBorderStroke: colorField,
+    provinceBorderStroke: colorField,
+    provinceBorderOpacity: { type: 'number', min: 0, max: 1 },
+    cityFill: colorField,
+    cityStroke: colorField,
+    capitalFill: colorField,
+    capitalStroke: colorField,
+    cityRadius: { type: 'number', min: 0.1, max: 20 },
+    capitalRadius: { type: 'number', min: 0.1, max: 40 },
+    cityHitRadius: { type: 'number', min: 0.1, max: 40 },
+    labelColor: colorField,
+    labelHaloColor: colorField,
+    countryLabelSize: { type: 'number', min: 1, max: 100 },
+    cityLabelSize: { type: 'number', min: 1, max: 100 },
+    selectionRingColor: colorField,
+    selectionRingColorAlt: colorField
+  }
+};
+
 export const WORLD_SCHEMA: FieldSchema = {
   type: 'object',
   allowUnknown: false,

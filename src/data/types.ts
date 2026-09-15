@@ -76,3 +76,35 @@ export interface WorldDataJson {
     readonly equipment: Readonly<Record<string, number>>;
   };
 }
+
+/**
+ * Visual theme of the strategic political map (colors + marker sizes).
+ * Data-driven: lives in src/data/mapTheme.json, validated by MAP_THEME_SCHEMA.
+ */
+export interface MapThemeData {
+  readonly oceanColor: string;
+  readonly oceanTone: string;
+  readonly landColor: string;
+  readonly countryPalette: readonly string[];
+  readonly selectedTint: string;
+  readonly selectedOpacity: number;
+  readonly provinceFill: string;
+  readonly provinceFillOpacity: number;
+  readonly coastStroke: string;
+  readonly countryBorderStroke: string;
+  readonly provinceBorderStroke: string;
+  readonly provinceBorderOpacity: number;
+  readonly cityFill: string;
+  readonly cityStroke: string;
+  readonly capitalFill: string;
+  readonly capitalStroke: string;
+  readonly cityRadius: number;
+  readonly capitalRadius: number;
+  readonly cityHitRadius: number;
+  readonly labelColor: string;
+  readonly labelHaloColor: string;
+  readonly countryLabelSize: number;
+  readonly cityLabelSize: number;
+  readonly selectionRingColor: string;
+  readonly selectionRingColorAlt: string;
+}

@@ -72,8 +72,29 @@
         padding: 8px 14px; cursor: pointer; text-align: left;
       }
       .screen button:hover { background: #243149; border-color: #4a5f88; }
-      .screen .map-region-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+      .screen .map-country-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
       .screen .dialog-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+      .map-info-panel {
+        position: absolute; top: 12px; left: 12px;
+        background: rgba(13, 18, 28, 0.88);
+        border: 1px solid #2a3446; border-radius: 6px;
+        padding: 10px 14px; min-width: 280px;
+      }
+      .map-info-title { color: #7fb2ff; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+      .map-info-row { display: flex; justify-content: space-between; gap: 16px; }
+      .map-info-key { color: #8a94a6; }
+      .map-info-value { color: #e8edf5; font-weight: 600; }
+      .map-layers-title { color: #8a94a6; margin-top: 8px; font-size: 11px; letter-spacing: 1px; }
+      .map-layers { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-width: 300px; }
+      .map-layer-toggle {
+        font: inherit; font-size: 10px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 3px;
+        padding: 2px 6px; color: #e8edf5; background: #1a2333;
+      }
+      .map-layer-toggle.on { border-color: #4a7f4a; color: #b8e6b8; background: #1d2b1d; }
+      .map-layer-toggle.off { opacity: 0.45; text-decoration: line-through; }
+      .map-country-list button { font: inherit; }
     </style>
   </head>
   <body>

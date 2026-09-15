@@ -1,0 +1,31 @@
+{
+  "oceanColor": "#173a5e",
+  "oceanTone": "#1d456c",
+  "landColor": "#c8bd9c",
+  "countryPalette": [
+    "#c96f5f", "#6fa8dc", "#8fbf6f", "#d9b25f", "#a678c4",
+    "#5fb3a1", "#d98a7e", "#7e9fd9", "#c4c46f", "#c47fb0",
+    "#7fc4c9", "#b08d6a"
+  ],
+  "selectedTint": "#ffffff",
+  "selectedOpacity": 0.4,
+  "provinceFill": "#000000",
+  "provinceFillOpacity": 0.07,
+  "coastStroke": "#12354f",
+  "countryBorderStroke": "#3a2f22",
+  "provinceBorderStroke": "#6b5f48",
+  "provinceBorderOpacity": 0.55,
+  "cityFill": "#2b2016",
+  "cityStroke": "#f5efe2",
+  "capitalFill": "#7a1f1f",
+  "capitalStroke": "#f5efe2",
+  "cityRadius": 0.9,
+  "capitalRadius": 1.6,
+  "cityHitRadius": 2.2,
+  "labelColor": "#20180f",
+  "labelHaloColor": "#f7f2e6",
+  "countryLabelSize": 7.5,
+  "cityLabelSize": 4.2,
+  "selectionRingColor": "#ffffff",
+  "selectionRingColorAlt": "#3a2f22"
+}

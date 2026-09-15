@@ -2,20 +2,21 @@ import { DataValidationError } from '../utils/errors';
 import type { Logger } from '../utils/Logger';
 import { validateOrThrow } from '../utils/validation';
 import type { FieldSchema } from '../utils/validation';
-import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA } from './schemas';
+import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA } from './schemas';
 import type { WorldDataJson } from './types';
 import type { UnitTypeDef, EquipmentDef } from '../military/types';
 import type { FactoryTypeDef, ResourceDef } from '../economy/types';
 import type { AIStrategyDef } from '../ai/types';
 import type { PlayerModeDef } from '../player/types';
 import type { InputBindings } from '../input/InputTypes';
-
+import type { MapThemeData } from './types';
 import unitsJson from './units.json';
 import equipmentJson from './equipment.json';
 import economyJson from './economy.json';
 import strategiesJson from './strategies.json';
 import playerModesJson from './playerModes.json';
 import inputBindingsJson from './inputBindings.json';
+import mapThemeJson from './mapTheme.json';
 import demoWorldJson from './worlds/demo-country.json';
 
 export interface EconomyDataBundle {
@@ -42,6 +43,7 @@ export class DataRegistry {
   private readonly strategies: readonly AIStrategyDef[];
   private readonly playerModes: readonly PlayerModeDef[];
   private readonly bindings: InputBindings;
+  private readonly theme: MapThemeData;
   private readonly worlds: Readonly<Record<string, WorldDataJson>>;
 
   constructor(private readonly logger?: Logger) {
@@ -51,6 +53,7 @@ export class DataRegistry {
     this.strategies = Object.values(strategiesJson) as unknown as AIStrategyDef[];
     this.playerModes = Object.values(playerModesJson) as unknown as PlayerModeDef[];
     this.bindings = inputBindingsJson as unknown as InputBindings;
+    this.theme = mapThemeJson as unknown as MapThemeData;
     this.worlds = { 'demo-country': demoWorldJson as unknown as WorldDataJson };
 
     this.validateAll();
@@ -83,6 +86,7 @@ export class DataRegistry {
       'playerModes'
     );
     check(() => validateOrThrow(this.bindings, INPUT_BINDINGS_SCHEMA, 'inputBindings'), 'inputBindings');
+    check(() => validateOrThrow(this.theme, MAP_THEME_SCHEMA, 'mapTheme'), 'mapTheme');
     for (const [worldId, world] of Object.entries(this.worlds)) {
       check(() => validateOrThrow(world, WORLD_SCHEMA, `worlds.${worldId}`), `worlds.${worldId}`);
     }
@@ -157,6 +161,11 @@ export class DataRegistry {
 
   get inputBindings(): InputBindings {
     return this.bindings;
+  }
+
+  /** Visual theme of the strategic map (colors, sizes — data-driven). */
+  get mapTheme(): MapThemeData {
+    return this.theme;
   }
 
   world(id: string): WorldDataJson {

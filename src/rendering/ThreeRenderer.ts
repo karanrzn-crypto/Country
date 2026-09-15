@@ -5,18 +5,31 @@ import { SceneManager } from './SceneManager';
 import { CameraRig } from './CameraRig';
 import { LightingRig } from './Lighting';
 import { registerThreeLoaders } from './loaders/ThreeLoaders';
+import { StrategicMapRenderer } from './map/StrategicMapRenderer';
+import { MapPointerInput } from './map/MapPointerInput';
 
 /**
  * Three.js renderer — the ONLY module allowed to know Three.js.
- * Implements IGameRenderer so the core stays backend-agnostic. Mirrors
- * chunk events into meshes, follows the player focus and scales pixel ratio
- * with the automatic quality tier.
+ * Implements IGameRenderer so the core stays backend-agnostic.
+ *
+ * Two render paths:
+ * - `config.map.enabled` (Part 1 default): the strategic political map —
+ *   orthographic top-down layers driven by the map state slice.
+ * - legacy chunk-streaming path (Phase 0 2.5D foundation, used when the map
+ *   is disabled): mirrors chunk events into meshes.
  */
 export class ThreeRenderer implements IGameRenderer {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
+
+  // Strategic map path (Part 1)
+  private mapRenderer: StrategicMapRenderer | null = null;
+  private pointerInput: MapPointerInput | null = null;
+
+  // Legacy chunk path
   private cameraRig: CameraRig | null = null;
   private sceneManager: SceneManager | null = null;
+
   private context: SystemContext | null = null;
   private readonly resizeHandler = (): void => {
     this.resize(window.innerWidth, window.innerHeight);
@@ -36,6 +49,7 @@ export class ThreeRenderer implements IGameRenderer {
       profiler: context.profiler,
       data: context.data,
       world: context.world,
+      map: context.map,
       assets: context.assets,
       perf: context.perf,
       commands: context.commands,
@@ -45,24 +59,29 @@ export class ThreeRenderer implements IGameRenderer {
     // The renderer registers its own Three-backed asset loaders.
     registerThreeLoaders((loader) => context.assets.registerLoader(loader));
 
+    const width = this.mount.clientWidth || window.innerWidth;
+    const height = this.mount.clientHeight || window.innerHeight;
+
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setSize(this.mount.clientWidth || window.innerWidth, this.mount.clientHeight || window.innerHeight);
+    this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.mount.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0b0e14);
-    new LightingRig(this.scene).setup();
 
-    this.cameraRig = new CameraRig(
-      context.config.world,
-      this.mount.clientWidth || window.innerWidth,
-      this.mount.clientHeight || window.innerHeight
-    );
-    this.cameraRig.attach(context.events);
-
-    this.sceneManager = new SceneManager(this.scene, context.state.world, context.config.world.chunkSize);
-    this.sceneManager.attach(context.events);
+    if (context.config.map.enabled) {
+      this.mapRenderer = new StrategicMapRenderer(this.scene, context, context.data.mapTheme);
+      this.pointerInput = new MapPointerInput(this.renderer.domElement, this.mapRenderer.getCamera(), context.commands);
+      // The logical viewport lives in the map slice — keep it in sync.
+      context.commands.send({ type: 'map.setViewport', width, height });
+    } else {
+      this.scene.background = new THREE.Color(0x0b0e14);
+      new LightingRig(this.scene).setup();
+      this.cameraRig = new CameraRig(context.config.world, width, height);
+      this.cameraRig.attach(context.events);
+      this.sceneManager = new SceneManager(this.scene, context.state.world, context.config.world.chunkSize);
+      this.sceneManager.attach(context.events);
+    }
 
     context.events.on('perf.qualityTierChanged', ({ tier }) => {
       if (this.renderer === null) return;
@@ -77,9 +96,15 @@ export class ThreeRenderer implements IGameRenderer {
   }
 
   render(frame: RenderFrame): void {
-    if (this.renderer === null || this.scene === null || this.cameraRig === null || this.context === null) {
+    if (this.renderer === null || this.scene === null || this.context === null) {
       return;
     }
+    if (this.mapRenderer !== null) {
+      this.mapRenderer.update(this.context.state.map, this.context.config.map.cityLabelMaxViewHeight);
+      this.renderer.render(this.scene, this.mapRenderer.getCamera().camera);
+      return;
+    }
+    if (this.cameraRig === null) return;
     this.cameraRig.update(frame.dtSeconds, frame.state);
     this.renderer.render(this.scene, this.cameraRig.camera);
   }
@@ -87,6 +112,10 @@ export class ThreeRenderer implements IGameRenderer {
   resize(width: number, height: number): void {
     this.renderer?.setSize(width, height);
     this.cameraRig?.setViewport(width, height);
+    if (this.mapRenderer !== null && this.context !== null) {
+      // Viewport is part of the map state (clamping + picking depend on it).
+      this.context.commands.send({ type: 'map.setViewport', width, height });
+    }
   }
 
   getStats(): RendererStats {
@@ -94,12 +123,18 @@ export class ThreeRenderer implements IGameRenderer {
     return {
       drawCalls: info?.render.calls ?? 0,
       triangles: info?.render.triangles ?? 0,
-      meshes: this.sceneManager?.meshCount ?? 0
+      meshes: this.mapRenderer !== null ? this.mapRenderer.meshCount : (this.sceneManager?.meshCount ?? 0)
     };
   }
 
   dispose(): void {
     window.removeEventListener('resize', this.resizeHandler);
+    this.pointerInput?.dispose();
+    this.pointerInput = null;
+    if (this.mapRenderer !== null && this.scene !== null) {
+      this.mapRenderer.dispose(this.scene);
+    }
+    this.mapRenderer = null;
     this.sceneManager?.dispose();
     this.sceneManager = null;
     this.cameraRig?.dispose();
