@@ -1,4 +1,5 @@
 import type { UIDomAdapter } from './adapter/UIDomAdapter';
+import type { UIElement } from './adapter/UIDomAdapter';
 import type { EventBus } from '../events/EventBus';
 import type { Logger } from '../utils/Logger';
 import type { CommandBus } from '../core/CommandBus';
@@ -27,10 +28,10 @@ export class UIManager implements PhaseSystem {
   private readonly notifications: NotificationSystem;
   private readonly dialogs: DialogSystem;
   private readonly mapUI: MapUI;
+  private readonly root: UIElement;
   private frameCounter = 0;
   private lastTreasuryWarnFrame = -1_000_000;
   private readonly unsubscribes: (() => void)[] = [];
-
   constructor(
     adapter: UIDomAdapter,
     modes: PlayerModeSystem,
@@ -38,15 +39,14 @@ export class UIManager implements PhaseSystem {
     private readonly events: EventBus,
     private readonly logger: Logger
   ) {
-    const root = adapter.create('div', 'ui-root');
-    adapter.root().appendChild(root);
+    this.root = this.createRoot(adapter);
 
     this.screens = new ScreenManager(adapter, events);
-    this.hud = new HUDSystem(root, adapter, modes);
+    this.hud = new HUDSystem(this.root, adapter, modes);
     this.notifications = new NotificationSystem(
       (() => {
         const container = adapter.create('div', 'notifications');
-        root.appendChild(container);
+        this.root.appendChild(container);
         return container;
       })(),
       (tag, className) => adapter.create(tag, className)
@@ -58,9 +58,19 @@ export class UIManager implements PhaseSystem {
     this.mapUI = new MapUI(this.screens, this.commands, (tag, className) => adapter.create(tag, className));
   }
 
-  init(context: SystemContext): void {
-    this.mapUI.registerBuilder(context.state);
+  private createRoot(adapter: UIDomAdapter): UIElement {
+    const root = adapter.create('div', 'ui-root');
+    adapter.root().appendChild(root);
+    return root;
+  }
 
+  init(context: SystemContext): void {
+    // Map UI observes the strategic map slice + static model.
+    this.mapUI.register(context, this.root);
+    this.unsubscribes.push(
+      this.events.on('map.selectionChanged', () => this.mapUI.refreshInfo()),
+      this.events.on('map.layerVisibilityChanged', () => this.mapUI.refreshInfo())
+    );
     this.unsubscribes.push(
       this.events.on('input.actionPressed', ({ action }) => {
         if (action === 'toggleMap') {
