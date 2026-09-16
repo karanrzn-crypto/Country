@@ -7,8 +7,10 @@ import type { MapCamera } from './MapCamera';
  * COMMANDS — it never mutates state:
  *
  * - click (with drag threshold) → map.pick at the world position
- * - left-drag → map.setCamera pan (clamped by the core)
- * - wheel → map.setCamera zoom-to-cursor (anchor stays under the pointer)
+ * - left-drag → map.panBy pan (clamped by the core; cancels a zoom gesture)
+ * - wheel → map.zoomBy cursor-anchored zoom (world point + cursor pixel are
+ *   both forwarded so the camera rig can keep the point under the cursor
+ *   for the WHOLE smoothed zoom animation)
  */
 export class MapPointerInput {
   private readonly canvas: HTMLCanvasElement;
@@ -53,6 +55,8 @@ export class MapPointerInput {
     this.lastX = this.downX = event.clientX;
     this.lastY = this.downY = event.clientY;
     this.moved = false;
+    // Grabbing the map is an explicit centering intent — stop any zoom gesture.
+    this.camera.cancelZoomGesture();
     this.canvas.setPointerCapture?.(event.pointerId);
   };
 
@@ -99,7 +103,9 @@ export class MapPointerInput {
       type: 'map.zoomBy',
       factor,
       anchorX: cursorWorld.x,
-      anchorZ: cursorWorld.z
+      anchorZ: cursorWorld.z,
+      screenX: cursorPxX,
+      screenY: cursorPxY
     });
   };
 

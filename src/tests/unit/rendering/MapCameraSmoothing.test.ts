@@ -1,0 +1,175 @@
+import { describe, it, expect } from 'vitest';
+import { MapCamera } from '../../../rendering/map/MapCamera';
+import type { MapBounds } from '../../../world/map/MapTypes';
+
+/**
+ * Part 2 camera rework — behavioral spec:
+ * smooth (no teleport), cursor-centered zoom, no corner-fling on zoom-out,
+ * clamped natural pan, hard zoom limits that stop without resetting.
+ */
+describe('MapCamera smoothing rig', () => {
+  const bounds: MapBounds = { minX: 0, minZ: 0, maxX: 300, maxZ: 200 };
+  const viewport = { width: 1280, height: 720 };
+
+  function makeCamera(start = { x: 150, z: 100, viewHeight: 200 }): MapCamera {
+    const camera = new MapCamera(viewport.width, viewport.height, start);
+    camera.setLimits({ bounds, minViewHeight: 26, maxViewHeight: 260 });
+    return camera;
+  }
+
+  /** Runs updates until the view settles (or the step budget runs out). */
+  function settle(camera: MapCamera, target: { x: number; z: number; viewHeight: number }, seconds = 6): void {
+    const dt = 1 / 60;
+    for (let i = 0; i < seconds * 60; i++) camera.update(dt, target);
+  }
+
+  it('eases toward the target without teleporting (damped motion, bounded per-frame step)', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    const target = { x: 150, z: 100, viewHeight: 40 };
+    let previous = camera.view.viewHeight;
+    let maxStep = 0;
+    for (let i = 0; i < 240; i++) {
+      camera.update(1 / 60, target);
+      const step = Math.abs(camera.view.viewHeight - previous);
+      maxStep = Math.max(maxStep, step);
+      previous = camera.view.viewHeight;
+    }
+    // Smooth: even the first frame covers only a fraction of the 160-unit
+    // distance (no teleport); the ease then decays geometrically.
+    expect(maxStep).toBeLessThan(40);
+    expect(camera.view.viewHeight).toBeCloseTo(40, 1);
+  });
+
+  it('frame-rate independence: large dt converges to the same place', () => {
+    const a = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    const b = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    const target = { x: 80, z: 60, viewHeight: 50 };
+    for (let i = 0; i < 60; i++) a.update(1 / 60, target);
+    for (let i = 0; i < 10; i++) b.update(0.1, target);
+    expect(b.view.viewHeight).toBeCloseTo(a.view.viewHeight, 1);
+    expect(b.view.x).toBeCloseTo(a.view.x, 0);
+  });
+
+  /** Mirrors Game.mapZoomBy: the logical target is ALWAYS anchor-consistent. */
+  function coreZoomTarget(
+    screenX: number,
+    screenY: number,
+    anchor: { x: number; z: number },
+    targetViewHeight: number
+  ): { x: number; z: number; viewHeight: number } {
+    const aspect = viewport.width / viewport.height;
+    const ndcX = (screenX / viewport.width) * 2 - 1;
+    const ndcY = (screenY / viewport.height) * 2 - 1;
+    return {
+      x: anchor.x - ndcX * ((targetViewHeight * aspect) / 2),
+      z: anchor.z + ndcY * (targetViewHeight / 2),
+      viewHeight: targetViewHeight
+    };
+  }
+
+  it('cursor-centered zoom: the anchor world point stays under the cursor pixel', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    const screenX = 640;
+    const screenY = 360;
+    const anchor = camera.screenToWorld(screenX, screenY);
+    camera.beginZoomGesture({ anchorX: anchor.x, anchorZ: anchor.z, screenX, screenY });
+    const target = coreZoomTarget(screenX, screenY, anchor, 40);
+
+    let midFlightError = 0;
+    for (let i = 0; i < 240; i++) {
+      camera.update(1 / 60, target);
+      const underCursor = camera.screenToWorld(screenX, screenY);
+      const error = Math.hypot(underCursor.x - anchor.x, underCursor.z - anchor.z);
+      if (i === 30) midFlightError = error;
+      if (i === 239) {
+        // Settled: EXACT anchor preservation.
+        expect(error).toBeLessThan(0.05);
+        expect(camera.view.viewHeight).toBeCloseTo(40, 1);
+      }
+      // Clamped every frame: never leaves the map bounds.
+      expect(camera.view.x).toBeGreaterThanOrEqual(bounds.minX - 60);
+      expect(camera.view.x).toBeLessThanOrEqual(bounds.maxX + 60);
+    }
+    // Mid-flight the anchor was already close (city barely moves under cursor).
+    expect(midFlightError).toBeLessThan(6);
+  });
+
+  it('zoom-out near the edge never flings the map to a corner', () => {
+    // Start fully zoomed in at the right edge of the map.
+    const camera = makeCamera({ x: 290, z: 100, viewHeight: 30 });
+    const screenX = 640;
+    const screenY = 360;
+    const anchor = camera.screenToWorld(screenX, screenY);
+    camera.beginZoomGesture({ anchorX: anchor.x, anchorZ: anchor.z, screenX, screenY });
+    const target = coreZoomTarget(screenX, screenY, anchor, 260);
+
+    let previousX = camera.view.x;
+    let maxJump = 0;
+    for (let i = 0; i < 240; i++) {
+      camera.update(1 / 60, target);
+      maxJump = Math.max(maxJump, Math.abs(camera.view.x - previousX));
+      previousX = camera.view.x;
+      // The center stays near the map — never tossed into a far corner.
+      expect(camera.view.x).toBeLessThanOrEqual(bounds.maxX + 40);
+      expect(camera.view.x).toBeGreaterThanOrEqual(bounds.minX - 40);
+      expect(camera.view.z).toBeGreaterThanOrEqual(bounds.minZ - 40);
+      expect(camera.view.z).toBeLessThanOrEqual(bounds.maxZ + 40);
+    }
+    expect(maxJump).toBeLessThan(25); // smooth glide (incl. intended re-centering swing), no teleport
+    expect(camera.view.viewHeight).toBeCloseTo(260, 1);
+    // The zoomed-out view always ends framed around the map center.
+    expect(camera.view.x).toBeCloseTo((bounds.minX + bounds.maxX) / 2, 0);
+    expect(camera.view.z).toBeCloseTo((bounds.minZ + bounds.maxZ) / 2, 0);
+  });
+
+  it('pan is clamped and eases to a stop at the edge (no snap)', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 60 });
+    const target = { x: 100_000, z: -50_000, viewHeight: 60 };
+    let previousX = camera.view.x;
+    let maxJump = 0;
+    for (let i = 0; i < 240; i++) {
+      camera.update(1 / 60, target);
+      maxJump = Math.max(maxJump, Math.abs(camera.view.x - previousX));
+      previousX = camera.view.x;
+      expect(camera.view.x).toBeLessThanOrEqual(bounds.maxX + 40);
+    }
+    // Converged to the clamped stop, not the raw (unreachable) target.
+    expect(camera.view.x).toBeLessThan(bounds.maxX + 40);
+    // Per-frame motion stays proportionally small even for a huge jump.
+    expect(maxJump).toBeLessThan(80);
+  });
+
+  it('zoom limits stop at min/max without resetting the camera', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    // Zoom out far beyond the limit (viewHeight above max = fully zoomed out).
+    settle(camera, { x: 150, z: 100, viewHeight: 100_000 }, 10);
+    expect(camera.view.viewHeight).toBeCloseTo(260, 1);
+    expect(camera.view.x).toBeCloseTo(150, 0); // center preserved
+    // Zoom in far beyond the limit (viewHeight below min = fully zoomed in).
+    settle(camera, { x: 150, z: 100, viewHeight: 0.001 }, 10);
+    expect(camera.view.viewHeight).toBeCloseTo(26, 1);
+    expect(camera.view.x).toBeCloseTo(150, 0); // still the same center — no reset
+  });
+
+  it('cancelZoomGesture releases the anchor and eases to the target center', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+    const anchor = camera.screenToWorld(640, 360);
+    camera.beginZoomGesture({ anchorX: anchor.x, anchorZ: anchor.z, screenX: 640, screenY: 360 });
+    camera.update(1 / 60, { x: 150, z: 100, viewHeight: 100 });
+    camera.cancelZoomGesture();
+    settle(camera, { x: 180, z: 120, viewHeight: 100 });
+    expect(camera.view.x).toBeCloseTo(180, 0);
+    expect(camera.view.z).toBeCloseTo(120, 0);
+  });
+
+  it('screenToWorld ↔ anchored center are consistent inverses', () => {
+    const camera = makeCamera({ x: 150, z: 100, viewHeight: 80 });
+    const world = camera.screenToWorld(300, 200);
+    const anchor = { anchorX: world.x, anchorZ: world.z, screenX: 300, screenY: 200 };
+    camera.beginZoomGesture(anchor);
+    camera.update(1 / 60, { x: 9999, z: 9999, viewHeight: 80 });
+    const under = camera.screenToWorld(300, 200);
+    expect(under.x).toBeCloseTo(world.x, 3);
+    expect(under.z).toBeCloseTo(world.z, 3);
+  });
+});

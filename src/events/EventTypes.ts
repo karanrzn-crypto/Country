@@ -102,6 +102,16 @@ export interface GameEventMap {
   };
   'map.layerVisibilityChanged': { readonly layer: string; readonly visible: boolean };
   'map.cameraChanged': { readonly x: number; readonly z: number; readonly viewHeight: number };
+  /**
+   * Presentation-side camera gesture channel (Part 2 camera rework).
+   * A non-null anchor begins/replaces a cursor-anchored zoom; null cancels
+   * the active gesture (explicit pan / focus / viewport changes).
+   */
+  'map.zoomGesture': {
+    readonly anchor:
+      | { readonly x: number; readonly z: number; readonly screenX: number; readonly screenY: number }
+      | null;
+  };
 
   // —— ui ——
   'ui.notification': { readonly level: 'info' | 'warn' | 'error'; readonly title: string; readonly message: string };

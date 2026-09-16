@@ -40,6 +40,9 @@ export type GameCommand =
       /** Optional world point kept under the cursor while zooming. */
       readonly anchorX?: number;
       readonly anchorZ?: number;
+      /** Cursor pixel (canvas space) — with the anchor enables exact cursor-centered zoom. */
+      readonly screenX?: number;
+      readonly screenY?: number;
     }
   | { readonly type: 'map.focusCountry'; readonly countryId: string }
   | { readonly type: 'map.setViewport'; readonly width: number; readonly height: number };

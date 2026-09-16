@@ -3,6 +3,59 @@
  * Referential integrity is validated when the initial state is built.
  */
 
+export type FlagLayout = 'solid' | 'horizontal-stripes' | 'vertical-stripes' | 'canton';
+
+export type FlagEmblem = 'none' | 'star' | 'circle' | 'crescent' | 'sun' | 'cross';
+
+/**
+ * Data-driven flag specification (Part 2). Deliberately small and abstract:
+ * the UI renders it as a tiny generated SVG today and can swap in real
+ * texture assets later without touching any caller.
+ */
+export interface FlagDataJson {
+  readonly layout: FlagLayout;
+  /** 1–4 stripe/field colors, first is the dominant field color. */
+  readonly colors: readonly string[];
+  readonly emblem: FlagEmblem;
+  readonly emblemColor: string;
+}
+
+export type ResourceAmountJson = Readonly<Record<string, number>>;
+
+/**
+ * Static, data-driven country profile (Part 2) — the Country Data Foundation.
+ * Lives in src/data/countries.json, validated by COUNTRY_PROFILES_SCHEMA and
+ * joined with the generated map by id. ids must match the map generator's
+ * stable ids (country_0 … country_N).
+ */
+export interface CountryProfileJson {
+  readonly id: string;
+  readonly name: string;
+  readonly flag: FlagDataJson;
+  readonly population: number;
+  readonly economy: {
+    readonly gdp: number;
+    readonly treasury: number;
+    readonly income: number;
+    readonly expenses: number;
+  };
+  /** Extensible resource map: resource id → amount (new ids need no code change). */
+  readonly resources: ResourceAmountJson;
+  readonly military: {
+    readonly manpower: number;
+    readonly armySize: number;
+    readonly equipment: number;
+    readonly aircraft: number;
+    readonly navy: number;
+  };
+  /**
+   * Foreign relations seed, keyed by OTHER country id.
+   * Scale is fixed: -100 = hostile, 0 = neutral, +100 = friendly.
+   * The builder symmetrizes each pair (A→B implies B→A).
+   */
+  readonly foreignRelations: Readonly<Record<string, number>>;
+}
+
 export interface CountryDataJson {
   readonly id: string;
   readonly name: string;
@@ -78,6 +131,37 @@ export interface WorldDataJson {
 }
 
 /**
+ * Zoom-tier configuration for one label class (data-driven LOD).
+ * `maxViewHeight` is the fully-visible threshold: labels fade in as the view
+ * height drops below it and are invisible at or above it (null = always).
+ * Fading spans `fadeSpanViewHeight` so labels never pop.
+ */
+export interface MapLabelTierData {
+  /** Visible below this view height; null = visible at every zoom. */
+  readonly maxViewHeight: number | null;
+  /** City labels additionally require at least this population. */
+  readonly minPopulation: number;
+  /** Higher priority wins label collision + the visibility cap. */
+  readonly priority: number;
+  /** Label height in screen pixels (screen-constant size). */
+  readonly screenPx: number;
+}
+
+export interface MapLabelsThemeData {
+  /** View-height span over which a label fades in/out (no popping). */
+  readonly fadeSpanViewHeight: number;
+  /** Alpha easing speed (per second). */
+  readonly fadeRatePerSecond: number;
+  /** Hard cap on simultaneously rendered labels (scalability guard). */
+  readonly maxVisible: number;
+  /** Extra padding (px) added around labels for collision tests. */
+  readonly collisionPaddingPx: number;
+  /** Vertical offset (px) between a city marker and its label. */
+  readonly labelOffsetPx: number;
+  readonly tiers: Readonly<Record<'country' | 'province' | 'capital' | 'majorCity' | 'city', MapLabelTierData>>;
+}
+
+/**
  * Visual theme of the strategic political map (colors + marker sizes).
  * Data-driven: lives in src/data/mapTheme.json, validated by MAP_THEME_SCHEMA.
  */
@@ -103,8 +187,7 @@ export interface MapThemeData {
   readonly cityHitRadius: number;
   readonly labelColor: string;
   readonly labelHaloColor: string;
-  readonly countryLabelSize: number;
-  readonly cityLabelSize: number;
+  readonly labels: MapLabelsThemeData;
   readonly selectionRingColor: string;
   readonly selectionRingColorAlt: string;
 }

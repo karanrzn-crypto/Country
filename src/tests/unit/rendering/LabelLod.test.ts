@@ -1,0 +1,181 @@
+import { describe, it, expect } from 'vitest';
+import { updateLabels, tierAlpha } from '../../../rendering/map/LabelLod';
+import type { LabelAlphaStore, LabelRecord, LabelView } from '../../../rendering/map/LabelLod';
+import type { MapLabelsThemeData } from '../../../data/types';
+import mapThemeJson from '../../../data/mapTheme.json';
+
+const labels = (mapThemeJson as unknown as { labels: MapLabelsThemeData }).labels;
+
+const VIEWPORT = { widthPx: 1280, heightPx: 720 };
+
+function view(viewHeight: number, centerX = 150, centerZ = 100): LabelView {
+  return {
+    centerX,
+    centerZ,
+    viewHeight,
+    aspect: VIEWPORT.widthPx / VIEWPORT.heightPx,
+    viewportWidthPx: VIEWPORT.widthPx,
+    viewportHeightPx: VIEWPORT.heightPx
+  };
+}
+
+function record(overrides: Partial<LabelRecord> & { id: string }): LabelRecord {
+  return {
+    tier: 'city',
+    x: 150,
+    z: 100,
+    population: 100_000,
+    aspect: 3,
+    offsetBelow: true,
+    ...overrides
+  };
+}
+
+/** Runs the pass until alphas settle; returns (frames, alphas). */
+function settled(records: LabelRecord[], v: LabelView, seconds = 4) {
+  const alphas: LabelAlphaStore = new Map();
+  let frames = updateLabels(records, v, labels, alphas, 1 / 60);
+  for (let i = 0; i < seconds * 60; i++) frames = updateLabels(records, v, labels, alphas, 1 / 60);
+  return { frames, alphas };
+}
+
+function alphaOf(frames: ReturnType<typeof updateLabels>, id: string): number {
+  const frame = frames.find((candidate) => candidate.record.id === id);
+  return frame !== undefined ? frame.alpha : 0;
+}
+
+describe('label LOD tiers (zoom-dependent visibility)', () => {
+  // Positions are spread so collision never suppresses a tier member:
+  // at near zoom (26) the viewport covers z 87–113, x 127–173.
+  const records = [
+    record({ id: 'country', tier: 'country', x: 150, z: 92 }),
+    record({ id: 'province', tier: 'province', x: 140, z: 104 }),
+    record({ id: 'capital', tier: 'capital', population: 1_500_000 }),
+    record({ id: 'major', tier: 'majorCity', population: 900_000, x: 162, z: 96 }),
+    record({ id: 'small', tier: 'city', population: 120_000, x: 140, z: 94 })
+  ];
+
+  it('far zoom: countries + capitals only — no province/major/city labels', () => {
+    const { frames } = settled(records, view(260));
+    expect(alphaOf(frames, 'country')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'province')).toBe(0);
+    expect(alphaOf(frames, 'major')).toBe(0);
+    expect(alphaOf(frames, 'small')).toBe(0);
+  });
+
+  it('mid zoom: provinces + capitals + major cities; plain cities still hidden', () => {
+    const { frames } = settled(records, view(100));
+    expect(alphaOf(frames, 'country')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'province')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'major')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'small')).toBe(0);
+  });
+
+  it('near zoom: everything visible', () => {
+    const { frames } = settled(records, view(26));
+    for (const id of ['country', 'province', 'capital', 'major', 'small']) {
+      expect(alphaOf(frames, id)).toBeGreaterThan(0.9);
+    }
+  });
+
+  it('major-city population gate: below the threshold a "major" label never shows', () => {
+    const poor = [record({ id: 'poor-major', tier: 'majorCity', population: 300_000 })];
+    const { frames } = settled(poor, view(26));
+    expect(alphaOf(frames, 'poor-major')).toBe(0);
+  });
+
+  it('tierAlpha fades over the span instead of popping', () => {
+    const city = labels.tiers.city;
+    expect(tierAlpha(city, 95 + 1, labels.fadeSpanViewHeight)).toBe(0); // above threshold
+    expect(tierAlpha(city, 94.5, labels.fadeSpanViewHeight)).toBeGreaterThan(0);
+    expect(tierAlpha(city, 94.5, labels.fadeSpanViewHeight)).toBeLessThan(1);
+    expect(tierAlpha(city, 95 - labels.fadeSpanViewHeight, labels.fadeSpanViewHeight)).toBe(1);
+  });
+});
+
+describe('label LOD fading (no sudden pops)', () => {
+  it('alpha eases smoothly frame by frame (bounded per-frame change)', () => {
+    const records = [record({ id: 'city', tier: 'city', population: 500_000 })];
+    const alphas: LabelAlphaStore = new Map();
+    const v = view(60);
+    let previous = 0;
+    for (let i = 0; i < 60; i++) {
+      const frames = updateLabels(records, v, labels, alphas, 1 / 60);
+      const alpha = alphaOf(frames, 'city');
+      // Per-frame alpha delta is small: gradual appearance, never a pop.
+      expect(Math.abs(alpha - previous)).toBeLessThan(0.35);
+      previous = alpha;
+    }
+    expect(previous).toBeGreaterThan(0.9);
+  });
+
+  it('alpha is continuous across the tier boundary (crossing takes the whole span)', () => {
+    const records = [record({ id: 'capital', tier: 'capital' })];
+    // Capital tier: max 280, fade span 22 → fade happens between 258 and 280.
+    const at270 = settled(records, view(270)).frames;
+    const at265 = settled(records, view(265)).frames;
+    expect(alphaOf(at270, 'capital')).toBeGreaterThan(0);
+    expect(alphaOf(at270, 'capital')).toBeLessThan(1);
+    expect(alphaOf(at265, 'capital')).toBeGreaterThan(alphaOf(at270, 'capital'));
+  });
+});
+
+describe('label LOD culling, collision and cap', () => {
+  it('labels outside the viewport are never rendered', () => {
+    const records = [record({ id: 'offscreen', tier: 'city', x: 2_000, z: -1_500 })];
+    const { frames } = settled(records, view(26));
+    expect(alphaOf(frames, 'offscreen')).toBe(0);
+  });
+
+  it('collision: the higher-priority label wins, the loser is suppressed', () => {
+    const records = [
+      record({ id: 'capital', tier: 'capital', population: 2_000_000 }),
+      record({ id: 'small', tier: 'city', population: 90_000, x: 150.5, z: 100.5 })
+    ];
+    const { frames } = settled(records, view(40));
+    expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'small')).toBe(0);
+  });
+
+  it('collision is distance-dependent: non-overlapping labels coexist', () => {
+    const records = [
+      record({ id: 'a', tier: 'city', x: 130, z: 90 }),
+      record({ id: 'b', tier: 'city', x: 170, z: 110 })
+    ];
+    const { frames } = settled(records, view(30));
+    expect(alphaOf(frames, 'a')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'b')).toBeGreaterThan(0.9);
+  });
+
+  it('cap: no more than maxVisible labels render at once', () => {
+    const records: LabelRecord[] = [];
+    // 300 cities spread over the visible area at view 30 (z 85–115, x 123–177)
+    // with enough spacing that collision is not the limiting factor.
+    for (let i = 0; i < 300; i++) {
+      records.push(
+        record({
+          id: `city-${i}`,
+          tier: 'city',
+          x: 128 + (i % 30) * 1.7,
+          z: 86 + Math.floor(i / 30) * 4
+        })
+      );
+    }
+    const { frames } = settled(records, view(30), 8);
+    const visible = frames.filter((frame) => frame.visible);
+    expect(visible.length).toBeLessThanOrEqual(labels.maxVisible);
+    expect(visible.length).toBeGreaterThan(50); // sanity: culling/collision not over-aggressive
+  });
+
+  it('priority ordering: capitals beat provinces beat cities at equal spots', () => {
+    const records = [
+      record({ id: 'province', tier: 'province' }),
+      record({ id: 'capital', tier: 'capital' })
+    ];
+    const { frames } = settled(records, view(80));
+    expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'province')).toBe(0);
+  });
+});

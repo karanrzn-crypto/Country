@@ -98,8 +98,6 @@ export interface MapConfig {
   readonly maxViewHeight: number;
   /** Keyboard pan speed as a fraction of the viewport width per second. */
   readonly panSpeedFractionPerSecond: number;
-  /** City labels become visible below this view height. */
-  readonly cityLabelMaxViewHeight: number;
   /** Click pick radius as a fraction of the visible height. */
   readonly pickRadiusFraction: number;
 }
@@ -162,7 +160,6 @@ export const DEFAULT_CONFIG: GameConfig = {
     minViewHeight: 26,
     maxViewHeight: 260,
     panSpeedFractionPerSecond: 0.85,
-    cityLabelMaxViewHeight: 95,
     pickRadiusFraction: 0.03
   }
 };

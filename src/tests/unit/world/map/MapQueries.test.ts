@@ -105,6 +105,21 @@ describe('MapQueries (pure geometry, renderer-free)', () => {
     expect(inside.z).toBeLessThan(bounds.maxZ + 5);
   });
 
+  it('clampCamera progressively re-centers as the view zooms out', () => {
+    const bounds = { minX: 0, minZ: 0, maxX: 300, maxZ: 200 };
+    // Near zoom: no pull — the cursor keeps full control.
+    const near = clampCamera({ x: 40, z: 40, viewHeight: 40, aspect: 1.6 }, bounds, 26, 260);
+    expect(near.x).toBeCloseTo(40, 5);
+    // Fully zoomed out: the map is always framed (no corner fling possible).
+    const far = clampCamera({ x: 470, z: 20, viewHeight: 260, aspect: 1.6 }, bounds, 26, 260);
+    expect(far.x).toBeCloseTo(150, 0);
+    expect(far.z).toBeCloseTo(100, 0);
+    // Mid zoom-out: partial pull between the clamped position and the center.
+    const mid = clampCamera({ x: 200, z: 60, viewHeight: 200, aspect: 1.6 }, bounds, 26, 260);
+    expect(mid.x).toBeGreaterThan(150);
+    expect(mid.x).toBeLessThan(200);
+  });
+
   it('distanceToRing measures from a point to the polygon outline', () => {
     const square = [
       { x: 0, z: 0 },

@@ -128,6 +128,17 @@ export const INPUT_BINDINGS_SCHEMA: FieldSchema = {
 
 const colorField: FieldSchema = { type: 'string', minLength: 4, pattern: '^#[0-9a-fA-F]{6}$' };
 
+const LABEL_TIER_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    maxViewHeight: { type: 'union', options: [{ type: 'number', min: 1 }, { type: 'null' }] },
+    minPopulation: { type: 'number', min: 0 },
+    priority: { type: 'number', min: 0, max: 1000 },
+    screenPx: { type: 'number', min: 5, max: 80 }
+  }
+};
+
 export const MAP_THEME_SCHEMA: FieldSchema = {
   type: 'object',
   allowUnknown: false,
@@ -153,10 +164,78 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
     cityHitRadius: { type: 'number', min: 0.1, max: 40 },
     labelColor: colorField,
     labelHaloColor: colorField,
-    countryLabelSize: { type: 'number', min: 1, max: 100 },
-    cityLabelSize: { type: 'number', min: 1, max: 100 },
+    labels: {
+      type: 'object',
+      allowUnknown: false,
+      fields: {
+        fadeSpanViewHeight: { type: 'number', min: 1, max: 200 },
+        fadeRatePerSecond: { type: 'number', min: 0.5, max: 60 },
+        maxVisible: { type: 'number', min: 1, max: 2000, integer: true },
+        collisionPaddingPx: { type: 'number', min: 0, max: 40 },
+        labelOffsetPx: { type: 'number', min: 0, max: 80 },
+        tiers: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            country: LABEL_TIER_SCHEMA,
+            province: LABEL_TIER_SCHEMA,
+            capital: LABEL_TIER_SCHEMA,
+            majorCity: LABEL_TIER_SCHEMA,
+            city: LABEL_TIER_SCHEMA
+          }
+        }
+      }
+    },
     selectionRingColor: colorField,
     selectionRingColorAlt: colorField
+  }
+};
+
+export const FLAG_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    layout: { type: 'enum', values: ['solid', 'horizontal-stripes', 'vertical-stripes', 'canton'] },
+    colors: { type: 'array', minLength: 1, items: colorField },
+    emblem: { type: 'enum', values: ['none', 'star', 'circle', 'crescent', 'sun', 'cross'] },
+    emblemColor: colorField
+  }
+};
+
+const relationValue: FieldSchema = { type: 'number', min: -100, max: 100 };
+
+/** Static country profiles (Part 2) — shape validation; cross-refs checked in the registry. */
+export const COUNTRY_PROFILE_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    id: idField,
+    name: nameField,
+    flag: FLAG_SCHEMA,
+    population: { type: 'number', min: 0, max: 2_000_000_000 },
+    economy: {
+      type: 'object',
+      allowUnknown: false,
+      fields: {
+        gdp: positiveNumber,
+        treasury: positiveNumber,
+        income: positiveNumber,
+        expenses: positiveNumber
+      }
+    },
+    resources: { type: 'record', values: positiveNumber },
+    military: {
+      type: 'object',
+      allowUnknown: false,
+      fields: {
+        manpower: positiveNumber,
+        armySize: positiveNumber,
+        equipment: positiveNumber,
+        aircraft: positiveNumber,
+        navy: positiveNumber
+      }
+    },
+    foreignRelations: { type: 'record', values: relationValue }
   }
 };
 

@@ -124,7 +124,6 @@ const CONFIG_SCHEMA: FieldSchema = {
         minViewHeight: { type: 'number', min: 1 },
         maxViewHeight: { type: 'number', min: 1 },
         panSpeedFractionPerSecond: { type: 'number', min: 0.05, max: 5 },
-        cityLabelMaxViewHeight: { type: 'number', min: 1 },
         pickRadiusFraction: { type: 'number', min: 0.001, max: 0.2 }
       }
     }

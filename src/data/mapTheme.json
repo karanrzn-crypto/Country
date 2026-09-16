@@ -24,8 +24,20 @@
   "cityHitRadius": 2.2,
   "labelColor": "#20180f",
   "labelHaloColor": "#f7f2e6",
-  "countryLabelSize": 7.5,
-  "cityLabelSize": 4.2,
+  "labels": {
+    "fadeSpanViewHeight": 22,
+    "fadeRatePerSecond": 7.5,
+    "maxVisible": 120,
+    "collisionPaddingPx": 4,
+    "labelOffsetPx": 14,
+    "tiers": {
+      "country":   { "maxViewHeight": null, "minPopulation": 0,      "priority": 200, "screenPx": 15 },
+      "province":  { "maxViewHeight": 150,  "minPopulation": 0,      "priority": 60,  "screenPx": 11 },
+      "capital":   { "maxViewHeight": 280,  "minPopulation": 0,      "priority": 100, "screenPx": 12 },
+      "majorCity": { "maxViewHeight": 130,  "minPopulation": 400000, "priority": 50,  "screenPx": 11 },
+      "city":      { "maxViewHeight": 95,   "minPopulation": 0,      "priority": 20,  "screenPx": 10 }
+    }
+  },
   "selectionRingColor": "#ffffff",
   "selectionRingColorAlt": "#3a2f22"
 }

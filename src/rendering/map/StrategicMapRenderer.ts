@@ -11,11 +11,14 @@ import { LabelLayer } from './LabelLayer';
 import type { MapTheme } from './MapTheme';
 
 /**
- * StrategicMapRenderer — the 2D political-map render path (Part 1).
+ * StrategicMapRenderer — the 2D political-map render path.
  *
  * Builds one Three.js group per map layer (fixed bottom→top order from
- * MAP_LAYER_ORDER), mirrors layer visibility + selection + logical camera
- * from the map state slice each frame, and applies zoom-based label LOD.
+ * MAP_LAYER_ORDER), mirrors layer visibility + selection from the map state
+ * slice each frame, and drives:
+ * - the SMOOTHED presentation camera (damped zoom/pan, cursor-anchored zoom
+ *   gestures arrive via the map.zoomGesture event channel);
+ * - the label LOD (fade/cull/collision/cap — see LabelLod).
  *
  * All map LOGIC lives in world/map + state; this class only projects state
  * to the screen (renderer as pure view).
@@ -30,6 +33,7 @@ export class StrategicMapRenderer {
   private readonly labelLayer: LabelLayer;
   private readonly ocean: THREE.Mesh;
   private readonly disposables: { dispose(): void }[] = [];
+  private readonly unsubscribes: (() => void)[] = [];
   private readonly model: StrategicMapModel;
   private readonly theme: MapTheme;
   private lastSelectionKey = '';
@@ -63,9 +67,29 @@ export class StrategicMapRenderer {
     this.labelLayer = new LabelLayer(model, theme);
     this.disposables.push(this.countryLayer, this.borderLayer, this.cityLayer, this.labelLayer);
 
+    const mapState = context.state.map;
     this.camera = new MapCamera(
-      context.state.map.viewport.width,
-      context.state.map.viewport.height
+      mapState.viewport.width,
+      mapState.viewport.height,
+      { x: mapState.camera.x, z: mapState.camera.z, viewHeight: mapState.camera.viewHeight }
+    );
+    this.camera.setLimits({
+      bounds: model.bounds,
+      minViewHeight: context.config.map.minViewHeight,
+      maxViewHeight: context.config.map.maxViewHeight
+    });
+    this.unsubscribes.push(
+      context.events.on('map.zoomGesture', ({ anchor }) => {
+        if (anchor === null) this.camera.cancelZoomGesture();
+        else {
+          this.camera.beginZoomGesture({
+            anchorX: anchor.x,
+            anchorZ: anchor.z,
+            screenX: anchor.screenX,
+            screenY: anchor.screenY
+          });
+        }
+      })
     );
 
     // Fixed layer order (bottom → top) — borders/cities/labels can never be
@@ -78,11 +102,9 @@ export class StrategicMapRenderer {
       countryBorders: this.borderLayer.countryGroup,
       cities: this.cityLayer.citiesGroup,
       capitals: this.cityLayer.capitalsGroup,
-      labels: new THREE.Group()
+      labels: this.labelLayer.group
     };
     groups.countryBorders.add(this.borderLayer.coastGroup);
-    groups.labels.add(this.labelLayer.countryGroup);
-    groups.labels.add(this.labelLayer.cityGroup);
 
     this.root.add(this.ocean);
     for (const layerId of MAP_LAYER_ORDER) {
@@ -90,30 +112,58 @@ export class StrategicMapRenderer {
       this.layerGroups.set(layerId, group);
       this.root.add(group);
     }
+    // Selection emphasis: independent overlay above every togglable layer.
+    this.root.add(this.borderLayer.selectionGroup);
     scene.add(this.root);
   }
 
-  /** Per-frame view sync: camera, layer visibility, selection, label LOD. */
-  update(state: MapSlice, cityLabelMaxViewHeight: number): void {
-    const camera = state.camera;
-    this.camera.sync(camera.x, camera.z, camera.viewHeight);
+  /** Per-frame view sync: smoothed camera, layers, selection, label LOD. */
+  update(state: MapSlice, dtSeconds: number): void {
+    // 0. Keep the presentation viewport in lock-step with the logical one
+    //    (resize-safe aspect: picking and labels never drift after a resize).
+    this.camera.setViewport(state.viewport.width, state.viewport.height);
+    // 1. Advance the damped presentation camera toward the logical target.
+    this.camera.update(dtSeconds, {
+      x: state.camera.x,
+      z: state.camera.z,
+      viewHeight: state.camera.viewHeight
+    });
 
+    // 2. Layer visibility toggles.
     for (const [layerId, group] of this.layerGroups) {
       group.visible = state.layerVisibility[layerId] !== false;
     }
 
+    // 3. Selection (country highlight, city ring, border emphasis).
     const selectionKey = `${state.selectedCountryId}|${state.selectedProvinceId}|${state.selectedCityId}`;
     if (selectionKey !== this.lastSelectionKey) {
       this.lastSelectionKey = selectionKey;
       this.countryLayer.setSelection(state.selectedCountryId, this.theme);
       this.cityLayer.setSelectedCity(state.selectedCityId, this.model);
+      this.borderLayer.setSelectedCountry(state.selectedCountryId, this.model, this.theme);
     }
 
-    this.labelLayer.applyZoomLod(camera.viewHeight, cityLabelMaxViewHeight);
+    // 4. Label LOD — decision pass + sprite sync from the DAMPED camera view.
+    const view = this.camera.view;
+    this.labelLayer.update(
+      {
+        centerX: view.x,
+        centerZ: view.z,
+        viewHeight: view.viewHeight,
+        aspect: this.camera.aspect,
+        viewportWidthPx: state.viewport.width,
+        viewportHeightPx: state.viewport.height
+      },
+      dtSeconds
+    );
   }
 
   getCamera(): MapCamera {
     return this.camera;
+  }
+
+  get renderedLabelCount(): number {
+    return this.labelLayer.renderedCount;
   }
 
   get meshCount(): number {
@@ -125,6 +175,8 @@ export class StrategicMapRenderer {
   }
 
   dispose(scene: THREE.Scene): void {
+    for (const unsubscribe of this.unsubscribes) unsubscribe();
+    this.unsubscribes.length = 0;
     for (const disposable of this.disposables) disposable.dispose();
     this.disposables.length = 0;
     scene.remove(this.root);

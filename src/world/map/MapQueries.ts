@@ -140,6 +140,13 @@ export interface CameraView {
 /**
  * Clamps a camera view so it can never wander off the map: zoom is bounded
  * and the center is constrained so the viewport always overlaps the map.
+ *
+ * Progressive re-centering (Part 2): the more zoomed-out the view is, the
+ * stronger the center is pulled toward the map center — fully zoomed out the
+ * map is always framed, mid-zoom the cursor keeps full control. This removes
+ * the classic "zoom out flings the map into a corner" failure while keeping
+ * cursor-anchored zooming where it matters.
+ *
  * Pure function — used by the camera system, command handlers and tests.
  */
 export function clampCamera(view: CameraView, bounds: MapBounds, minViewHeight: number, maxViewHeight: number): CameraView {
@@ -153,7 +160,23 @@ export function clampCamera(view: CameraView, bounds: MapBounds, minViewHeight: 
   const maxX = bounds.maxX + marginX;
   const minZ = bounds.minZ - marginZ;
   const maxZ = bounds.maxZ + marginZ;
-  const x = viewWidth >= mapWidth + marginX * 2 ? (bounds.minX + bounds.maxX) / 2 : Math.min(maxX, Math.max(minX, view.x));
-  const z = viewHeight >= mapHeight + marginZ * 2 ? (bounds.minZ + bounds.maxZ) / 2 : Math.min(maxZ, Math.max(minZ, view.z));
+  let x = viewWidth >= mapWidth + marginX * 2 ? (bounds.minX + bounds.maxX) / 2 : Math.min(maxX, Math.max(minX, view.x));
+  let z = viewHeight >= mapHeight + marginZ * 2 ? (bounds.minZ + bounds.maxZ) / 2 : Math.min(maxZ, Math.max(minZ, view.z));
+
+  // —— progressive re-centering ——
+  const zoomOut = Math.min(1, Math.max(0, (viewHeight - minViewHeight) / Math.max(1e-6, maxViewHeight - minViewHeight)));
+  const pull = smoothstep(0.55, 1, zoomOut);
+  if (pull > 0) {
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+    x += (centerX - x) * pull;
+    z += (centerZ - z) * pull;
+  }
   return { x, z, viewHeight, aspect: view.aspect };
+}
+
+/** Hermite smoothstep between edges (0 below e0, 1 above e1). */
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }

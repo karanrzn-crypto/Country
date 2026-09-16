@@ -100,7 +100,7 @@ export class ThreeRenderer implements IGameRenderer {
       return;
     }
     if (this.mapRenderer !== null) {
-      this.mapRenderer.update(this.context.state.map, this.context.config.map.cityLabelMaxViewHeight);
+      this.mapRenderer.update(this.context.state.map, frame.dtSeconds);
       this.renderer.render(this.scene, this.mapRenderer.getCamera().camera);
       return;
     }
