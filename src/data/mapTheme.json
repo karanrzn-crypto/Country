@@ -32,12 +32,14 @@
     "maxVisible": 120,
     "collisionPaddingPx": 6,
     "labelOffsetPx": 18,
+    "minReadablePx": 11,
     "tiers": {
-      "country":   { "maxViewHeight": null,  "minPopulation": 0,      "priority": 200, "screenPx": 19 },
-      "province":  { "maxViewHeight": 170,   "minPopulation": 0,      "priority": 60,  "screenPx": 13 },
-      "capital":   { "maxViewHeight": 300,   "minPopulation": 0,      "priority": 100, "screenPx": 16 },
-      "majorCity": { "maxViewHeight": 150,   "minPopulation": 400000, "priority": 50,  "screenPx": 14 },
-      "city":      { "maxViewHeight": 115,   "minPopulation": 0,      "priority": 20,  "screenPx": 13 }
+      "country":    { "maxViewHeight": null,  "minPopulation": 0,      "priority": 200, "screenPx": 19 },
+      "province":   { "maxViewHeight": 170,   "minPopulation": 0,      "priority": 60,  "screenPx": 13 },
+      "capital":    { "maxViewHeight": 300,   "minPopulation": 0,      "priority": 100, "screenPx": 16 },
+      "majorCity":  { "maxViewHeight": 150,   "minPopulation": 400000, "priority": 50,  "screenPx": 14 },
+      "city":       { "maxViewHeight": 115,   "minPopulation": 0,      "priority": 20,  "screenPx": 13 },
+      "settlement": { "maxViewHeight": 75,    "minPopulation": 0,      "priority": 10,  "screenPx": 12 }
     }
   },
   "selectionRingColor": "#ffffff",
@@ -83,6 +85,8 @@
     "populationHigh": "#a02c2c",
     "economyLow": "#ece7d4",
     "economyHigh": "#2e6b4f",
+    "strategicLow": "#efe9d6",
+    "strategicHigh": "#8e2418",
     "riverStroke": "#2e78b8",
     "riverOpacity": 0.92,
     "lakeFill": "#2e78b8",
@@ -111,6 +115,21 @@
       "airbase": "#3a4a6b",
       "base": "#4a3b2a"
     },
-    "siteOpacity": 0.95
+    "siteOpacity": 0.95,
+    "gridColor": "#8a7d5f",
+    "gridOpacity": 0.32,
+    "buildingColors": {
+      "residential": "#8f7a55",
+      "industrial": "#6b3f2a",
+      "commercial": "#a06a3f",
+      "government": "#7a5f22",
+      "hospital": "#a63d3d",
+      "militaryBase": "#4a3b2a",
+      "airport": "#3a4a6b",
+      "port": "#24557f",
+      "railwayStation": "#46355a",
+      "power": "#5a5a3a"
+    },
+    "buildingOpacity": 0.9
   }
 }

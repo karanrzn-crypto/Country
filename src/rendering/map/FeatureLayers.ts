@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { StrategicMapModel, MapSite, MapRiver } from '../../world/map/MapTypes';
+import type { StrategicMapModel, MapSite, MapRiver, MapBuilding } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
 import { type MapTheme } from './MapTheme';
 import {
@@ -383,7 +383,10 @@ export function buildRiverRibbons(
   return geometry;
 }
 
-/** Rivers (natural ribbon meshes) + lake basin cells (filled quads). */
+/**
+ * Rivers: ONE merged natural ribbon mesh (see buildRiverRibbons).
+ * Lakes are a SEPARATE user-facing layer — see LakeLayer below.
+ */
 export class RiverLayer {
   readonly group = new THREE.Group();
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -414,32 +417,6 @@ export class RiverLayer {
       mesh.renderOrder = 6;
       this.group.add(mesh);
     }
-    // Lakes: filled quads of the basin cells (same shared lattice geometry),
-    // lifted exactly like the rivers so they always sit ON the surface.
-    if (model.features.lakeCells.length > 0) {
-      const heights = buildVertexElevationGrid(model, this.columns);
-      const positions: number[] = [];
-      for (const cellIndex of model.features.lakeCells) {
-        const [nw, ne, se, sw] = cellCornerPoints(cellIndex, model.lattice, this.columns);
-        const y = waterSurfaceY(heights, this.columns, cellIndex);
-        for (const point of [nw, sw, se, nw, se, ne]) positions.push(point.x, y, point.z);
-      }
-      const lakeGeometry = new THREE.BufferGeometry();
-      lakeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      lakeGeometry.computeBoundingSphere();
-      this.geometries.push(lakeGeometry);
-      const lakeMaterial = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(this.theme.layerColors.lakeFill),
-        transparent: true,
-        opacity: this.theme.layerColors.lakeOpacity,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      });
-      this.materials.push(lakeMaterial);
-      const lakeMesh = new THREE.Mesh(lakeGeometry, lakeMaterial);
-      lakeMesh.renderOrder = 6;
-      this.group.add(lakeMesh);
-    }
   }
 
   dispose(): void {
@@ -448,6 +425,146 @@ export class RiverLayer {
     for (const material of this.materials) material.dispose();
     this.geometries.length = 0;
     this.materials.length = 0;
+    this.built = false;
+  }
+}
+
+/**
+ * Lakes / standing water: ONE merged mesh of filled cell quads per lake
+ * (the same shared lattice geometry), lifted exactly like rivers so they
+ * always sit ON the surface. Data source: model.features.lakes (MapLake).
+ */
+export class LakeLayer {
+  readonly group = new THREE.Group();
+  private geometry: THREE.BufferGeometry | null = null;
+  private material: THREE.MeshBasicMaterial | null = null;
+  private built = false;
+
+  constructor(
+    private readonly columns: number,
+    private readonly theme: MapTheme
+  ) {}
+
+  ensureBuilt(model: StrategicMapModel): void {
+    if (this.built) return;
+    this.built = true;
+    if (model.features.lakes.length === 0) return;
+    const heights = buildVertexElevationGrid(model, this.columns);
+    const positions: number[] = [];
+    for (const lake of model.features.lakes) {
+      for (const cellIndex of lake.cells) {
+        const [nw, ne, se, sw] = cellCornerPoints(cellIndex, model.lattice, this.columns);
+        const y = waterSurfaceY(heights, this.columns, cellIndex);
+        for (const point of [nw, sw, se, nw, se, ne]) positions.push(point.x, y, point.z);
+      }
+    }
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    this.geometry.computeBoundingSphere();
+    this.material = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(this.theme.layerColors.lakeFill),
+      transparent: true,
+      opacity: this.theme.layerColors.lakeOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(this.geometry, this.material);
+    mesh.renderOrder = 6;
+    this.group.add(mesh);
+  }
+
+  dispose(): void {
+    this.group.clear();
+    this.geometry?.dispose();
+    this.geometry = null;
+    this.material?.dispose();
+    this.material = null;
+    this.built = false;
+  }
+}
+
+/**
+ * Geographic grid: ONE merged LineSegments of every country-INTERNAL cell
+ * boundary (the shared lattice edges between two land cells of the same
+ * country). Country/province borders stay their own layers; the grid is the
+ * A/B/C × 1/2/3 reference mesh behind them. Emitted once per lattice edge
+ * (deduped by edge key), lazy, one draw call — no measurable frame cost.
+ */
+export class GridLayer {
+  readonly group = new THREE.Group();
+  private geometry: THREE.BufferGeometry | null = null;
+  private material: THREE.LineBasicMaterial | null = null;
+  private built = false;
+
+  constructor(
+    private readonly columns: number,
+    private readonly rows: number,
+    private readonly theme: MapTheme
+  ) {}
+
+  ensureBuilt(model: StrategicMapModel): void {
+    if (this.built) return;
+    this.built = true;
+    const cellCount = model.features.biomes.length;
+    const owner = model.features.cellOwner;
+    const emitted = new Set<string>();
+    const positions: number[] = [];
+    const color = rgb(this.theme.layerColors.gridColor);
+    const latticePoints = model.lattice;
+    const stride = this.columns + 1;
+    const latticeIndexOf = (cellIndex: number, corner: 0 | 1 | 2 | 3): number => {
+      const cz = Math.floor(cellIndex / this.columns);
+      const cx = cellIndex - cz * this.columns;
+      const nw = cz * stride + cx;
+      return corner === 0 ? nw : corner === 1 ? nw + 1 : corner === 2 ? nw + stride + 1 : nw + stride;
+    };
+    const emitEdge = (a: number, b: number): void => {
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (emitted.has(key)) return;
+      emitted.add(key);
+      const pa = latticePoints[a];
+      const pb = latticePoints[b];
+      positions.push(pa.x, GridLayer.LINE_Y, pa.z, pb.x, GridLayer.LINE_Y, pb.z);
+    };
+    for (let cellIndex = 0; cellIndex < cellCount; cellIndex++) {
+      if (owner[cellIndex] < 0) continue; // ocean
+      const cz = Math.floor(cellIndex / this.columns);
+      const cx = cellIndex - cz * this.columns;
+      // East + south neighbors: every interior lattice edge emitted once.
+      const east = cx < this.columns - 1 ? cellIndex + 1 : -1;
+      const south = cz < this.rows - 1 ? cellIndex + this.columns : -1;
+      if (east >= 0 && owner[east] === owner[cellIndex]) {
+        emitEdge(latticeIndexOf(cellIndex, 1), latticeIndexOf(cellIndex, 2));
+      }
+      if (south >= 0 && owner[south] === owner[cellIndex]) {
+        emitEdge(latticeIndexOf(cellIndex, 3), latticeIndexOf(cellIndex, 2));
+      }
+    }
+    if (positions.length === 0) return;
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    this.geometry.computeBoundingSphere();
+    this.material = new THREE.LineBasicMaterial({
+      vertexColors: false,
+      color: new THREE.Color(color.r, color.g, color.b),
+      transparent: true,
+      opacity: this.theme.layerColors.gridOpacity,
+      depthWrite: false
+    });
+    const segments = new THREE.LineSegments(this.geometry, this.material);
+    segments.renderOrder = 5;
+    this.group.add(segments);
+  }
+
+  /** Sits just above the land surface, below rivers/borders. */
+  static readonly LINE_Y = 0.62;
+
+  dispose(): void {
+    this.group.clear();
+    this.geometry?.dispose();
+    this.geometry = null;
+    this.material?.dispose();
+    this.material = null;
     this.built = false;
   }
 }
@@ -536,4 +653,98 @@ export class SiteLayer {
     this.material?.dispose();
     this.material = null;
   }
+}
+
+/**
+ * Buildings / facilities layer (Part 3): ONE InstancedMesh over
+ * model.features.buildings with per-instance theme colors
+ * (layerColors.buildingColors — data-driven, small square markers).
+ */
+export class BuildingsLayer {
+  readonly group = new THREE.Group();
+  private mesh: THREE.InstancedMesh | null = null;
+  private geometry: THREE.BufferGeometry | null = null;
+  private material: THREE.MeshBasicMaterial | null = null;
+  private built = false;
+
+  constructor(
+    /** Kinds to render (null = every building kind). */
+    private readonly kinds: readonly MapBuilding['kind'][] | null,
+    private readonly theme: MapTheme
+  ) {}
+
+  ensureBuilt(model: StrategicMapModel): void {
+    if (this.built) return;
+    this.built = true;
+    const kinds = this.kinds;
+    const buildings =
+      kinds === null
+        ? model.features.buildings
+        : model.features.buildings.filter((building) => kinds.includes(building.kind));
+    if (buildings.length === 0) return;
+    const colorOf = new Map<string, RGB>(
+      Object.entries(this.theme.layerColors.buildingColors).map(([kind, hex]) => [kind, rgb(hex)])
+    );
+    this.geometry = new THREE.PlaneGeometry(1.2, 1.2);
+    this.geometry.rotateX(-Math.PI / 2);
+    this.material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: this.theme.layerColors.buildingOpacity,
+      depthWrite: false
+    });
+    this.mesh = new THREE.InstancedMesh(this.geometry, this.material, buildings.length);
+    const matrix = new THREE.Matrix4();
+    const color = new THREE.Color();
+    buildings.forEach((building, index) => {
+      matrix.makeTranslation(building.position.x, 1.05, building.position.z);
+      this.mesh?.setMatrixAt(index, matrix);
+      const buildingColor = colorOf.get(building.kind);
+      if (buildingColor !== undefined) {
+        color.setRGB(buildingColor.r, buildingColor.g, buildingColor.b);
+        this.mesh?.setColorAt(index, color);
+      }
+    });
+    this.mesh.renderOrder = 8;
+    this.group.add(this.mesh);
+  }
+
+  dispose(): void {
+    this.group.clear();
+    this.mesh?.dispose();
+    this.mesh = null;
+    this.geometry?.dispose();
+    this.geometry = null;
+    this.material?.dispose();
+    this.material = null;
+    this.built = false;
+  }
+}
+
+/**
+ * Strategic-value tint (Strategic Information layer): a translucent
+ * per-cell fill colored by the OWNING PROVINCE's strategic value
+ * (model.provinces[id].strategicValue — the SAME computed value any future
+ * war/economy system reads). One merged vertex-colored mesh, lazy.
+ */
+export function createStrategicFillLayer(
+  columns: number,
+  theme: MapTheme
+): CellFillLayer {
+  const low = rgb(theme.layerColors.strategicLow);
+  const high = rgb(theme.layerColors.strategicHigh);
+  let maxValue = 1;
+  let maxComputed = false;
+  return new CellFillLayer(columns, theme.layerColors.tintFillOpacity, (cellIndex, model) => {
+    const provinceId = model.features.provinceOf[cellIndex];
+    if (provinceId === null || provinceId === undefined) return null;
+    const province = model.provinces[provinceId];
+    if (province === undefined) return null;
+    if (!maxComputed) {
+      // One-time normalization anchor: the strongest province on the map.
+      maxValue = Math.max(1, ...Object.values(model.provinces).map((entry) => entry.strategicValue));
+      maxComputed = true;
+    }
+    const t = Math.pow(province.strategicValue / maxValue, 1.4);
+    return lerpColor(low, high, t);
+  });
 }

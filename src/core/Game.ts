@@ -143,8 +143,13 @@ export class Game {
     this.time = new TimeSystem(this.config.time, this.events);
     // Static political map (Part 1) — deterministic, immutable, renderer-free.
     // Generated BEFORE the initial state so the country data slice (Part 2)
-    // can join capitals + id space at construction time.
-    const mapGeneration = generateStrategicMap(this.config.map);
+    // can join capitals + id space at construction time. Part 3: the DECLARED
+    // profile populations anchor the geographic population tree — Σ provinces
+    // (and Σ cities inside them) always equals the declared value exactly.
+    const declaredPopulations = Object.fromEntries(
+      this.data.countryProfileList.map((profile) => [profile.id, profile.population])
+    );
+    const mapGeneration = generateStrategicMap(this.config.map, { countryPopulations: declaredPopulations });
     this.mapModel = mapGeneration.model;
     for (const warning of mapGeneration.warnings) {
       this.logger.warn(`map: ${warning}`);

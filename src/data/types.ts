@@ -158,7 +158,14 @@ export interface MapLabelsThemeData {
   readonly collisionPaddingPx: number;
   /** Vertical offset (px) between a city marker and its label. */
   readonly labelOffsetPx: number;
-  readonly tiers: Readonly<Record<'country' | 'province' | 'capital' | 'majorCity' | 'city', MapLabelTierData>>;
+  /**
+   * Minimum readable label height in screen px: any VISIBLE label is at
+   * least this tall, no matter its tier (spec §12 — never unreadable).
+   */
+  readonly minReadablePx: number;
+  readonly tiers: Readonly<
+    Record<'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement', MapLabelTierData>
+  >;
 }
 
 /** Data-driven colors for the Part-3 information layers (see mapTheme.json). */
@@ -205,6 +212,9 @@ export interface MapLayerColorsData {
   readonly populationHigh: string;
   readonly economyLow: string;
   readonly economyHigh: string;
+  /** Strategic-information tint (province strategic value ramp). */
+  readonly strategicLow: string;
+  readonly strategicHigh: string;
   readonly riverStroke: string;
   readonly riverOpacity: number;
   readonly lakeFill: string;
@@ -225,6 +235,26 @@ export interface MapLayerColorsData {
     Record<'port' | 'farm' | 'factory' | 'mine' | 'oil' | 'airbase' | 'base', string>
   >;
   readonly siteOpacity: number;
+  /** Geographic-grid line color + opacity (country-local cell mesh). */
+  readonly gridColor: string;
+  readonly gridOpacity: number;
+  /** Building/facility marker colors (Part 3 buildings layer). */
+  readonly buildingColors: Readonly<
+    Record<
+      | 'residential'
+      | 'industrial'
+      | 'commercial'
+      | 'government'
+      | 'hospital'
+      | 'militaryBase'
+      | 'airport'
+      | 'port'
+      | 'railwayStation'
+      | 'power',
+      string
+    >
+  >;
+  readonly buildingOpacity: number;
 }
 
 /**

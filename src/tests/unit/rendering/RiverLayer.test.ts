@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import {
   RiverLayer,
+  LakeLayer,
   riverWidthAt,
   buildRiverRibbons
 } from '../../../rendering/map/FeatureLayers';
@@ -83,22 +84,37 @@ describe('river ribbons (natural water in every surface mode)', () => {
     for (let i = 0; i < pa.length; i++) expect(pa[i]).toBe(pb[i]);
   });
 
-  it('lakes render as water quads above the surface (never sunk into relief)', () => {
-    const layer = new RiverLayer(DEFAULT_MAP_CONFIG.columns, theme);
+  it('lakes render as their own water layer, quads above the surface', () => {
+    // Part 3: lakes are real MapLake records on a SEPARATE layer (Rivers
+    // and Lakes/Water are independently togglable). Every lake cell quad
+    // floats above the surface — never sunk into the relief.
+    const layer = new LakeLayer(DEFAULT_MAP_CONFIG.columns, theme);
     layer.ensureBuilt(model);
-    if (model.features.lakeCells.length === 0) {
-      expect(layer.group.children.length).toBeLessThanOrEqual(1);
+    const lakeCellCount = model.features.lakes.reduce((sum, lake) => sum + lake.cells.length, 0);
+    if (lakeCellCount === 0) {
+      expect(layer.group.children.length).toBe(0);
       layer.dispose();
       return;
     }
-    const lakeMesh = layer.group.children[1] as THREE.Mesh;
+    const lakeMesh = layer.group.children[0] as THREE.Mesh;
     expect(lakeMesh?.isMesh).toBe(true);
     const pos = lakeMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
-    expect(pos.count).toBe(model.features.lakeCells.length * 6);
+    expect(pos.count).toBe(lakeCellCount * 6);
     const array = pos.array as Float32Array;
     for (let i = 1; i < array.length; i += 3) {
       expect(array[i]).toBeGreaterThan(SURFACE_FILL_Y);
     }
     layer.dispose();
+  });
+
+  it('rivers and lakes are SEPARATE layers (independent togglability)', () => {
+    const rivers = new RiverLayer(DEFAULT_MAP_CONFIG.columns, theme);
+    const lakes = new LakeLayer(DEFAULT_MAP_CONFIG.columns, theme);
+    rivers.ensureBuilt(model);
+    lakes.ensureBuilt(model);
+    // Disposing one never touches the other (separate GPU state).
+    lakes.dispose();
+    expect(rivers.group.children.length).toBeGreaterThan(0);
+    rivers.dispose();
   });
 });

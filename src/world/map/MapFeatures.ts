@@ -1,10 +1,17 @@
 /**
  * Static geographic feature generation (Part 3 — map layers).
  *
- * Runs ONCE per seed at the end of the strategic-map generation, producing
- * the immutable `MapFeatures` section of the model: biomes, elevation,
- * temperature, terrain, rivers, lakes, roads, railways, sea routes and
- * point sites (ports / farms / factories / mines / military).
+ * Produces the per-cell FIELDS and the point/line features of the model:
+ * biomes, temperature, terrain, roads, railways, sea routes and point sites
+ * (ports / farms / factories / mines / military).
+ *
+ * Part-3 structure:
+ * - `buildClimateFields` (exported) computes elevation / temperature /
+ *   moisture ONCE — the generator needs elevation BEFORE placing cities
+ *   (water-aware placement) and rivers; the same fields are then passed
+ *   back in here, so every consumer shares ONE field source of truth.
+ * - Rivers / lakes are built by MapRivers.buildRiverSystem and passed in as
+ *   data — this module never re-derives water.
  *
  * Design rules honored here:
  * - Deterministic: every decision is seeded or explicitly tie-broken — the
@@ -21,7 +28,6 @@
  */
 
 import { Random } from '../../utils/Random';
-import { generateCityName } from './MapNames';
 import type {
   BiomeId,
   MapCity,
@@ -29,6 +35,7 @@ import type {
   MapLineFeature,
   MapPoint,
   MapRiver,
+  MapLake,
   MapSite,
   TerrainId
 } from './MapTypes';
@@ -37,12 +44,51 @@ import { pointInRing } from './MapQueries';
 import type { MapRing } from './MapTypes';
 
 /** Tunable generation policy (module constants — one documented place). */
-const RIVER_MIN_ELEVATION = 0.68;
-const RIVER_MIN_SEPARATION = 4; // Chebyshev cell distance between sources
-const RIVER_MAX_COUNT = 7;
-const RIVER_MAX_STEPS = 80;
 const ROAD_DIRT_MAX_POPULATION = 250_000;
 const FACTORIES_PER_COUNTRY = 2;
+
+export interface MapClimateFields {
+  /** Normalized elevation 0..1 per cell (ocean cells included). */
+  readonly elevation: readonly number[];
+  readonly temperature: readonly number[];
+  readonly moisture: readonly number[];
+}
+
+/**
+ * THE climate fields of a seed — elevation, temperature, moisture per cell.
+ * Deterministic and byte-stable per (seed, columns, rows): the RNG seeds and
+ * call order are fixed so every consumer (generator, rivers, features) sees
+ * the identical field values.
+ */
+export function buildClimateFields(seed: number, columns: number, rows: number): MapClimateFields {
+  const cellCount = columns * rows;
+  const rng = new Random((seed ^ 0x1a2b3c4d) >>> 0);
+  const elevationNoise = fbm(rng);
+  const temperatureNoise = fbm(rng);
+  const moistureNoise = makeNoise(rng, 5);
+  const rawElevation: number[] = new Array(cellCount);
+  const rawTemperature: number[] = new Array(cellCount);
+  const rawMoisture: number[] = new Array(cellCount);
+  for (let cz = 0; cz < rows; cz++) {
+    for (let cx = 0; cx < columns; cx++) {
+      const cellIndex = cz * columns + cx;
+      const fx = (cx + 0.5) / columns;
+      const fz = (cz + 0.5) / rows;
+      rawElevation[cellIndex] = elevationNoise(fx, fz);
+      // Latitude gradient (north = colder) + noise, stored raw for normalization.
+      rawTemperature[cellIndex] = 1 - Math.abs(fz - 0.5) * 1.4 + temperatureNoise(fx, fz) * 0.5 - 0.25;
+      rawMoisture[cellIndex] = moistureNoise(fx, fz);
+    }
+  }
+  const elevation = minMaxNormalize(rawElevation);
+  const moisture = minMaxNormalize(rawMoisture);
+  // Temperature: blend raw gradient with normalized noise, penalize altitude.
+  const temperatureNorm = minMaxNormalize(rawTemperature);
+  const temperature = elevation.map((elev, i) =>
+    Math.max(0, Math.min(1, temperatureNorm[i] * 0.75 + moisture[i] * 0.1 - elev * 0.3 + 0.18))
+  );
+  return { elevation, temperature, moisture };
+}
 
 export interface MapFeaturesInput {
   readonly seed: number;
@@ -53,6 +99,11 @@ export interface MapFeaturesInput {
   readonly cells: readonly Cell[];
   /** Land mask (true = land cell). */
   readonly land: readonly boolean[];
+  /** Prebuilt climate fields (buildClimateFields) — never re-derived here. */
+  readonly fields: MapClimateFields;
+  /** Prebuilt water network (MapRivers.buildRiverSystem). */
+  readonly rivers: readonly MapRiver[];
+  readonly lakes: readonly MapLake[];
   /** Dense country owner index per land cell (matches country id `country_${owner}`). */
   readonly countryPartition: Int32Array;
   readonly countries: readonly {
@@ -111,7 +162,7 @@ function minMaxNormalize(values: number[]): number[] {
   return values.map((value) => (value - min) / span);
 }
 
-// ———————————————————————————— field classification ————————————————————————————
+// ———————————————————— field classification ————————————————————
 
 /**
  * Terrain classification thresholds (elevation is min-max normalized 0..1;
@@ -154,7 +205,7 @@ export function classifyBiome(temperature: number, moisture: number): BiomeId {
   return 'grassland';
 }
 
-// ———————————————————————————— geometry helpers ————————————————————————————
+// ———————————————————— geometry helpers ————————————————————
 
 /** Rebuilds the 4 lattice corner points of a cell (NW, NE, SE, SW). */
 export function cellCornerPoints(
@@ -180,7 +231,7 @@ function cellCentroidOf(cell: Cell, lattice: LatticeData): MapPoint {
 }
 
 /** Nearest cell index for a world position (used to tag city-based sites). */
-function cellIndexOf(position: MapPoint, columns: number, cellSize: number): number {
+export function cellIndexOf(position: MapPoint, columns: number, cellSize: number): number {
   const cx = Math.max(0, Math.floor(position.x / cellSize));
   const cz = Math.max(0, Math.floor(position.z / cellSize));
   return cz * columns + cx;
@@ -202,7 +253,7 @@ function jitteredMidpoint(
   return { x: mx + (-dz / length) * offset, z: mz + (dx / length) * offset };
 }
 
-// ———————————————————————————— graph helpers ————————————————————————————
+// ———————————————————— graph helpers ————————————————————
 
 /**
  * Deterministic Prim MST over weighted points. Tie-breaks compare ids, so
@@ -270,42 +321,18 @@ function spreadCells(
   return chosen;
 }
 
-// ———————————————————————————— main builder ————————————————————————————
+// ———————————————————— main builder ————————————————————
 
 export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
-  const { seed, columns, rows, cellSize, lattice, cells, land, countryPartition, countries, cities } =
+  const { seed, columns, rows, cellSize, lattice, cells, land, countryPartition, countries, cities, fields } =
     input;
+  const { elevation, temperature, moisture } = fields;
   const cellCount = columns * rows;
-  const rng = new Random((seed ^ 0x1a2b3c4d) >>> 0);
-  const nameRng = new Random((seed ^ 0x5f5f5f5f) >>> 0);
+  const rng = new Random((seed ^ 0x77c25f1b) >>> 0);
 
-  // —— 1. elevation / temperature / moisture fields (per cell) ——
-  const elevationNoise = fbm(rng);
-  const temperatureNoise = fbm(rng);
-  const moistureNoise = makeNoise(rng, 5);
-  const rawElevation: number[] = new Array(cellCount);
-  const rawTemperature: number[] = new Array(cellCount);
-  const rawMoisture: number[] = new Array(cellCount);
-  for (let cz = 0; cz < rows; cz++) {
-    for (let cx = 0; cx < columns; cx++) {
-      const cellIndex = cz * columns + cx;
-      const fx = (cx + 0.5) / columns;
-      const fz = (cz + 0.5) / rows;
-      rawElevation[cellIndex] = elevationNoise(fx, fz);
-      // Latitude gradient (north = colder) + noise, stored raw for normalization.
-      rawTemperature[cellIndex] = 1 - Math.abs(fz - 0.5) * 1.4 + temperatureNoise(fx, fz) * 0.5 - 0.25;
-      rawMoisture[cellIndex] = moistureNoise(fx, fz);
-    }
-  }
-  const elevation = minMaxNormalize(rawElevation);
-  const moisture = minMaxNormalize(rawMoisture);
-  // Temperature: blend raw gradient with normalized noise, penalize altitude.
-  const temperatureNorm = minMaxNormalize(rawTemperature);
-  const temperature = elevation.map((elev, i) =>
-    Math.max(0, Math.min(1, temperatureNorm[i] * 0.75 + moisture[i] * 0.1 - elev * 0.3 + 0.18))
-  );
+  const centroids: MapPoint[] = cells.map((cell) => cellCentroidOf(cell, lattice));
 
-  // —— 2. terrain + biome classification ——
+  // —— 1. terrain + biome classification (from the SHARED climate fields) ——
   // Local relief per land cell: max elevation difference to LAND neighbors
   // (ocean neighbors excluded — coasts are not automatically mountains).
   const localRelief: number[] = new Array(cellCount).fill(0);
@@ -344,90 +371,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     biomes[cellIndex] = classifyBiome(temperature[cellIndex], moisture[cellIndex]);
   }
 
-  const centroids: MapPoint[] = cells.map((cell) => cellCentroidOf(cell, lattice));
-
-  // —— 3. rivers: high sources descend greedily to the coast or an inland basin ——
-  const riverNameUsed = new Set<string>();
-  const rivers: MapRiver[] = [];
-  const lakeCellSet = new Set<number>();
-  const riverSources: number[] = [];
-  const landCellsByElevation = Array.from({ length: cellCount }, (_, i) => i).filter(
-    (cellIndex) => land[cellIndex] && elevation[cellIndex] >= RIVER_MIN_ELEVATION
-  );
-  landCellsByElevation.sort(
-    (a, b) => elevation[b] - elevation[a] || a - b
-  );
-  for (const source of landCellsByElevation) {
-    if (rivers.length >= RIVER_MAX_COUNT) break;
-    const sx = source % columns;
-    const sz = Math.floor(source / columns);
-    const tooClose = riverSources.some((other) => {
-      const ox = other % columns;
-      const oz = Math.floor(other / columns);
-      return Math.max(Math.abs(sx - ox), Math.abs(sz - oz)) < RIVER_MIN_SEPARATION;
-    });
-    if (tooClose) continue;
-
-    const visited = new Set<number>([source]);
-    const path: number[] = [source];
-    let current = source;
-    let mouth: number | null = null;
-    for (let step = 0; step < RIVER_MAX_STEPS; step++) {
-      const cx = current % columns;
-      const cz = Math.floor(current / columns);
-      const neighbors = [
-        cx > 0 ? current - 1 : -1,
-        cx < columns - 1 ? current + 1 : -1,
-        cz > 0 ? current - columns : -1,
-        cz < rows - 1 ? current + columns : -1
-      ].filter((neighbor) => neighbor >= 0 && !visited.has(neighbor));
-      const oceanNeighbor = neighbors.find((neighbor) => !land[neighbor]);
-      if (oceanNeighbor !== undefined) {
-        mouth = current; // river ends at its last land cell (the coast)
-        break;
-      }
-      if (neighbors.length === 0) break;
-      // Lowest neighbor wins; deterministic tie-break by cell index.
-      let best = -1;
-      let bestElevation = Number.POSITIVE_INFINITY;
-      for (const neighbor of neighbors) {
-        const neighborElevation = elevation[neighbor];
-        if (neighborElevation < bestElevation - 1e-9 || (Math.abs(neighborElevation - bestElevation) <= 1e-9 && neighbor < best)) {
-          bestElevation = neighborElevation;
-          best = neighbor;
-        }
-      }
-      if (best < 0 || bestElevation >= elevation[current] - 1e-9) {
-        // Inland basin — the river ends in a small lake.
-        lakeCellSet.add(current);
-        break;
-      }
-      visited.add(best);
-      path.push(best);
-      current = best;
-    }
-    if (path.length < 3) continue; // too short to read as a river
-    riverSources.push(source);
-
-    const polyline: MapPoint[] = path.map((cellIndex, index) => {
-      const centroid = centroids[cellIndex];
-      if (index === 0 || index === path.length - 1) return centroid;
-      const jitter = cellSize * 0.18;
-      return {
-        x: centroid.x + (rng.next() * 2 - 1) * jitter,
-        z: centroid.z + (rng.next() * 2 - 1) * jitter
-      };
-    });
-    rivers.push({
-      id: `river_${rivers.length}`,
-      name: generateCityName(nameRng, riverNameUsed),
-      cells: path,
-      polyline,
-      mouthCell: mouth
-    });
-  }
-
-  // —— 4. roads (MST over ALL cities) + railways (MST over capitals) + sea routes ——
+  // —— 2. roads (MST over ALL cities) + railways (MST over capitals) + sea routes ——
   const cityList = Object.values(cities);
   const lines: MapLineFeature[] = [];
 
@@ -504,7 +448,10 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     });
   }
 
-  // —— 5. sites: ports, resources (mines/oil), farms, factories, military ——
+  // —— 3. sites: ports, resources (mines/oil), farms, factories, military ——
+  // Lake cells are water: sites never target them.
+  const lakeCellSet = new Set<number>();
+  for (const lake of input.lakes) for (const cellIndex of lake.cells) lakeCellSet.add(cellIndex);
   const sites: MapSite[] = [];
   const pushSite = (
     kind: MapSite['kind'],
@@ -541,9 +488,9 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
 
     // Extractive resources: spread candidates, kind follows the local terrain.
     const targetResourceCount = Math.max(2, Math.min(5, Math.ceil(country.cellIds.length / 10)));
-    const resourceCandidates = [...country.cellIds].sort(
-      (a, b) => elevation[b] - elevation[a] || a - b
-    );
+    const resourceCandidates = [...country.cellIds]
+      .filter((cellIndex) => !lakeCellSet.has(cellIndex))
+      .sort((a, b) => elevation[b] - elevation[a] || a - b);
     const chosenCells = spreadCells(resourceCandidates, targetResourceCount, centroids);
     for (const cellIndex of chosenCells) {
       const terrainClass = terrain[cellIndex];
@@ -570,7 +517,9 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     }
 
     // Farms: grassland cells, spread for readability.
-    const grassCells = country.cellIds.filter((cellIndex) => biomes[cellIndex] === 'grassland');
+    const grassCells = country.cellIds.filter(
+      (cellIndex) => biomes[cellIndex] === 'grassland' && !lakeCellSet.has(cellIndex)
+    );
     const farmCount = Math.max(1, Math.min(3, Math.ceil(country.cellIds.length / 14)));
     for (const cellIndex of spreadCells(grassCells, farmCount, centroids)) {
       const position = centroids[cellIndex];
@@ -605,9 +554,13 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     moisture,
     terrain,
     cellOwner,
-    rivers,
-    lakeCells: [...lakeCellSet].sort((a, b) => a - b),
+    provinceOf: [],
+    gridIds: [],
+    rivers: input.rivers,
+    lakes: input.lakes,
     lines,
-    sites
+    sites,
+    deposits: [],
+    buildings: []
   };
 }

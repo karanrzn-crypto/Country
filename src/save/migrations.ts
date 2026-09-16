@@ -59,7 +59,17 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       const clone = JSON.parse(JSON.stringify(data)) as { state: Record<string, unknown> };
       if (clone.state.countries === undefined) {
-        const mapModel = generateStrategicMap(DEFAULT_CONFIG.map).model;
+        // Part 3: the regenerated model anchors its population tree on the
+        // SAME declared profile populations the slice is built from.
+        const declaredPopulations = Object.fromEntries(
+          (countriesJson as unknown as readonly CountryProfileJson[]).map((profile) => [
+            profile.id,
+            profile.population
+          ])
+        );
+        const mapModel = generateStrategicMap(DEFAULT_CONFIG.map, {
+          countryPopulations: declaredPopulations
+        }).model;
         clone.state.countries = buildCountrySlice(
           countriesJson as unknown as readonly CountryProfileJson[],
           mapModel

@@ -12,10 +12,14 @@ import { SurfaceLayer, type SurfaceMode } from './MapSurface';
 import {
   createPopulationFillLayer,
   createEconomyFillLayer,
+  createStrategicFillLayer,
   createRoadsLayer,
   createRailwaysLayer,
   createSeaRoutesLayer,
   RiverLayer,
+  LakeLayer,
+  GridLayer,
+  BuildingsLayer,
   SiteLayer,
   type CellFillLayer
 } from './FeatureLayers';
@@ -103,7 +107,10 @@ export class StrategicMapRenderer {
       const country = context.state.countries.countries[countryId];
       return country !== undefined ? country.economy.gdp : 0;
     });
+    const strategicLayer = createStrategicFillLayer(this.columns, theme);
     const riverLayer = new RiverLayer(this.columns, theme);
+    const lakeLayer = new LakeLayer(this.columns, theme);
+    const gridLayer = new GridLayer(this.columns, context.config.map.rows, theme);
     const roadsLayer = createRoadsLayer(theme);
     const railwaysLayer = createRailwaysLayer(theme);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
@@ -111,10 +118,16 @@ export class StrategicMapRenderer {
     const industryLayer = new SiteLayer(['farm', 'factory'], 'square', theme);
     const resourcesLayer = new SiteLayer(['mine', 'oil'], 'diamond', theme);
     const militaryLayer = new SiteLayer(['base', 'airbase'], 'pentagon', theme);
+    const airportBuildings = new BuildingsLayer(['airport'], theme);
+    const cityBuildings = new BuildingsLayer(
+      ['residential', 'industrial', 'commercial', 'government', 'hospital', 'militaryBase', 'railwayStation', 'power'],
+      theme
+    );
     // Ports & Maritime is ONE user-facing layer: port markers + sea routes.
     portsLayer.group.add(seaRoutesLayer.group);
     this.fillLayers.set('population', populationLayer);
     this.fillLayers.set('economy', economyLayer);
+    this.fillLayers.set('strategic', strategicLayer);
     const lazyEntries: readonly (readonly [
       MapLayerId,
       { ensureBuilt(model: StrategicMapModel): void; dispose(): void }
@@ -129,9 +142,14 @@ export class StrategicMapRenderer {
       }],
       ['population', populationLayer],
       ['economy', economyLayer],
+      ['strategic', strategicLayer],
       ['rivers', riverLayer],
+      ['lakes', lakeLayer],
+      ['grid', gridLayer],
       ['roads', roadsLayer],
       ['railways', railwaysLayer],
+      ['airports', airportBuildings],
+      ['buildings', cityBuildings],
       ['ports', {
         ensureBuilt: (model) => {
           portsLayer.ensureBuilt(model);
@@ -188,19 +206,24 @@ export class StrategicMapRenderer {
       biomes: surfaceLayer.group,
       terrain: surfaceLayer.group,
       rivers: riverLayer.group,
+      lakes: lakeLayer.group,
+      grid: gridLayer.group,
       provinceBorders: this.borderLayer.provinceGroup,
       cityAreas: this.cityLayer.cityAreasGroup,
       countryBorders: this.borderLayer.countryGroup,
       roads: roadsLayer.group,
       railways: railwaysLayer.group,
+      airports: airportBuildings.group,
       ports: portsLayer.group,
       industry: industryLayer.group,
+      buildings: cityBuildings.group,
       resources: resourcesLayer.group,
       military: militaryLayer.group,
       cities: this.cityLayer.citiesGroup,
       capitals: this.cityLayer.capitalsGroup,
       population: populationLayer.group,
       economy: economyLayer.group,
+      strategic: strategicLayer.group,
       weather: new THREE.Group(), // extensible stub — future weather systems fill it
       intelligence: new THREE.Group(), // extensible stub — future intel systems fill it
       labels: this.labelLayer.group

@@ -26,20 +26,25 @@ export type MapLayerId =
   | 'biomes'
   | 'terrain'
   | 'rivers'
+  | 'lakes'
+  | 'grid'
   | 'provinceBorders'
   | 'cities'
   | 'capitals'
   // infrastructure
   | 'roads'
   | 'railways'
+  | 'airports'
   | 'ports'
   | 'industry'
+  | 'buildings'
   | 'resources'
   | 'military'
   // society (population real; economy reads countrySlice; weather/intelligence
   // are extensible stubs filled by future systems without renderer rewrites)
   | 'population'
   | 'economy'
+  | 'strategic'
   | 'weather'
   | 'intelligence';
 
@@ -59,19 +64,24 @@ export const MAP_LAYERS: readonly MapLayerDef[] = [
   { id: 'biomes', label: 'Biomes', group: 'geography', defaultVisible: false },
   { id: 'terrain', label: 'Terrain', group: 'geography', defaultVisible: false },
   { id: 'rivers', label: 'Rivers', group: 'geography', defaultVisible: true },
+  { id: 'lakes', label: 'Lakes / Water', group: 'geography', defaultVisible: true },
+  { id: 'grid', label: 'Geographic Grid', group: 'geography', defaultVisible: false },
   { id: 'provinceBorders', label: 'Provinces', group: 'geography', defaultVisible: true },
   { id: 'cityAreas', label: 'City Areas', group: 'geography', defaultVisible: true },
   { id: 'countryBorders', label: 'Country Borders', group: 'base', defaultVisible: true },
   { id: 'roads', label: 'Roads', group: 'infrastructure', defaultVisible: false },
   { id: 'railways', label: 'Railways', group: 'infrastructure', defaultVisible: false },
+  { id: 'airports', label: 'Airports', group: 'infrastructure', defaultVisible: false },
   { id: 'ports', label: 'Ports', group: 'infrastructure', defaultVisible: false },
   { id: 'industry', label: 'Industry', group: 'infrastructure', defaultVisible: false },
+  { id: 'buildings', label: 'Buildings', group: 'infrastructure', defaultVisible: false },
   { id: 'resources', label: 'Resources', group: 'infrastructure', defaultVisible: false },
   { id: 'military', label: 'Military', group: 'infrastructure', defaultVisible: false },
   { id: 'cities', label: 'Cities', group: 'geography', defaultVisible: true },
   { id: 'capitals', label: 'Capitals', group: 'geography', defaultVisible: true },
   { id: 'population', label: 'Population', group: 'society', defaultVisible: false },
   { id: 'economy', label: 'Economy', group: 'society', defaultVisible: false },
+  { id: 'strategic', label: 'Strategic Value', group: 'society', defaultVisible: false },
   { id: 'weather', label: 'Weather', group: 'society', defaultVisible: false },
   { id: 'intelligence', label: 'Intelligence', group: 'society', defaultVisible: false },
   { id: 'labels', label: 'Labels', group: 'base', defaultVisible: true }

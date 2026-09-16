@@ -25,6 +25,7 @@ function record(overrides: Partial<LabelRecord> & { id: string }): LabelRecord {
     x: 150,
     z: 100,
     population: 100_000,
+    importance: 0,
     aspect: 3,
     offsetBelow: true,
     ...overrides
@@ -186,5 +187,38 @@ describe('label LOD culling, collision and cap', () => {
     const { frames } = settled(records, view(80));
     expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
     expect(alphaOf(frames, 'province')).toBe(0);
+  });
+});
+
+describe('Part 3 label rules (settlement tier, readability floor, importance)', () => {
+  it('settlement labels only appear when deeply zoomed in', () => {
+    const settlement = record({ id: 'village', tier: 'settlement', population: 5_000 });
+    const { frames: far } = settled([settlement], view(200));
+    expect(alphaOf(far, 'village')).toBe(0);
+    const { frames: near } = settled([settlement], view(40));
+    expect(alphaOf(near, 'village')).toBeGreaterThan(0.9);
+  });
+
+  it('a visible label never shrinks below the theme minimum readable size', () => {
+    const tierPx = labels.tiers.settlement.screenPx;
+    expect(tierPx).toBeGreaterThanOrEqual(labels.minReadablePx);
+    for (const tierName of Object.keys(labels.tiers) as (keyof typeof labels.tiers)[]) {
+      expect(labels.tiers[tierName].screenPx).toBeGreaterThanOrEqual(labels.minReadablePx);
+    }
+  });
+
+  it('importance nudges collision priority WITHIN a tier, never across tiers', () => {
+    // Same tier: the more important city wins the overlap.
+    const a = record({ id: 'a', tier: 'settlement', x: 150, z: 100, importance: 1 });
+    const b = record({ id: 'b', tier: 'settlement', x: 151, z: 100, importance: 0 });
+    const { frames } = settled([a, b], view(40));
+    expect(alphaOf(frames, 'a')).toBeGreaterThan(0.9);
+    expect(alphaOf(frames, 'b')).toBe(0);
+    // Cross-tier: the boost can never let a settlement beat a capital.
+    const boosted = record({ id: 'boosted', tier: 'settlement', x: 150, z: 100, importance: 1 });
+    const capital = record({ id: 'capital', tier: 'capital', x: 151, z: 100 });
+    const { frames: cross } = settled([boosted, capital], view(40));
+    expect(alphaOf(cross, 'capital')).toBeGreaterThan(0.9);
+    expect(alphaOf(cross, 'boosted')).toBe(0);
   });
 });

@@ -175,6 +175,7 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
         maxVisible: { type: 'number', min: 1, max: 2000, integer: true },
         collisionPaddingPx: { type: 'number', min: 0, max: 40 },
         labelOffsetPx: { type: 'number', min: 0, max: 80 },
+        minReadablePx: { type: 'number', min: 5, max: 40 },
         tiers: {
           type: 'object',
           allowUnknown: false,
@@ -183,7 +184,8 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             province: LABEL_TIER_SCHEMA,
             capital: LABEL_TIER_SCHEMA,
             majorCity: LABEL_TIER_SCHEMA,
-            city: LABEL_TIER_SCHEMA
+            city: LABEL_TIER_SCHEMA,
+            settlement: LABEL_TIER_SCHEMA
           }
         }
       }
@@ -259,6 +261,8 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
         populationHigh: colorField,
         economyLow: colorField,
         economyHigh: colorField,
+        strategicLow: colorField,
+        strategicHigh: colorField,
         riverStroke: colorField,
         riverOpacity: { type: 'number', min: 0, max: 1 },
         lakeFill: colorField,
@@ -295,7 +299,26 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             base: colorField
           }
         },
-        siteOpacity: { type: 'number', min: 0, max: 1 }
+        siteOpacity: { type: 'number', min: 0, max: 1 },
+        gridColor: colorField,
+        gridOpacity: { type: 'number', min: 0, max: 1 },
+        buildingColors: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            residential: colorField,
+            industrial: colorField,
+            commercial: colorField,
+            government: colorField,
+            hospital: colorField,
+            militaryBase: colorField,
+            airport: colorField,
+            port: colorField,
+            railwayStation: colorField,
+            power: colorField
+          }
+        },
+        buildingOpacity: { type: 'number', min: 0, max: 1 }
       }
     }
   }

@@ -96,7 +96,7 @@ describe('map features generation', () => {
     }
   });
 
-  it('rivers start on land and end at the coast or in an inland lake', () => {
+  it('rivers start on land and end at the coast, a lake, or a parent river', () => {
     expect(features.rivers.length).toBeGreaterThan(0);
     for (const river of features.rivers) {
       expect(river.polyline.length).toBeGreaterThanOrEqual(2);
@@ -104,9 +104,20 @@ describe('map features generation', () => {
       for (const cellIndex of river.cells) {
         expect(features.biomes[cellIndex]).not.toBe('ocean');
       }
-      if (river.mouthCell === null) {
-        // Inland basin: the final cell must be a marked lake cell.
-        expect(features.lakeCells).toContain(river.cells[river.cells.length - 1]);
+      if (river.mouthType === 'lake') {
+        // Inland basin: the mouth cell must belong to a real lake record.
+        const inSomeLake = features.lakes.some((lake) => lake.cells.includes(river.mouthCell as number));
+        expect(inSomeLake).toBe(true);
+      }
+      if (river.mouthType === 'river') {
+        // Tributary: the confluence cell lies on the PARENT's path.
+        const parent = features.rivers.find((candidate) => candidate.id === river.parentRiverId);
+        expect(parent).toBeDefined();
+        expect(parent?.cells.includes(river.mouthCell as number)).toBe(true);
+        // Confluence geometry is continuous: the tributary's last polyline
+        // point IS the parent's point at the confluence cell.
+        const confluenceIndex = parent?.cells.indexOf(river.mouthCell as number) ?? -1;
+        expect(river.polyline[river.polyline.length - 1]).toEqual(parent?.polyline[confluenceIndex]);
       }
     }
   });

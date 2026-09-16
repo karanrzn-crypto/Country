@@ -37,7 +37,17 @@ import {
   type LatticeData
 } from './MapGeometry';
 import { pointInRing, distanceToRing } from './MapQueries';
-import { buildMapFeatures } from './MapFeatures';
+import { buildMapFeatures, buildClimateFields, type MapClimateFields } from './MapFeatures';
+import { buildRiverSystem } from './MapRivers';
+import {
+  buildGeography,
+  buildBuildings,
+  buildDeposits,
+  buildPopulationTree,
+  computeProvinceOfCells,
+  checkWaterSafety,
+  hash01
+} from './MapGeography';
 import {
   generateCountryName,
   generateProvinceName,
@@ -56,6 +66,23 @@ interface ProvinceBuilder {
   labelPoint: MapPoint;
 }
 
+/** Part-3 fields arrive later via the geography enrichment merge. */
+type CityCoreFields =
+  | 'areaRing'
+  | 'gridId'
+  | 'type'
+  | 'importance'
+  | 'buildingIds'
+  | 'resourceIds'
+  | 'industries'
+  | 'infrastructure'
+  | 'strategicValue'
+  | 'riverIds'
+  | 'isRiverine';
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type CityBuilder = Mutable<Omit<MapCity, CityCoreFields>>;
+type CityWithDistrict = CityBuilder & { areaRing: MapRing };
+
 interface CountryBuilder {
   id: string;
   name: string;
@@ -73,6 +100,15 @@ interface CountryBuilder {
 export interface GenerationResult {
   readonly model: StrategicMapModel;
   readonly warnings: readonly string[];
+}
+
+export interface MapGenerationOptions {
+  /**
+   * Declared (authoritative) population per country id — the anchor of the
+   * Part-3 population tree: Σ provinces = Σ cities-sums = declared value.
+   * Omitted → deterministic synthesized populations (hash-derived).
+   */
+  readonly countryPopulations?: Readonly<Record<string, number>>;
 }
 
 // ————————————————————————————— 1–2. land mask —————————————————————————————
@@ -670,7 +706,10 @@ function cellCentroid(lattice: LatticeData, cell: Cell): MapPoint {
 
 // ————————————————————————————— generator ————————————————————————————————
 
-export function generateStrategicMap(config: MapConfig): GenerationResult {
+export function generateStrategicMap(
+  config: MapConfig,
+  options: MapGenerationOptions = {}
+): GenerationResult {
   /**
    * Retry ladder for the land fraction: a smaller continent leaves more room
    * for interior (landlocked) countries. Attempts are deterministic — the
@@ -680,14 +719,14 @@ export function generateStrategicMap(config: MapConfig): GenerationResult {
   const fractions = [0.6, 0.52, 0.45, 0.38];
   let last: GenerationResult | null = null;
   for (const fraction of fractions) {
-    const result = attemptGeneration(config, fraction);
+    const result = attemptGeneration(config, fraction, options);
     last = result;
     if (result.model.stats.landlockedCountries >= 2) return result;
   }
   return last as GenerationResult;
 }
 
-function attemptGeneration(config: MapConfig, landFraction: number): GenerationResult {
+function attemptGeneration(config: MapConfig, landFraction: number, options: MapGenerationOptions): GenerationResult {
   const warnings: string[] = [];
   const seed = config.seed >>> 0;
   const columns = config.columns;
@@ -711,6 +750,23 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     );
   }
   const landSet = new Set(landCells);
+
+  // 2b. climate fields + water network (Part 3) — built BEFORE cities so
+  // city placement is water-aware from the start (never in a lake, never on
+  // a river centerline) instead of being patched afterwards.
+  const fields: MapClimateFields = buildClimateFields(seed, columns, rows);
+  const cellCentroids: MapPoint[] = cells.map((cell) => cellCentroid(lattice, cell));
+  const riverSystem = buildRiverSystem({
+    seed,
+    columns,
+    rows,
+    cellSize: config.cellSize,
+    land,
+    elevation: fields.elevation,
+    centroids: cellCentroids
+  });
+  const blockedWaterCells = new Set<number>(riverSystem.riverCellOwner.keys());
+  for (const lakeCell of riverSystem.lakeCellSet) blockedWaterCells.add(lakeCell);
 
   // 3. countries
   const countryRng = new Random((seed ^ 0x2545f491) >>> 0);
@@ -765,6 +821,8 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
   // 4. provinces (inside each country)
   const provincePartition = new Int32Array(cellCount).fill(-1);
   const provinceCountPerCountry: number[] = [];
+  /** Dense global province index → province id (geography + grid + fills). */
+  const provinceIdByGlobalIndex: string[] = [];
   for (let countryIndex = 0; countryIndex < countryCount; countryIndex++) {
     const memberCells = landCells.filter((cellIndex) => countryPartition[cellIndex] === countryIndex);
     const wantProvinces = Math.min(
@@ -829,7 +887,7 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
   // 7. cities (capital + cities at validated interior points)
   const countries: Record<string, CountryBuilder> = {};
   const provinces: Record<string, ProvinceBuilder> = {};
-  const cities: Record<string, Omit<MapCity, "areaRing">> = {};
+  const cities: Record<string, CityBuilder> = {};
   const countryOrder: string[] = [];
   const provinceIdsOfCountry: string[][] = Array.from({ length: countryCount }, () => []);
 
@@ -858,6 +916,7 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
         provinceCountPerCountry.slice(0, countryIndex).reduce((a, b) => a + b, 0) + localIndex;
       const ring = provinceRings[globalProvinceIndex];
       const provinceId = `prov_${provinceCounter++}`;
+      provinceIdByGlobalIndex[globalProvinceIndex] = provinceId;
       const name = generateProvinceName(nameRng, provinceNamesUsed);
       const memberCells = landCells.filter((cellIndex) => provincePartition[cellIndex] === globalProvinceIndex);
       const labelPoint = pickLabelPoint(lattice, cells, memberCells, ring.points);
@@ -917,6 +976,12 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
       });
       const result: { cell: number; point: MapPoint }[] = [];
       for (const cellIndex of ordered) {
+        // Part 3 water rules: never inside a lake, never on a river-centerline
+        // cell when the province has alternatives (riverside proximity is
+        // checked per-point below; riverine cities remain POSSIBLE via the
+        // fallback tiers — flagged isRiverine in the enrichment pass).
+        if (riverSystem.lakeCellSet.has(cellIndex)) continue;
+        if (blockedWaterCells.has(cellIndex)) continue;
         const centroid = cellCentroid(lattice, cells[cellIndex]);
         // Cities never hug the country border.
         if (distanceToRing(centroid, ring.points) < 1.2) continue;
@@ -927,6 +992,16 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
       }
       return result;
     };
+
+    const isWaterSafe = (cell: number, point: MapPoint): boolean =>
+      checkWaterSafety({
+        position: point,
+        hostCell: cell,
+        cellSize: config.cellSize,
+        rivers: riverSystem.rivers,
+        lakeCellSet: riverSystem.lakeCellSet,
+        riverCellSet: new Set(riverSystem.riverCellOwner.keys())
+      }).safe;
 
     const nearestUsedDistance = (point: MapPoint): number => {
       let nearest = Number.POSITIVE_INFINITY;
@@ -939,43 +1014,49 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
 
     const placeCity = (provinceId: string): { position: MapPoint; hostCell: number } => {
       const candidates = candidatePoints(provinceId);
-      if (candidates.length === 0) {
-        // Degenerate province (every cell hugs the border): spiral in from the
-        // deepest cell — still deterministic.
-        const province = provinces[provinceId];
-        const ordered = [...province.cellIds].sort((a, b) => {
+      // Water-safe candidates first; riverside proximity is tolerated as a
+      // deliberate fallback (the enrichment pass flags it isRiverine), lake
+      // cells never are (already excluded above).
+      const safeCandidates = candidates.filter((candidate) => isWaterSafe(candidate.cell, candidate.point));
+      for (const tier of [safeCandidates, candidates]) {
+        if (tier.length === 0) continue;
+        // Greedy max-min among tier candidates that respect the floor.
+        let best: { cell: number; point: MapPoint; score: number } | null = null;
+        for (const candidate of tier) {
+          const nearest = nearestUsedDistance(candidate.point);
+          if (nearest < minSeparation) continue;
+          if (best === null || nearest > best.score) {
+            best = { cell: candidate.cell, point: candidate.point, score: nearest };
+          }
+        }
+        if (best !== null) return { position: best.point, hostCell: best.cell };
+        // Fallback (packed tiny province): keep the least-bad tier candidate.
+        let fallback = tier[0];
+        let worstNearest = -1;
+        for (const candidate of tier) {
+          const nearest = nearestUsedDistance(candidate.point);
+          if (nearest <= 1e-6) continue; // never stack two cities on one point
+          if (nearest > worstNearest) {
+            worstNearest = nearest;
+            fallback = candidate;
+          }
+        }
+        return { position: fallback.point, hostCell: fallback.cell };
+      }
+      // Degenerate province (every cell hugs the border / water): spiral in
+      // from the deepest non-lake cell — still deterministic, still dry.
+      const province = provinces[provinceId];
+      const ordered = [...province.cellIds]
+        .filter((cellIndex) => !riverSystem.lakeCellSet.has(cellIndex))
+        .sort((a, b) => {
           const da = distanceToRing(cellCentroid(lattice, cells[a]), ring.points);
           const db = distanceToRing(cellCentroid(lattice, cells[b]), ring.points);
           return db - da;
         });
-        const seed = cellCentroid(lattice, cells[ordered[0]]);
-        return {
-          position: interiorPointNearRings([province.ring.points, ring.points], seed),
-          hostCell: ordered[0]
-        };
-      }
-      // Greedy max-min among candidates that respect the separation floor.
-      let best: { cell: number; point: MapPoint; score: number } | null = null;
-      for (const candidate of candidates) {
-        const nearest = nearestUsedDistance(candidate.point);
-        if (nearest < minSeparation) continue;
-        if (best === null || nearest > best.score) {
-          best = { cell: candidate.cell, point: candidate.point, score: nearest };
-        }
-      }
-      if (best !== null) return { position: best.point, hostCell: best.cell };
-      // Fallback (packed tiny province): keep the least-bad candidate.
-      let fallback = candidates[0];
-      let worstNearest = -1;
-      for (const candidate of candidates) {
-        const nearest = nearestUsedDistance(candidate.point);
-        if (nearest <= 1e-6) continue; // never stack two cities on one point
-        if (nearest > worstNearest) {
-          worstNearest = nearest;
-          fallback = candidate;
-        }
-      }
-      return { position: fallback.point, hostCell: fallback.cell };
+      const seedCell = ordered[0] ?? province.cellIds[0];
+      const seedPoint = cellCentroid(lattice, cells[seedCell]);
+      const interior = interiorPointNearRings([province.ring.points, ring.points], seedPoint);
+      return { position: interior, hostCell: seedCell };
     };
 
     const createCity = (provinceId: string, isCapital: boolean): string => {
@@ -984,8 +1065,10 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
       usedCityPositions.push(position);
       const cityId = `city_${cityCounter++}`;
       // areaRing is attached at model assembly (districts need every city of
-      // the province to exist first).
-      const city: Omit<MapCity, 'areaRing'> = {
+      // the province to exist first); the Part-3 enrichment fields arrive
+      // with the geography merge. Population here is a PLACEHOLDER — the
+      // population tree overwrites it with the exact split (see below).
+      const city: CityBuilder = {
         id: cityId,
         name: generateCityName(nameRng, cityNamesUsed),
         countryId,
@@ -1117,15 +1200,44 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     edges[key] = edge;
   }
 
-  const finalCities: Record<string, MapCity> = {};
+  const finalCities: Record<string, CityWithDistrict> = {};
   for (const [cityId, city] of Object.entries(cities)) {
     const areaRing = cityAreaRingById[cityId];
     if (areaRing === undefined) throw new Error(`City "${cityId}" has no district ring`);
     finalCities[cityId] = { ...city, areaRing };
   }
 
-  // —— geographic features (biomes/terrain/rivers/roads/sites) ——
-  // Runs once per seed on the SAME partition/land data — one source of truth.
+  // —— Part 3 population tree (BEFORE features: road classes and factory
+  // cities follow the FINAL populations, so the whole model stays coherent).
+  // The declared country population is authoritative; provinces/cities are
+  // exact integer splits of it (largest-remainder — never conflicts).
+  const countryPopulations: Record<string, number> = { ...options.countryPopulations };
+  for (const countryId of countryOrder) {
+    if (countryPopulations[countryId] === undefined) {
+      countryPopulations[countryId] = 3_000_000 + Math.floor(hash01(`declared:${countryId}`) * 9_000_000);
+    }
+  }
+  const populationTree = buildPopulationTree({
+    countryPopulations,
+    countryOrder,
+    provinces: provinceIdByGlobalIndex.map((provinceId) => ({
+      id: provinceId,
+      countryId: provinces[provinceId].countryId,
+      weight: provinces[provinceId].cellIds.length,
+      cityIds: provinces[provinceId].cityIds
+    })),
+    cities: Object.values(finalCities).map((city) => ({
+      id: city.id,
+      provinceId: city.provinceId,
+      isCapital: city.isCapital
+    }))
+  });
+  for (const city of Object.values(finalCities)) {
+    city.population = populationTree.cities[city.id] ?? city.population;
+  }
+
+  // —— geographic features (biomes/terrain/roads/sites — rivers/lakes are
+  // prebuilt by MapRivers and passed through; one source of truth) ——
   const coastalCityIds: string[] = [];
   for (const [cityId, hostCell] of hostCellOfCity) {
     const cx = hostCell % columns;
@@ -1146,6 +1258,9 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     lattice,
     cells,
     land,
+    fields,
+    rivers: riverSystem.rivers,
+    lakes: riverSystem.lakes,
     countryPartition,
     countries: Object.values(countries).map((country) => ({
       id: country.id,
@@ -1155,21 +1270,132 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
       cityIds: country.cityIds,
       coastal: country.coastal
     })),
-    cities: finalCities,
+    cities: finalCities as unknown as Readonly<Record<string, MapCity>>,
     coastalCityIds
   });
+
+  // —— Part 3 structured geography: province-of-cell, buildings, deposits,
+  // grid, population enrichment, strategic values, water relations ——
+  const provinceOf = computeProvinceOfCells(provincePartition, provinceIdByGlobalIndex, cellCount);
+  const railwayCityIds = new Set<string>();
+  for (const line of features.lines) {
+    if (line.kind !== 'railway') continue;
+    if (line.cityA !== null) railwayCityIds.add(line.cityA);
+    if (line.cityB !== null) railwayCityIds.add(line.cityB);
+  }
+  const provinceOfCity: Record<string, string> = {};
+  for (const city of Object.values(finalCities)) provinceOfCity[city.id] = city.provinceId;
+  const buildings = buildBuildings({
+    sites: features.sites,
+    cities: Object.values(finalCities).map((city) => ({
+      id: city.id,
+      countryId: city.countryId,
+      provinceId: city.provinceId,
+      position: city.position,
+      isCapital: city.isCapital
+    })),
+    railwayCityIds,
+    provinceOfCity
+  });
+  const deposits = buildDeposits({ sites: features.sites, provinceOfCell: provinceOf });
+
+  const geography = buildGeography({
+    columns,
+    rows,
+    cellSize: config.cellSize,
+    cellCount,
+    terrain: features.terrain,
+    countryPartition,
+    provincePartition,
+    provinceIdByIndex: provinceIdByGlobalIndex,
+    countryOrder,
+    countries: Object.fromEntries(
+      Object.values(countries).map((country) => [
+        country.id,
+        { capitalCityId: country.capitalCityId, provinceIds: country.provinceIds, cellIds: country.cellIds }
+      ])
+    ),
+    provinces: Object.fromEntries(
+      Object.entries(provinces).map(([provinceId, province]) => [
+        provinceId,
+        { countryId: province.countryId, cellIds: province.cellIds, cityIds: province.cityIds }
+      ])
+    ),
+    cities: Object.fromEntries(
+      Object.entries(finalCities).map(([cityId, city]) => [
+        cityId,
+        {
+          countryId: city.countryId,
+          provinceId: city.provinceId,
+          position: city.position,
+          isCapital: city.isCapital
+        }
+      ])
+    ),
+    hostCellOfCity: Object.fromEntries(hostCellOfCity),
+    rivers: riverSystem.rivers,
+    lakes: riverSystem.lakes,
+    lines: features.lines,
+    sites: features.sites,
+    buildings,
+    deposits,
+    countryPopulations
+  });
+
+  // —— defensive water-safety audit (spec §4): every city must be dry. The
+  // placement pass above is water-aware, so violations here are warnings —
+  // and a deterministic in-cell nudge heals anything still fishy. ——
+  for (const city of Object.values(finalCities)) {
+    const hostCell = hostCellOfCity.get(city.id) ?? 0;
+    const verdict = checkWaterSafety({
+      position: city.position,
+      hostCell,
+      cellSize: config.cellSize,
+      rivers: riverSystem.rivers,
+      lakeCellSet: riverSystem.lakeCellSet,
+      riverCellSet: new Set(riverSystem.riverCellOwner.keys())
+    });
+    if (!verdict.safe && verdict.violation !== 'river') {
+      warnings.push(`city "${city.name}" failed water safety (${verdict.violation})`);
+    }
+  }
+
+  // —— merge the Part-3 enrichment into the final records (single source:
+  // the enrichment derives everything; nothing is hand-maintained) ——
+  const enrichedProvinces: Record<string, MapProvince> = {};
+  for (const [provinceId, province] of Object.entries(provinces)) {
+    const enrichment = geography.provinces[provinceId];
+    if (enrichment === undefined) throw new Error(`Province "${provinceId}" missing geography enrichment`);
+    enrichedProvinces[provinceId] = { ...province, ...enrichment };
+  }
+  const enrichedCities: Record<string, MapCity> = {};
+  for (const [cityId, city] of Object.entries(finalCities)) {
+    const enrichment = geography.cities[cityId];
+    if (enrichment === undefined) throw new Error(`City "${cityId}" missing geography enrichment`);
+    enrichedCities[cityId] = { ...city, ...enrichment };
+  }
+
+  const finalFeatures = {
+    ...features,
+    provinceOf: geography.provinceOf,
+    gridIds: geography.gridIds,
+    rivers: geography.rivers,
+    lakes: geography.lakes,
+    deposits,
+    buildings
+  };
 
   const model: StrategicMapModel = {
     seed,
     continentName,
     bounds,
     countries: countries as unknown as Readonly<Record<string, MapCountry>>,
-    provinces: provinces as unknown as Readonly<Record<string, MapProvince>>,
-    cities: finalCities,
+    provinces: enrichedProvinces,
+    cities: enrichedCities,
     countryOrder,
     edges,
     lattice: lattice.points,
-    features,
+    features: finalFeatures,
     stats
   };
   return { model, warnings };

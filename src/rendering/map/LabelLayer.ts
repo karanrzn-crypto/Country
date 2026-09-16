@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import type { MapTheme } from './MapTheme';
 import { updateLabels } from './LabelLod';
-import type { LabelAlphaStore, LabelFrame, LabelRecord, LabelView } from './LabelLod';
+import type { LabelAlphaStore, LabelFrame, LabelRecord, LabelTier, LabelView } from './LabelLod';
 
 /**
  * LabelLayer — world-anchored text labels (canvas → sprite textures).
@@ -35,7 +35,6 @@ export class LabelLayer {
     this.theme = theme;
     this.measureCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 
-    const majorMinPopulation = theme.labels.tiers.majorCity.minPopulation;
     let recordId = 0;
 
     const push = (record: Omit<LabelRecord, 'id'>, text: string): void => {
@@ -53,6 +52,7 @@ export class LabelLayer {
           x: country.labelPoint.x,
           z: country.labelPoint.z,
           population: 0,
+          importance: 0,
           aspect: this.measureAspect(text, true),
           offsetBelow: false
         },
@@ -67,6 +67,7 @@ export class LabelLayer {
           x: province.labelPoint.x,
           z: province.labelPoint.z,
           population: 0,
+          importance: 0,
           aspect: this.measureAspect(province.name, false),
           offsetBelow: false
         },
@@ -75,12 +76,24 @@ export class LabelLayer {
     }
 
     for (const city of Object.values(model.cities)) {
+      // Part 3: the label tier follows the city TYPE (capital / major /
+      // medium → city / small+settlement → settlement) so unimportant names
+      // only appear when the player actually zooms in — and city importance
+      // nudges collision priority within the tier.
+      const tier: LabelTier = city.isCapital
+        ? 'capital'
+        : city.type === 'major'
+          ? 'majorCity'
+          : city.type === 'medium'
+            ? 'city'
+            : 'settlement';
       push(
         {
-          tier: city.isCapital ? 'capital' : city.population >= majorMinPopulation ? 'majorCity' : 'city',
+          tier,
           x: city.position.x,
           z: city.position.z,
           population: city.population,
+          importance: city.importance,
           aspect: this.measureAspect(city.name, false),
           offsetBelow: true
         },

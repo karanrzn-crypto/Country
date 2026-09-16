@@ -20,7 +20,7 @@
 
 import type { MapLabelsThemeData, MapLabelTierData } from '../../data/types';
 
-export type LabelTier = 'country' | 'province' | 'capital' | 'majorCity' | 'city';
+export type LabelTier = 'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement';
 
 /** Static description of one label (built once — no per-frame allocation). */
 export interface LabelRecord {
@@ -30,6 +30,8 @@ export interface LabelRecord {
   readonly z: number;
   /** City population (0 for area labels) — collision tie-breaker. */
   readonly population: number;
+  /** 0..1 city importance — nudges priority WITHIN a tier (never across). */
+  readonly importance: number;
   /** Text width / height ratio (for the screen-space collision box). */
   readonly aspect: number;
   /** Area labels center on their point; city labels sit below their marker. */
@@ -81,6 +83,24 @@ function tierOf(theme: MapLabelsThemeData, tier: LabelTier): MapLabelTierData {
 }
 
 /**
+ * Effective screen size of a label: its tier size, never below the theme's
+ * minimum readable size (a visible label is ALWAYS legible — spec §12).
+ */
+export function effectiveScreenPx(tier: MapLabelTierData, minReadablePx: number): number {
+  return Math.max(tier.screenPx, minReadablePx);
+}
+
+/**
+ * Collision/cap priority: the tier defines the band; city importance
+ * (0..1) adds up to IMPORTANCE_BOOST within it — a more important city
+ * wins overlaps against equal-tier neighbors, never against a higher tier.
+ */
+export const IMPORTANCE_BOOST = 8;
+export function labelPriority(tier: MapLabelTierData, importance: number): number {
+  return tier.priority + Math.round(Math.max(0, Math.min(1, importance)) * IMPORTANCE_BOOST);
+}
+
+/**
  * Runs one label LOD pass. `alphas` is mutated with the eased values so the
  * caller can persist them between frames (temporal cross-fading).
  */
@@ -125,7 +145,7 @@ export function updateLabels(
 
   for (const record of records) {
     let target = tierAlpha(tierOf(theme, record.tier), view.viewHeight, fadeSpan);
-    if (record.tier === 'majorCity' || record.tier === 'city') {
+    if (record.tier === 'majorCity' || record.tier === 'city' || record.tier === 'settlement') {
       const minPopulation = tierOf(theme, record.tier).minPopulation;
       if (record.population < minPopulation) target = 0;
     }
@@ -147,7 +167,7 @@ export function updateLabels(
       target,
       screenX: worldToScreenX(record.x),
       screenY: worldToScreenY(record.z),
-      priority: tierOf(theme, record.tier).priority
+      priority: labelPriority(tierOf(theme, record.tier), record.importance)
     });
   }
 
@@ -171,7 +191,7 @@ export function updateLabels(
         const box = labelBox(
           candidate.screenX,
           candidate.screenY,
-          tier.screenPx,
+          effectiveScreenPx(tier, theme.minReadablePx),
           candidate.record.aspect,
           candidate.record.offsetBelow,
           theme.labelOffsetPx,
@@ -208,7 +228,7 @@ export function updateLabels(
         record: candidate.record,
         alpha: 0,
         visible: false,
-        scaleWorld: tierOf(theme, candidate.record.tier).screenPx * worldPerPx,
+        scaleWorld: scaledScreenPx(theme, candidate.record) * worldPerPx,
         screenX: candidate.screenX,
         screenY: candidate.screenY
       });
@@ -218,13 +238,18 @@ export function updateLabels(
       record: candidate.record,
       alpha: finalAlpha,
       visible: true,
-      scaleWorld: tierOf(theme, candidate.record.tier).screenPx * worldPerPx,
+      scaleWorld: scaledScreenPx(theme, candidate.record) * worldPerPx,
       screenX: candidate.screenX,
       screenY: candidate.screenY
     });
   }
 
   return frames;
+}
+
+/** Effective (floored) screen-pixel height for one record. */
+function scaledScreenPx(theme: MapLabelsThemeData, record: LabelRecord): number {
+  return effectiveScreenPx(tierOf(theme, record.tier), theme.minReadablePx);
 }
 
 /** Screen-space AABB of a label (px), including collision padding. */

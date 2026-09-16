@@ -99,13 +99,18 @@ describe('MapUI country-select screen', () => {
 
   it('layer toggles exist for every registered layer with labels', () => {
     const toggles = findAll(adapter.rootElement, 'map-layer-toggle');
-    // Registry order — all 22 layers have a button.
-    expect(toggles.length).toBe(22);
+    // Registry order — all 27 layers have a button.
+    expect(toggles.length).toBe(27);
     const texts = toggles.map((button) => button.text);
     expect(texts).toContain('Biomes');
     expect(texts).toContain('Terrain');
     expect(texts).toContain('Roads');
     expect(texts).toContain('Rivers');
+    expect(texts).toContain('Lakes / Water');
+    expect(texts).toContain('Geographic Grid');
+    expect(texts).toContain('Airports');
+    expect(texts).toContain('Buildings');
+    expect(texts).toContain('Strategic Value');
     expect(texts).toContain('Industry');
     expect(texts).toContain('Resources');
     expect(texts).toContain('Ports');

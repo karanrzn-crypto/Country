@@ -139,6 +139,66 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
     game2.dispose();
   });
 
+  it('Part 3: save/load preserves geographic layer toggles + regenerated model without loss', () => {
+    const seed = 2024;
+    const storage = new MemorySaveStorage();
+    const game = new Game({ seed, saveStorage: storage });
+    game.init();
+
+    // Toggle a spread of Part-3 layers to NON-default values.
+    game.mapSetLayerVisible('grid', true);
+    game.mapSetLayerVisible('resources', true);
+    game.mapSetLayerVisible('roads', true);
+    game.mapSetLayerVisible('railways', true);
+    game.mapSetLayerVisible('population', true);
+    game.mapSetLayerVisible('biomes', true); // exclusive group: terrain forced off
+
+    // Select a country capital so selection survival is exercised too.
+    const countryId = game.strategicMap.countryOrder[0];
+    const capitalId = game.strategicMap.countries[countryId].capitalCityId;
+    game.mapSelect({ countryId, cityId: capitalId });
+    game.saveToSlot('part3-slot');
+
+    // Same seed → the load regenerates the SAME deterministic geography.
+    const game2 = new Game({ seed, saveStorage: storage });
+    game2.init();
+    game2.loadFromSlot('part3-slot');
+
+    // 1) Every layer toggle survives the roundtrip exactly.
+    const savedVisibility = game.gameState.map.layerVisibility;
+    for (const layer of Object.keys(savedVisibility) as (keyof typeof savedVisibility)[]) {
+      expect(game2.gameState.map.layerVisibility[layer]).toBe(savedVisibility[layer]);
+    }
+    // 2) The regenerated Part-3 model is IDENTICAL to the saved one.
+    expect(stableStringify(game2.strategicMap)).toBe(stableStringify(game.strategicMap));
+    // 3) Selection survives (ids exist in the same-seed model).
+    expect(game2.gameState.map.selectedCountryId).toBe(countryId);
+    expect(game2.gameState.map.selectedCityId).toBe(capitalId);
+    // 4) Population tree invariants hold on the LOADED model:
+    //    Σ city populations = province population, and Σ provinces = declared.
+    const model = game2.strategicMap;
+    let checkedProvinces = 0;
+    for (const province of Object.values(model.provinces)) {
+      const citySum = province.cityIds.reduce((sum, id) => sum + model.cities[id].population, 0);
+      expect(citySum).toBe(province.population);
+      checkedProvinces++;
+    }
+    expect(checkedProvinces).toBeGreaterThan(0);
+    const declared = game2.gameState.countries.countries[countryId].population;
+    const provinceSum = model.countries[countryId].provinceIds.reduce(
+      (sum, id) => sum + model.provinces[id].population,
+      0
+    );
+    expect(provinceSum).toBe(declared);
+    // 5) Part-3 feature payload is present after load (no silent empty fields).
+    expect(model.features.gridIds.filter((id) => id !== null).length).toBeGreaterThan(0);
+    expect(model.features.rivers.length).toBeGreaterThan(0);
+    expect(model.features.deposits.length).toBeGreaterThan(0);
+    expect(model.features.buildings.length).toBeGreaterThan(0);
+    game.dispose();
+    game2.dispose();
+  });
+
   it('heals map selections that reference ids missing from the live map (generation drift)', () => {
     const storage = new MemorySaveStorage();
     const game = new Game({ seed: 4242, saveStorage: storage });
