@@ -8,9 +8,8 @@ import { CountryLayer } from './CountryLayer';
 import { BorderLayer } from './BorderLayer';
 import { CityLayer } from './CityLayer';
 import { LabelLayer } from './LabelLayer';
+import { SurfaceLayer, type SurfaceMode } from './MapSurface';
 import {
-  createBiomeFillLayer,
-  createTerrainFillLayer,
   createPopulationFillLayer,
   createEconomyFillLayer,
   createRoadsLayer,
@@ -48,6 +47,7 @@ export class StrategicMapRenderer {
   private readonly borderLayer: BorderLayer;
   private readonly cityLayer: CityLayer;
   private readonly labelLayer: LabelLayer;
+  private readonly surfaceLayer: SurfaceLayer;
   private readonly fillLayers = new Map<MapLayerId, CellFillLayer>();
   private readonly lazyLayers = new Map<
     MapLayerId,
@@ -93,8 +93,11 @@ export class StrategicMapRenderer {
     this.disposables.push(this.countryLayer, this.borderLayer, this.cityLayer, this.labelLayer);
 
     // —— Part-3 information layers (lazy, data-driven colors from the theme) ——
-    const biomeLayer = createBiomeFillLayer(this.columns, theme);
-    const terrainLayer = createTerrainFillLayer(this.columns, theme);
+    // The land SURFACE (biomes and/or terrain) is ONE composited mesh whose
+    // mode follows the two layer flags — enabling one never destroys the
+    // other, and enabling both blends biome hue with relief shading.
+    const surfaceLayer = new SurfaceLayer(this.columns);
+    this.surfaceLayer = surfaceLayer;
     const populationLayer = createPopulationFillLayer(this.columns, theme);
     const economyLayer = createEconomyFillLayer(this.columns, theme, (countryId) => {
       const country = context.state.countries.countries[countryId];
@@ -110,16 +113,20 @@ export class StrategicMapRenderer {
     const militaryLayer = new SiteLayer(['base', 'airbase'], 'pentagon', theme);
     // Ports & Maritime is ONE user-facing layer: port markers + sea routes.
     portsLayer.group.add(seaRoutesLayer.group);
-    this.fillLayers.set('biomes', biomeLayer);
-    this.fillLayers.set('terrain', terrainLayer);
     this.fillLayers.set('population', populationLayer);
     this.fillLayers.set('economy', economyLayer);
     const lazyEntries: readonly (readonly [
       MapLayerId,
       { ensureBuilt(model: StrategicMapModel): void; dispose(): void }
     ])[] = [
-      ['biomes', biomeLayer],
-      ['terrain', terrainLayer],
+      ['biomes', {
+        ensureBuilt: (model) => surfaceLayer.ensureBuilt(model, theme),
+        dispose: () => surfaceLayer.dispose()
+      }],
+      ['terrain', {
+        ensureBuilt: (model) => surfaceLayer.ensureBuilt(model, theme),
+        dispose: () => surfaceLayer.dispose()
+      }],
       ['population', populationLayer],
       ['economy', economyLayer],
       ['rivers', riverLayer],
@@ -171,12 +178,14 @@ export class StrategicMapRenderer {
 
     // Fixed layer order (bottom → top) — borders/cities/labels can never be
     // hidden by fills because they sit above them in both order and height.
+    // The biomes and terrain layer groups are THE SAME SurfaceLayer group:
+    // one composited land-surface mesh serves both (and their combination).
     const groups: Record<MapLayerId, THREE.Group> = {
       ocean: new THREE.Group(),
       land: this.countryLayer.landGroup,
       countries: this.countryLayer.countryGroup,
-      biomes: biomeLayer.group,
-      terrain: terrainLayer.group,
+      biomes: surfaceLayer.group,
+      terrain: surfaceLayer.group,
       rivers: riverLayer.group,
       provinceBorders: this.borderLayer.provinceGroup,
       cityAreas: this.cityLayer.cityAreasGroup,
@@ -223,7 +232,9 @@ export class StrategicMapRenderer {
     });
 
     // 2. Layer visibility toggles — lazy layers build on their FIRST show.
+    //    (biomes/terrain share ONE surface group; handled after the loop.)
     for (const [layerId, group] of this.layerGroups) {
+      if (layerId === 'biomes' || layerId === 'terrain') continue;
       const visible = map.layerVisibility[layerId] !== false;
       if (visible && this.lazyLayers.has(layerId)) {
         const layer = this.lazyLayers.get(layerId);
@@ -236,6 +247,28 @@ export class StrategicMapRenderer {
         }
       }
       group.visible = visible;
+    }
+
+    // 2b. The composited land surface: mode follows BOTH layer flags so the
+    // two layers combine instead of overwriting each other. The mesh rebuilds
+    // ONLY when the contributing set changes (SurfaceLayer checks internally).
+    const biomesOn = map.layerVisibility.biomes === true;
+    const terrainOn = map.layerVisibility.terrain === true;
+    const mode: SurfaceMode = biomesOn && terrainOn
+      ? 'biomes+terrain'
+      : biomesOn
+        ? 'biomes'
+        : terrainOn
+          ? 'terrain'
+          : 'political';
+    const surfaceGroup = this.layerGroups.get('biomes');
+    if (surfaceGroup !== undefined) {
+      surfaceGroup.visible = biomesOn || terrainOn;
+      this.surfaceLayer.setMode(mode);
+      if (surfaceGroup.visible) {
+        const layer = this.lazyLayers.get(biomesOn ? 'biomes' : 'terrain');
+        if (layer !== undefined) layer.ensureBuilt(this.model);
+      }
     }
 
     // 3. Selection (country highlight, city ring, border emphasis) + the

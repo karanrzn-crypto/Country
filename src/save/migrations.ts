@@ -93,6 +93,31 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       clone.state.player.countryConfirmed = true;
       return clone;
     }
+  },
+  {
+    // v4 → v5: the clock became MINUTE-resolution (time v2). Pre-v5 saves
+    // store runtime.tick in 15-minute ticks (hoursPerTick 0.25); v5+ stores
+    // 1-minute ticks, so the saved instant must scale by ×15 to preserve the
+    // exact campaign moment across the upgrade.
+    from: 4,
+    to: 5,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v4→v5: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        runtime?: { tick?: unknown };
+      };
+      const tick = clone.runtime?.tick;
+      if (typeof tick !== 'number' || !Number.isFinite(tick) || tick < 0) {
+        throw new SaveError('Migration v4→v5: save has no valid runtime.tick');
+      }
+      if (clone.runtime === undefined) {
+        throw new SaveError('Migration v4→v5: save has no runtime object');
+      }
+      (clone.runtime as { tick: number }).tick = Math.floor(tick * 15);
+      return clone;
+    }
   }
 ];
 

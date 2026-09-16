@@ -134,8 +134,21 @@ export type BiomeId =
   | 'drylands'
   | 'jungle';
 
-/** Terrain class per cell derived from elevation quantiles. */
-export type TerrainId = 'mountain' | 'hills' | 'plains' | 'valley';
+/**
+ * Terrain class per cell — a data-driven description of the land's SHAPE
+ * (elevation band + local ruggedness), independent from the biome layer so
+ * the two can be toggled and combined freely (mountain+forest, plains+
+ * grassland, lowland+wetland …). `plateau` marks elevated-but-flat ground;
+ * `highMountain` the distinct highest, snow-prone band.
+ */
+export type TerrainId =
+  | 'lowland'
+  | 'valley'
+  | 'plains'
+  | 'plateau'
+  | 'hills'
+  | 'mountain'
+  | 'highMountain';
 
 /** A river: seeded at a high cell, descending to a coast or an inland basin. */
 export interface MapRiver {

@@ -84,4 +84,53 @@ describe('Game clock: pause / resume / speed steps', () => {
     expect(game.gameTime.isPaused).toBe(false);
     game.dispose();
   });
+
+  it('simulated time steps MINUTE by MINUTE with exact hour/day rollover', () => {
+    const game = createTestGame({ seed: 77 });
+    game.runTicks(61); // 61 game-minutes after 2030-01-01 00:00
+    const date = game.gameTime.date;
+    expect(date.hour).toBe(1);
+    expect(date.minute).toBe(1);
+    expect(date.day).toBe(1);
+    // Run to exactly midnight: 24 h = 1440 min → day 2, 00:00.
+    game.runTicks(1440 - 61);
+    const midnight = game.gameTime.date;
+    expect(midnight.day).toBe(2);
+    expect(midnight.hour).toBe(0);
+    expect(midnight.minute).toBe(0);
+    game.dispose();
+  });
+
+  it('speed multiplies the RATE of simulated time (10× ≈ 10× the game-minutes)', () => {
+    const frames = 240;
+    const slow = createTestGame({ seed: 77 });
+    slow.runFrames(frames);
+    const slowMinutes = slow.gameTime.elapsedMinutes;
+    slow.dispose();
+
+    const fast = createTestGame({ seed: 77 });
+    fast.gameTime.setSpeedStep(3); // ×10
+    fast.runFrames(frames);
+    const fastMinutes = fast.gameTime.elapsedMinutes;
+    fast.dispose();
+
+    // The clock itself only ever advances in whole game-minutes; the step
+    // count scales with speed, so 10× must pass ~10× the simulated time.
+    expect(fastMinutes).toBeGreaterThan(slowMinutes * 5);
+    expect(fastMinutes).toBeLessThanOrEqual(slowMinutes * 11);
+  });
+
+  it('at 10× the date visibly rolls over days (real fast-forward, not minute-spin)', () => {
+    const game = createTestGame({ seed: 77 });
+    game.gameTime.setSpeedStep(3); // ×10
+    // 240 frames × 1/60 s × 10× × 30 Hz = 1200 game-minutes = 20 game-hours…  plus slack.
+    game.runFrames(480);
+    const elapsedDays = Math.floor(game.gameTime.elapsedMinutes / (24 * 60));
+    expect(elapsedDays).toBeGreaterThanOrEqual(1);
+    let dayEvents = 0;
+    game.gameEvents.on('time.dayChanged', () => dayEvents++);
+    game.runFrames(480);
+    expect(dayEvents).toBeGreaterThan(0);
+    game.dispose();
+  });
 });

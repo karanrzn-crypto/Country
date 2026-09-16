@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import type { StrategicMapModel, MapSite } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
 import { type MapTheme } from './MapTheme';
+import { type RGB, rgb, lerpColor } from './MapSurface';
 
 /**
- * FeatureLayers — the Part-3 information-layer visuals (biomes, terrain,
- * rivers/lakes, roads, railways, sea routes, ports, industry, resources,
- * military, population, economy).
+ * FeatureLayers — Part-3 information-layer visuals EXCEPT the land surface
+ * (biomes/terrain live in MapSurface.ts — the single land-surface
+ * definition shared with the legends): rivers/lakes, roads, railways,
+ * sea routes, ports, industry, resources, military, population, economy.
  *
  * Performance contract (weak-hardware friendly):
  * - ONE merged geometry + ONE material per layer (a handful of draw calls
@@ -20,120 +22,13 @@ import { type MapTheme } from './MapTheme';
  * All data comes from the static model / game state (renderer as pure view).
  */
 
-export interface RGB {
-  r: number;
-  g: number;
-  b: number;
-}
-
-function rgb(hex: string): RGB {
-  // THREE.Color(hex) converts authored sRGB to the renderer's LINEAR working
-  // space (ColorManagement) — exactly what vertex/instance color attributes
-  // must carry, so displayed colors match the theme exactly.
-  const color = new THREE.Color(hex.startsWith('#') ? hex : `#${hex}`);
-  return { r: color.r, g: color.g, b: color.b };
-}
-
-function lerpColor(a: RGB, b: RGB, t: number): RGB {
-  const clamped = Math.max(0, Math.min(1, t));
-  return { r: a.r + (b.r - a.r) * clamped, g: a.g + (b.g - a.g) * clamped, b: a.b + (b.b - a.b) * clamped };
-}
-
-// ———————————————————————————— natural biome variation ————————————————————
-
-/**
- * Deterministic 32-bit hash → [0,1). Pure integer math (Math.imul), so the
- * same (a, b, seed) yields the same value on every platform and run.
- */
-export function hash01(a: number, b: number, seed: number): number {
-  let h = (seed | 0) ^ 0x9e3779b9;
-  h = Math.imul(h ^ (a | 0), 0x85ebca6b);
-  h ^= h >>> 13;
-  h = Math.imul(h, 0xc2b2ae35);
-  h ^= h >>> 16;
-  h = Math.imul(h ^ (b | 0), 0x27d4eb2d);
-  h ^= h >>> 15;
-  return (h >>> 0) / 4294967296;
-}
-
-/** Smooth bilinear value-noise over an integer lattice (pure, hash-based). */
-function valueNoise01(x: number, z: number, seed: number): number {
-  const x0 = Math.floor(x);
-  const z0 = Math.floor(z);
-  const tx = x - x0;
-  const tz = z - z0;
-  const sx = tx * tx * (3 - 2 * tx);
-  const sz = tz * tz * (3 - 2 * tz);
-  const n00 = hash01(x0, z0, seed);
-  const n10 = hash01(x0 + 1, z0, seed);
-  const n01 = hash01(x0, z0 + 1, seed);
-  const n11 = hash01(x0 + 1, z0 + 1, seed);
-  return (n00 * (1 - sx) + n10 * sx) * (1 - sz) + (n01 * (1 - sx) + n11 * sx) * sz;
-}
-
-export interface BiomeVariationParams {
-  /** Large-scale tonal patches (lightness ± factor). */
-  readonly patchStrength: number;
-  /** Per-cell micro jitter (lightness ± factor). */
-  readonly cellJitter: number;
-  /** High cells drift lighter/rockier, low cells darker (± factor / 2). */
-  readonly elevationLightness: number;
-}
-
-const DEFAULT_BIOME_VARIATION: BiomeVariationParams = {
-  patchStrength: 0.055,
-  cellJitter: 0.03,
-  elevationLightness: 0.14
-};
-
-function clamp01(value: number): number {
-  return value < 0 ? 0 : value > 1 ? 1 : value;
-}
-
-/**
- * Natural physical-atlas biome color: the biome's base theme color modulated
- * by (1) large low-frequency tonal patches, (2) a tiny per-cell jitter and
- * (3) an elevation lightness drift — all small, muted and deterministic.
- * No saturation boosts, no neon: the map stays readable and natural.
- */
-export function naturalBiomeColor(
-  base: RGB,
-  elevation: number,
-  cx: number,
-  cz: number,
-  seed: number,
-  variation: BiomeVariationParams = DEFAULT_BIOME_VARIATION
-): RGB {
-  const patch =
-    valueNoise01(cx * 0.16, cz * 0.16, seed) * 0.65 +
-    valueNoise01(cx * 0.45, cz * 0.45, seed + 1013) * 0.35;
-  const tone = (patch - 0.5) * 2 * variation.patchStrength;
-  const jitter = (hash01(cellKey(cx, cz), 0x5f356495, seed) - 0.5) * 2 * variation.cellJitter;
-  const elevShift = (elevation - 0.5) * variation.elevationLightness;
-  const light = 1 + tone + jitter + elevShift;
-  // Subtle warm/cool drift between patches (warm → +R −B, cool → −R +B).
-  const warm =
-    (valueNoise01(cx * 0.3 + 11.7, cz * 0.3 + 4.3, seed + 7331) - 0.5) *
-    2 *
-    variation.patchStrength *
-    0.6;
-  return {
-    r: clamp01(base.r * light + warm * 0.5),
-    g: clamp01(base.g * light + warm * 0.1),
-    b: clamp01(base.b * light - warm * 0.4)
-  };
-}
-
-/** Packs cell coordinates into one stable integer key for hashing. */
-function cellKey(cx: number, cz: number): number {
-  return (cz * 4096 + cx) | 0;
-}
-
-// ———————————————————————————— cell fills ————————————————————————————
+export type { RGB } from './MapSurface';
 
 /**
  * One merged, vertex-colored mesh over the cell grid (2 triangles per cell).
  * `colorAt` returns null for cells the layer must skip (e.g. ocean).
+ * Used by the translucent OVERLAY tints (population / economy) — the land
+ * SURFACE itself (biomes/terrain) is MapSurface.SurfaceLayer.
  */
 export class CellFillLayer {
   readonly group = new THREE.Group();
@@ -179,13 +74,12 @@ export class CellFillLayer {
       side: THREE.DoubleSide
     });
     const mesh = new THREE.Mesh(this.geometry, this.material);
-    mesh.renderOrder = 4;
+    mesh.renderOrder = 5; // translucent tint ABOVE the surface (4), below rivers (6)
     this.group.add(mesh);
   }
 
-  /** Cell-fill height — ABOVE all base fills (land 0.5, countries 0.55,
-   *  provinces 0.6), BELOW borders (1.0) / rivers (0.8) / markers. */
-  private static readonly FILL_Y = 0.7;
+  /** Cell-fill height — ABOVE the land surface (0.7), below borders/rivers. */
+  private static readonly FILL_Y = 0.72;
 
   /** Drops GPU objects; the next ensureBuilt rebuilds from current data. */
   invalidate(): void {
@@ -201,43 +95,6 @@ export class CellFillLayer {
     this.invalidate();
     this.group.clear();
   }
-}
-
-/**
- * Biome fills: land cells only (ocean is its own base layer).
- * Natural-map look: base theme color + deterministic variation (tonal
- * patches, per-cell jitter, elevation lightness) — still ONE merged mesh,
- * computed once at build time (zero per-frame cost).
- */
-export function createBiomeFillLayer(columns: number, theme: MapTheme): CellFillLayer {
-  const palette = new Map<string, RGB>();
-  for (const [biome, hex] of Object.entries(theme.layerColors.biomes)) {
-    palette.set(biome, rgb(hex));
-  }
-  const variation: BiomeVariationParams =
-    theme.layerColors.biomeVariation ?? DEFAULT_BIOME_VARIATION;
-  return new CellFillLayer(columns, theme.layerColors.biomeFillOpacity, (cellIndex, model) => {
-    const biome = model.features.biomes[cellIndex];
-    if (biome === 'ocean') return null;
-    const base = palette.get(biome);
-    if (base === undefined) return null;
-    const cz = Math.floor(cellIndex / columns);
-    const cx = cellIndex - cz * columns;
-    const elevation = model.features.elevation[cellIndex] ?? 0.5;
-    return naturalBiomeColor(base, elevation, cx, cz, model.seed, variation);
-  });
-}
-
-/** Terrain fills: land cells only. */
-export function createTerrainFillLayer(columns: number, theme: MapTheme): CellFillLayer {
-  const palette = new Map<string, RGB>();
-  for (const [terrain, hex] of Object.entries(theme.layerColors.terrain)) {
-    palette.set(terrain, rgb(hex));
-  }
-  return new CellFillLayer(columns, theme.layerColors.terrainFillOpacity, (cellIndex, model) => {
-    if (model.features.biomes[cellIndex] === 'ocean') return null;
-    return palette.get(model.features.terrain[cellIndex]) ?? null;
-  });
 }
 
 /** Per-cell population density from city populations with a small falloff. */

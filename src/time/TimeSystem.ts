@@ -1,12 +1,13 @@
 import type { TimeConfig } from '../config/configTypes';
 import type { EventBus } from '../events/EventBus';
-import { hoursToCalendar, HOURS_PER_DAY } from './Calendar';
+import { minutesToCalendar, HOURS_PER_DAY } from './Calendar';
 import type { CalendarDate, CalendarStart } from './Calendar';
 
 export interface TickInfo {
   readonly tick: number;
   readonly date: CalendarDate;
-  readonly hoursPerTick: number;
+  /** Game-minutes of simulated time this tick represents. */
+  readonly minutesPerTick: number;
 }
 
 /**
@@ -18,13 +19,20 @@ export const DEFAULT_SPEED_STEPS: readonly number[] = [1, 2, 5, 10];
 
 /**
  * Owns the game clock: current tick, pause state and simulation speed.
+ *
  * One call to `advance()` equals one fixed simulation step and emits the
- * time events (tick / day / month / year). Pure and deterministic — the
- * renderer never touches this; it only observes emitted state.
+ * time events (tick / day / month / year). The tick is ONE GAME MINUTE by
+ * default (TimeConfig.minutesPerTick), so the clock is a real simulated
+ * clock: minutes pass one by one, hours roll over at :60, days at midnight,
+ * months at their real length and years at December → January. Speed steps
+ * multiply the RATE at which simulated time passes (more ticks per real
+ * second) — they never touch the clock value itself.
  *
  * Single-source-of-truth contract: NO other system may keep its own clock,
  * speed multiplier or pause flag — everything time-related reads here
  * (directly via SystemContext.time, or from the emitted time.* events).
+ * Pure and deterministic — the renderer never touches this; it only
+ * observes emitted state.
  */
 export class TimeSystem {
   private currentTick = 0;
@@ -49,12 +57,22 @@ export class TimeSystem {
     return this.currentTick;
   }
 
+  /** Elapsed game-minutes since campaign start (the raw clock value). */
+  get elapsedMinutes(): number {
+    return this.currentTick * this.timeConfig.minutesPerTick;
+  }
+
   get date(): CalendarDate {
-    return hoursToCalendar(this.currentTick * this.timeConfig.hoursPerTick, this.start);
+    return minutesToCalendar(this.elapsedMinutes, this.start);
   }
 
   get isPaused(): boolean {
     return this.paused;
+  }
+
+  /** Campaign start date (for elapsed-format labels). */
+  get startDate(): CalendarStart {
+    return this.start;
   }
 
   /** Current speed multiplier (steps[this.speedIndex]). */
@@ -125,7 +143,7 @@ export class TimeSystem {
     const info: TickInfo = {
       tick: this.currentTick,
       date,
-      hoursPerTick: this.timeConfig.hoursPerTick
+      minutesPerTick: this.timeConfig.minutesPerTick
     };
     this.events.emit('time.tick', {
       tick: info.tick,
@@ -167,11 +185,11 @@ export class TimeSystem {
 
   /** Hours elapsed since campaign start (helper for external systems). */
   get elapsedHours(): number {
-    return this.currentTick * this.timeConfig.hoursPerTick;
+    return this.elapsedMinutes / 60;
   }
 
-  get hoursPerTick(): number {
-    return this.timeConfig.hoursPerTick;
+  get minutesPerTick(): number {
+    return this.timeConfig.minutesPerTick;
   }
 
   get hoursPerDay(): number {

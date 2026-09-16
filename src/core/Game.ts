@@ -83,7 +83,7 @@ export class Game {
   private loop: GameLoop | null = null;
   private initialized = false;
   private accumulator = 0;
-  private readonly stepSeconds: number;
+  private stepSeconds: number;
 
   // Built during init():
   private config!: GameConfig;
@@ -122,6 +122,10 @@ export class Game {
     if (this.initialized) throw new StateError('Game already initialized');
 
     this.config = resolveConfig(this.options.configOverrides);
+    // Fixed sim step = 1 / tickRateHz real seconds at speed 1 (speed scales
+    // the accumulator, so each step always advances the clock by the same
+    // simulated duration — the rate of simulated time, not its meaning).
+    this.stepSeconds = 1 / this.config.sim.tickRateHz;
     this.logger = new Logger(new ConsoleLogSink(), this.config.debug.logLevel, 'game');
     this.events = new EventBus(this.logger.child('events'));
     this.ids = new IdGenerator();

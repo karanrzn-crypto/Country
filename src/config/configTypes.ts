@@ -21,8 +21,12 @@ export interface SimConfig {
 }
 
 export interface TimeConfig {
-  /** Game hours advanced per fixed simulation tick (0.25 = 15-minute ticks). */
-  readonly hoursPerTick: number;
+  /**
+   * Game-MINUTES of simulated time per fixed simulation tick (1 = the clock
+   * advances minute by minute; larger values fast-forward the whole clock).
+   * The clock always rolls over exactly: minute → hour → day → month → year.
+   */
+  readonly minutesPerTick: number;
   readonly startYear: number;
   readonly startMonth: number;
   readonly startDay: number;
@@ -124,8 +128,8 @@ export interface GameConfig {
 
 export const DEFAULT_CONFIG: GameConfig = {
   debug: { enabled: true, logLevel: 'info', overlayVisibleByDefault: false },
-  sim: { tickRateHz: 5, maxCatchUpSteps: 8 },
-  time: { hoursPerTick: 0.25, startYear: 2030, startMonth: 1, startDay: 1 },
+  sim: { tickRateHz: 30, maxCatchUpSteps: 8 },
+  time: { minutesPerTick: 1, startYear: 2030, startMonth: 1, startDay: 1 },
   world: {
     chunkSize: 10,
     activeRadius: 2,
@@ -139,7 +143,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     unitUpkeepPerDay: 1,
     lowTreasuryWarnThreshold: 500
   },
-  ai: { enabled: true, decisionIntervalTicks: 6 },
+  ai: { enabled: true, decisionIntervalTicks: 30 },
   combat: {
     enabled: true,
     baseAccuracy: 0.75,

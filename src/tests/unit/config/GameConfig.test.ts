@@ -5,7 +5,7 @@ import { ConfigError } from '../../../utils/errors';
 describe('resolveConfig', () => {
   it('returns validated defaults with no overrides', () => {
     const config = resolveConfig();
-    expect(config.sim.tickRateHz).toBe(5);
+    expect(config.sim.tickRateHz).toBe(30);
     expect(config.world.activeRadius).toBe(2);
     expect(config.world.simulatedRadius).toBeGreaterThanOrEqual(config.world.activeRadius);
   });

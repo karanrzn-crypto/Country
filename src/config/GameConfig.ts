@@ -47,7 +47,7 @@ const CONFIG_SCHEMA: FieldSchema = {
     time: {
       type: 'object',
       fields: {
-        hoursPerTick: { type: 'number', min: 0.25, max: 24 },
+        minutesPerTick: { type: 'number', min: 0.1, max: 1440 },
         startYear: { type: 'number', min: 1900, max: 2200, integer: true },
         startMonth: { type: 'number', min: 1, max: 12, integer: true },
         startDay: { type: 'number', min: 1, max: 31, integer: true },

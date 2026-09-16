@@ -44,7 +44,6 @@
   "selectionRingColorAlt": "#3a2f22",
   "playerOutlineColor": "#f2c94c",
   "layerColors": {
-    "biomeFillOpacity": 0.85,
     "biomes": {
       "forest": "#5e7d4a",
       "grassland": "#a9ad6d",
@@ -54,9 +53,9 @@
       "jungle": "#47693f"
     },
     "biomeVariation": {
-      "patchStrength": 0.055,
-      "cellJitter": 0.03,
-      "elevationLightness": 0.14
+      "patchStrength": 0.035,
+      "cellJitter": 0.02,
+      "elevationLightness": 0.07
     },
     "biomeLabels": {
       "forest": "Forest",
@@ -67,13 +66,35 @@
       "jungle": "Jungle"
     },
     "biomeLegendOrder": ["forest", "grassland", "drylands", "desert", "tundra", "jungle"],
-    "terrainFillOpacity": 0.45,
-    "terrain": {
-      "mountain": "#8d8578",
-      "hills": "#a89a80",
-      "plains": "#b5ab8e",
-      "valley": "#c7bfa5"
+    "terrainRamp": [
+      { "at": 0.0,  "color": "#a9bf8a" },
+      { "at": 0.18, "color": "#bcc493" },
+      { "at": 0.35, "color": "#cfc9a0" },
+      { "at": 0.52, "color": "#c4b184" },
+      { "at": 0.68, "color": "#b39a75" },
+      { "at": 0.8,  "color": "#a08a72" },
+      { "at": 0.9,  "color": "#b9b2a8" },
+      { "at": 1.0,  "color": "#eceae4" }
+    ],
+    "terrainShading": {
+      "exaggeration": 45,
+      "strength": 0.5,
+      "minShade": 0.72,
+      "maxShade": 1.2
     },
+    "terrainTintStrength": 0.42,
+    "terrainLabels": {
+      "lowland": "Lowlands",
+      "valley": "Valleys",
+      "plains": "Plains",
+      "plateau": "Plateaus",
+      "hills": "Hills",
+      "mountain": "Mountains",
+      "highMountain": "High Mountains"
+    },
+    "terrainLegendOrder": [
+      "highMountain", "mountain", "hills", "plateau", "plains", "valley", "lowland"
+    ],
     "tintFillOpacity": 0.4,
     "populationLow": "#fdf6d8",
     "populationHigh": "#a02c2c",

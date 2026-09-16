@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { EventBus } from '../../../events/EventBus';
 import { TimeSystem, DEFAULT_SPEED_STEPS } from '../../../time/TimeSystem';
-import { formatCalendarDate } from '../../../time/Calendar';
+import { formatCalendarDate, formatCalendarElapsed } from '../../../time/Calendar';
 import { DEFAULT_CONFIG } from '../../../config/configTypes';
 import type { TimeConfig } from '../../../config/configTypes';
 
@@ -17,77 +17,116 @@ function makeTime(overrides: Partial<TimeConfig> = {}): {
   return { time: new TimeSystem(config, events), events, dayEvents: dayChanges };
 }
 
-describe('TimeSystem', () => {
+describe('TimeSystem (minute-resolution simulated clock)', () => {
   it('advances one tick at a time and emits time.tick', () => {
     const { time } = makeTime();
     expect(time.tick).toBe(0);
     const info = time.advance();
     expect(info.tick).toBe(1);
     expect(time.tick).toBe(1);
+    expect(info.minutesPerTick).toBe(1);
   });
 
-  it('default campaign ticks are 15 minutes (hoursPerTick 0.25)', () => {
+  it('default ticks are ONE game minute — the clock steps minute by minute', () => {
     const { time } = makeTime();
-    time.advance();
-    expect(time.date.hour).toBe(0);
-    expect(time.date.minute).toBe(15);
-    time.advance();
-    time.advance();
-    time.advance();
+    // Campaign starts 2030-01-01 00:00; advance 61 ticks → 01:01 next minute each.
+    for (let index = 0; index < 61; index++) time.advance();
     expect(time.date.hour).toBe(1);
-    expect(time.date.minute).toBe(0);
+    expect(time.date.minute).toBe(1);
     expect(time.date.day).toBe(1);
   });
 
-  it('maps ticks to calendar dates (24h days, 1h ticks)', () => {
-    const { time } = makeTime({ hoursPerTick: 1 });
+  it('maps ticks to calendar dates (hour-per-tick fast-forward also works)', () => {
+    const { time } = makeTime({ minutesPerTick: 60 });
     for (let index = 0; index < 25; index++) time.advance();
     const date = time.date;
     expect(date.hour).toBe(1);
     expect(date.day).toBe(2); // 25 hours after Jan 1 00:00 → Jan 2 01:00
   });
 
-  it('formats the clock with minutes (HH:MM)', () => {
-    const { time } = makeTime({ hoursPerTick: 0.25 });
-    for (let index = 0; index < 25; index++) time.advance();
-    // 25 × 15 min = 6 h 15 min after 2030-01-01 00:00.
+  it('formats the absolute clock with minutes (HH:MM)', () => {
+    const { time } = makeTime();
+    for (let index = 0; index < 375; index++) time.advance();
+    // 375 minutes = 6 h 15 min after 2030-01-01 00:00.
     expect(formatCalendarDate(time.date)).toBe('2030-01-01 06:15');
   });
 
-  it('emits the minute in time.tick payloads', () => {
+  it('formats the campaign-elapsed clock (Year — Month — Day — HH:MM)', () => {
+    const { time } = makeTime();
+    for (let index = 0; index < 8 * 60; index++) time.advance();
+    expect(formatCalendarElapsed(time.date, time.startDate)).toBe(
+      'Year 1 — Month 1 — Day 1 — 08:00'
+    );
+    // Cross the month boundary: Jan 31 23:59 + 1 tick → Month 2, Day 1.
+    for (let index = 0; index < (31 * 24 - 8) * 60; index++) time.advance();
+    expect(formatCalendarElapsed(time.date, time.startDate)).toBe(
+      'Year 1 — Month 2 — Day 1 — 00:00'
+    );
+  });
+
+  it('rolls the YEAR over correctly (Dec 31 23:59 → next year Jan 1 00:00)', () => {
+    const { time } = makeTime({ minutesPerTick: 60 }); // hourly ticks
+    // (365 days − 1 minute) after the start → Dec 31, 23:59 of the first year.
+    for (let index = 0; index < 365 * 24 - 1; index++) time.advance();
+    expect(time.date.year).toBe(2030);
+    expect(time.date.month).toBe(12);
+    expect(time.date.day).toBe(31);
+    expect(time.date.hour).toBe(23);
+    time.advance();
+    expect(time.date.year).toBe(2031);
+    expect(time.date.month).toBe(1);
+    expect(time.date.day).toBe(1);
+    expect(time.date.hour).toBe(0);
+  });
+
+  it('emits the minute in time.tick payloads (natural minute stepping)', () => {
     const events = new EventBus();
     const minutes: number[] = [];
     events.on('time.tick', ({ minute }) => minutes.push(minute));
-    const time = new TimeSystem({ ...DEFAULT_CONFIG.time, hoursPerTick: 0.25 }, events);
+    const time = new TimeSystem({ ...DEFAULT_CONFIG.time }, events);
     time.advance();
     time.advance();
     time.advance();
-    expect(minutes).toEqual([15, 30, 45]);
+    expect(minutes).toEqual([1, 2, 3]);
   });
 
   it('emits dayChanged exactly once per day rollover', () => {
-    const { time, dayEvents } = makeTime({ hoursPerTick: 1 });
+    const { time, dayEvents } = makeTime({ minutesPerTick: 60 });
     for (let index = 0; index < 72; index++) time.advance();
     expect(dayEvents).toEqual([2, 3, 4]);
   });
 
-  it('day rollover also works with 15-minute ticks', () => {
-    const { time, dayEvents } = makeTime({ hoursPerTick: 0.25 });
-    for (let index = 0; index < 96 * 2; index++) time.advance();
+  it('day rollover also works with minute ticks (midnight boundary)', () => {
+    const { time, dayEvents } = makeTime();
+    for (let index = 0; index < 24 * 60 * 2; index++) time.advance();
     expect(dayEvents).toEqual([2, 3]);
     expect(time.date.day).toBe(3);
     expect(time.date.hour).toBe(0);
     expect(time.date.minute).toBe(0);
   });
 
-  it('emits monthChanged at month boundaries', () => {
+  it('emits monthChanged at month boundaries with real month lengths', () => {
     const events = new EventBus();
     let months = 0;
     events.on('time.monthChanged', () => months++);
-    const time = new TimeSystem({ ...DEFAULT_CONFIG.time, hoursPerTick: 1 }, events);
-    for (let index = 0; index < 24 * 31 + 5; index++) time.advance();
+    const time = new TimeSystem({ ...DEFAULT_CONFIG.time }, events);
+    // January has 31 days; run 31 days + 5 minutes.
+    for (let index = 0; index < 31 * 24 * 60 + 5; index++) time.advance();
     expect(months).toBe(1);
     expect(time.date.month).toBe(2);
+  });
+
+  it('emits yearChanged exactly once at the year boundary', () => {
+    const events = new EventBus();
+    let years = 0;
+    let months = 0;
+    events.on('time.yearChanged', () => years++);
+    events.on('time.monthChanged', () => months++);
+    const time = new TimeSystem({ ...DEFAULT_CONFIG.time, minutesPerTick: 60 }, events);
+    for (let index = 0; index < 365 * 24 + 1; index++) time.advance();
+    expect(years).toBe(1);
+    expect(months).toBe(12);
+    expect(time.date.year).toBe(2031);
   });
 
   it('pause state emits game events once', () => {

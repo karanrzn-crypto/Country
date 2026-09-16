@@ -163,12 +163,16 @@ export interface MapLabelsThemeData {
 
 /** Data-driven colors for the Part-3 information layers (see mapTheme.json). */
 export interface MapLayerColorsData {
-  readonly biomeFillOpacity: number;
+  /**
+   * Canonical biome colors — THE single definition: the land surface paints
+   * every biome around its base color and the biome legend shows exactly it.
+   */
   readonly biomes: Readonly<Record<'forest' | 'grassland' | 'desert' | 'tundra' | 'drylands' | 'jungle', string>>;
   /**
-   * Natural-map variation (Part 4): deterministic per-cell tone changes so
-   * biomes read like a physical atlas instead of flat fills. All values are
-   * small multiplicative factors around 0 (no saturation, no neon).
+   * Natural-map variation: deterministic per-cell tone changes so biomes
+   * read like a physical atlas instead of flat fills. Values are SMALL and
+   * symmetric around the base color — the legend base always stays
+   * recognizable on the map.
    */
   readonly biomeVariation: {
     /** Large-scale tonal patches (lightness ± factor). */
@@ -182,8 +186,32 @@ export interface MapLayerColorsData {
   readonly biomeLabels: Readonly<Record<'forest' | 'grassland' | 'desert' | 'tundra' | 'drylands' | 'jungle', string>>;
   /** Legend display order (biome ids; missing ids append deterministically). */
   readonly biomeLegendOrder: readonly string[];
-  readonly terrainFillOpacity: number;
-  readonly terrain: Readonly<Record<'mountain' | 'hills' | 'plains' | 'valley', string>>;
+  /**
+   * Hypsometric elevation ramp — THE single terrain color definition: the
+   * land surface interpolates it by elevation, and the terrain legend
+   * samples it at each class's representative elevation.
+   */
+  readonly terrainRamp: readonly { readonly at: number; readonly color: string }[];
+  /**
+   * Hillshading of the relief, normalized so flat ground shows the exact
+   * ramp color (legend match): `exaggeration` scales the height-field
+   * gradient into a visible slope, `strength` the light contrast, clamped
+   * to [minShade, maxShade].
+   */
+  readonly terrainShading: {
+    readonly exaggeration: number;
+    readonly strength: number;
+    readonly minShade: number;
+    readonly maxShade: number;
+  };
+  /** Biome↔terrain composite: how far biome hue shifts toward the ramp. */
+  readonly terrainTintStrength: number;
+  /** Display labels for the terrain legend (data-driven — UI owns none). */
+  readonly terrainLabels: Readonly<
+    Record<'lowland' | 'valley' | 'plains' | 'plateau' | 'hills' | 'mountain' | 'highMountain', string>
+  >;
+  /** Legend display order (terrain ids; missing ids append deterministically). */
+  readonly terrainLegendOrder: readonly string[];
   readonly tintFillOpacity: number;
   readonly populationLow: string;
   readonly populationHigh: string;

@@ -113,10 +113,37 @@ function minMaxNormalize(values: number[]): number[] {
 
 // ———————————————————————————— field classification ————————————————————————————
 
-export function classifyTerrain(elevation: number): TerrainId {
-  if (elevation >= 0.8) return 'mountain';
-  if (elevation >= 0.62) return 'hills';
-  if (elevation <= 0.22) return 'valley';
+/**
+ * Terrain classification thresholds (elevation is min-max normalized 0..1;
+ * relief = max elevation difference to land neighbors). Tuned against the
+ * default generator so every class appears on a typical continent:
+ * lowland ~6%, valley ~9%, plains ~40%, plateau+hills ~28%, mountain ~13%,
+ * highMountain ~4%.
+ */
+export const TERRAIN_THRESHOLDS = {
+  lowlandBelow: 0.2,
+  valleyBelow: 0.3,
+  plateauFrom: 0.55,
+  mountainFrom: 0.76,
+  highMountainFrom: 0.88,
+  plateauMaxRelief: 0.1
+} as const;
+
+/**
+ * Classifies one land cell into a terrain class. `relief` is the max
+ * elevation difference to the cell's land neighbors (0 for isolated cells) —
+ * elevated + flat ground reads as a plateau even below the mountain band.
+ */
+export function classifyTerrain(elevation: number, relief: number): TerrainId {
+  const t = TERRAIN_THRESHOLDS;
+  if (elevation >= t.highMountainFrom) return 'highMountain';
+  if (elevation >= t.mountainFrom) return 'mountain';
+  if (elevation >= t.plateauFrom && elevation < t.mountainFrom && relief < t.plateauMaxRelief) {
+    return 'plateau';
+  }
+  if (elevation >= t.plateauFrom) return 'hills';
+  if (elevation <= t.lowlandBelow) return 'lowland';
+  if (elevation <= t.valleyBelow) return 'valley';
   return 'plains';
 }
 
@@ -279,17 +306,41 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
   );
 
   // —— 2. terrain + biome classification ——
+  // Local relief per land cell: max elevation difference to LAND neighbors
+  // (ocean neighbors excluded — coasts are not automatically mountains).
+  const localRelief: number[] = new Array(cellCount).fill(0);
+  for (let cz = 0; cz < rows; cz++) {
+    for (let cx = 0; cx < columns; cx++) {
+      const cellIndex = cz * columns + cx;
+      if (!land[cellIndex]) continue;
+      let maxDiff = 0;
+      for (const [dx, dz] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1]
+      ] as const) {
+        const nx = cx + dx;
+        const nz = cz + dz;
+        if (nx < 0 || nx >= columns || nz < 0 || nz >= rows) continue;
+        const neighbor = nz * columns + nx;
+        if (!land[neighbor]) continue;
+        maxDiff = Math.max(maxDiff, Math.abs(elevation[cellIndex] - elevation[neighbor]));
+      }
+      localRelief[cellIndex] = maxDiff;
+    }
+  }
   const terrain: TerrainId[] = new Array(cellCount);
   const biomes: BiomeId[] = new Array(cellCount);
   const cellOwner: number[] = new Array(cellCount);
   for (let cellIndex = 0; cellIndex < cellCount; cellIndex++) {
     cellOwner[cellIndex] = land[cellIndex] ? countryPartition[cellIndex] : -1;
     if (!land[cellIndex]) {
-      terrain[cellIndex] = 'valley';
+      terrain[cellIndex] = 'lowland'; // sea floor — never rendered as land terrain
       biomes[cellIndex] = 'ocean';
       continue;
     }
-    terrain[cellIndex] = classifyTerrain(elevation[cellIndex]);
+    terrain[cellIndex] = classifyTerrain(elevation[cellIndex], localRelief[cellIndex]);
     biomes[cellIndex] = classifyBiome(temperature[cellIndex], moisture[cellIndex]);
   }
 

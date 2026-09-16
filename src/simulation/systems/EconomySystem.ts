@@ -15,7 +15,7 @@ export class EconomySystem implements SimulationSystemDef {
 
   tick(context: SystemContext, tick: TickInfo): void {
     const { state, config, data, events } = context;
-    const dayFraction = tick.hoursPerTick / 24;
+    const dayFraction = tick.minutesPerTick / (60 * 24);
     const economy = state.economy;
 
     // —— factory production ——

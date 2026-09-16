@@ -20,8 +20,8 @@ describe('Headless integration (renderer-independent core)', () => {
     const game = createTestGame({ seed: 1001 });
     game.gameEvents.on('time.tick', () => seenPhases.push('tick'));
     game.gameEvents.on('ai.orderIssued', () => seenPhases.push('ai'));
-    // dt equals exactly one sim step → one tick per frame.
-    game.runFrames(60, 0.2);
+    // dt = 1/60 with a 30 Hz sim step → one tick every other frame.
+    game.runFrames(120, 1 / 60);
     expect(seenPhases).toContain('tick');
     expect(game.gameTime.tick).toBe(60);
     game.dispose();
@@ -36,7 +36,7 @@ describe('Headless integration (renderer-independent core)', () => {
     game.gameEvents.on('ai.orderIssued', () => emitted.add('ai.orderIssued'));
     game.gameEvents.on('world.chunkActivated', () => emitted.add('world.chunkActivated'));
     // Frames (not bare ticks) so the streaming phase runs and emits events.
-    game.runFrames(60, 0.2);
+    game.runFrames(120, 1 / 60);
     for (const expected of ['time.tick', 'sim.economyProduced', 'sim.economyTreasuryChanged', 'ai.orderIssued', 'world.chunkActivated']) {
       expect(emitted.has(expected)).toBe(true);
     }

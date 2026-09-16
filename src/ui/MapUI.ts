@@ -6,7 +6,8 @@ import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/Ma
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
-import { buildBiomeLegend, biomeLegendSignature } from './biomeLegend';
+import { buildBiomeLegend, buildTerrainLegend, legendSignature } from './biomeLegend';
+import type { MapLegendEntry } from './biomeLegend';
 
 /**
  * Strategic map UI (Part 1 + 2 + 3):
@@ -163,44 +164,58 @@ export class MapUI {
     }
   }
 
-  // —— biome legend (Part 4) ——
+  // —— map legends (biomes + terrain) ——
 
   /**
-   * Legend panel at the right edge of the map. Shown ONLY while the biomes
-   * layer is visible; rows/colors/labels come from buildBiomeLegend (model
-   * + theme — the UI owns no biome data). Rows rebuild only when the
-   * legend's content signature changes.
+   * Legend panel at the right edge of the map. Shown while the biomes and/or
+   * terrain layer is visible; one titled section per active layer. Rows,
+   * colors and labels come from the legend builders (model + theme via the
+   * SAME central color definitions the renderer paints with) — the UI owns
+   * no biome/terrain data. Rows rebuild only when the content signature
+   * changes.
    */
   private buildLegend(root: UIElement): void {
     this.legendContainer = this.create('div', 'map-legend');
-    const title = this.create('div', 'map-legend-title');
-    title.setText('BIOMES');
-    this.legendContainer.appendChild(title);
     root.appendChild(this.legendContainer);
   }
 
   private refreshLegend(): void {
     const context = this.context;
     if (context === null || this.legendContainer === null) return;
-    const visible = context.state.map.layerVisibility.biomes === true;
+    const visibility = context.state.map.layerVisibility;
+    const sections: { title: string; entries: MapLegendEntry[] }[] = [];
+    if (visibility.biomes === true) {
+      sections.push({ title: 'BIOMES', entries: buildBiomeLegend(context.map, context.data.mapTheme) });
+    }
+    if (visibility.terrain === true) {
+      sections.push({ title: 'TERRAIN', entries: buildTerrainLegend(context.map, context.data.mapTheme) });
+    }
+    const visible = sections.length > 0;
     this.legendContainer.setVisible(visible);
     if (!visible) return;
-    const entries = buildBiomeLegend(context.map, context.data.mapTheme);
-    const signature = biomeLegendSignature(entries);
+    const signature = sections
+      .map((section) => `${section.title}#${legendSignature(section.entries)}`)
+      .join('||');
     if (signature === this.legendSignature) return;
     this.legendSignature = signature;
     for (const row of this.legendRows) row.remove();
     this.legendRows.length = 0;
-    for (const entry of entries) {
-      const row = this.create('div', 'map-legend-row');
-      const swatch = this.create('span', 'map-legend-swatch');
-      swatch.setAttribute('style', `background: ${entry.color}`);
-      const label = this.create('span', 'map-legend-label');
-      label.setText(entry.label);
-      row.appendChild(swatch);
-      row.appendChild(label);
-      this.legendContainer.appendChild(row);
-      this.legendRows.push(row);
+    for (const section of sections) {
+      const title = this.create('div', 'map-legend-title');
+      title.setText(section.title);
+      this.legendContainer.appendChild(title);
+      this.legendRows.push(title);
+      for (const entry of section.entries) {
+        const row = this.create('div', 'map-legend-row');
+        const swatch = this.create('span', 'map-legend-swatch');
+        swatch.setAttribute('style', `background: ${entry.color}`);
+        const label = this.create('span', 'map-legend-label');
+        label.setText(entry.label);
+        row.appendChild(swatch);
+        row.appendChild(label);
+        this.legendContainer.appendChild(row);
+        this.legendRows.push(row);
+      }
     }
   }
 

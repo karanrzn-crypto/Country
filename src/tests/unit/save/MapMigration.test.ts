@@ -9,9 +9,11 @@ import { fnv1a32, stableStringify } from '../../../utils/hash';
  * Save migrations:
  * - v1 → v2: strategic map slice (Part 1)
  * - v2 → v3: country data slice (Part 2)
+ * - v3 → v4: country-selection flow (Part 3)
+ * - v4 → v5: minute-resolution clock (time v2) — ticks ×15 (15-min → 1-min)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → v2 → v3)', () => {
+describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -23,7 +25,7 @@ describe('save migrations (v1 → v2 → v3)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -45,7 +47,8 @@ describe('save migrations (v1 → v2 → v3)', () => {
     expect(migrated.state.player.countryId).toBe('republic');
     // Part 3: migrated saves are already-started campaigns.
     expect((migrated.state.player as Record<string, unknown>).countryConfirmed).toBe(true);
-    expect(migrated.runtime.tick).toBe(12);
+    // v4→v5 converted 15-minute ticks to 1-minute ticks: 12 × 15 = 180.
+    expect(migrated.runtime.tick).toBe(180);
   });
 
   it('v2 → v3 injects only the country slice (map state untouched)', () => {
@@ -57,7 +60,7 @@ describe('save migrations (v1 → v2 → v3)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
@@ -75,11 +78,27 @@ describe('save migrations (v1 → v2 → v3)', () => {
       runtime: { tick: 77 }
     };
     const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
-    expect(version).toBe(4);
+    expect(version).toBe(5);
     const migrated = data as { state: { player: Record<string, unknown> } };
     expect(migrated.state.player.countryConfirmed).toBe(true);
     expect(migrated.state.player.countryId).toBe('country_2');
-    expect((data as typeof v3).runtime.tick).toBe(77);
+    // v4→v5: 77 × 15 = 1155 game-minutes — the exact saved instant.
+    expect((data as typeof v3).runtime.tick).toBe(1155);
+  });
+
+  it('v4 → v5 scales runtime.tick ×15 (15-minute ticks → 1-minute ticks)', () => {
+    const v4 = {
+      state: { player: { countryConfirmed: true } },
+      runtime: { tick: 100, rngState: 7, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v4, 4, SAVE_VERSION);
+    expect(version).toBe(5);
+    expect((data as typeof v4).runtime.tick).toBe(1500);
+  });
+
+  it('v4 → v5 fails loudly on a save without a valid runtime.tick', () => {
+    const broken = { state: {}, runtime: {} };
+    expect(() => applyMigrations(broken, 4, SAVE_VERSION)).toThrow();
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

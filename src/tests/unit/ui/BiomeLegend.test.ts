@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildBiomeLegend, biomeLegendSignature } from '../../../ui/biomeLegend';
+import { buildBiomeLegend, buildTerrainLegend, legendSignature } from '../../../ui/biomeLegend';
+import { parseTerrainRamp, rampColorAt, rgbToHex, TERRAIN_LEGEND_SAMPLE } from '../../../rendering/map/MapSurface';
 import { generateStrategicMap } from '../../../world/map/MapGenerator';
 import { DEFAULT_MAP_CONFIG } from '../../helpers/mapTestConfig';
 import themeJson from '../../../data/mapTheme.json';
@@ -19,9 +20,10 @@ function modelWithBiomes(biomes: readonly string[]): StrategicMapModel {
 }
 
 /**
- * Biome legend (Part 4): fully data-driven — only biomes present in the map
- * model get a row; labels/colors/order come from the theme (mapTheme.json);
- * swatch colors are EXACTLY the base colors the biome fill uses on the map.
+ * Map legends: fully data-driven — only entries present in the map model get
+ * a row; labels/colors/order come from the theme (mapTheme.json) through the
+ * SAME central accessors the land surface paints with, so a legend swatch is
+ * by construction the color the map shows.
  */
 describe('biome legend builder', () => {
   it('lists only biomes present in the current map data', () => {
@@ -32,9 +34,10 @@ describe('biome legend builder', () => {
     for (const entry of entries) expect(present.has(entry.id)).toBe(true);
   });
 
-  it('every entry color comes from the theme (exact match with the map)', () => {
+  it('every entry color is the EXACT theme base color the map paints', () => {
     const palette = theme.layerColors.biomes as Record<string, string>;
     for (const entry of buildBiomeLegend(model, theme)) {
+      // Legend color flows through the central accessor + exact sRGB roundtrip.
       expect(entry.color).toBe(palette[entry.id]);
     }
   });
@@ -76,9 +79,47 @@ describe('biome legend builder', () => {
   it('signature changes when content changes (DOM rebuild gate)', () => {
     const a = modelWithBiomes(['ocean', 'forest']);
     const b = modelWithBiomes(['ocean', 'forest', 'desert']);
-    const signatureA = biomeLegendSignature(buildBiomeLegend(a, theme));
-    const signatureB = biomeLegendSignature(buildBiomeLegend(b, theme));
+    const signatureA = legendSignature(buildBiomeLegend(a, theme));
+    const signatureB = legendSignature(buildBiomeLegend(b, theme));
     expect(signatureA).not.toBe(signatureB);
-    expect(signatureA).toBe(biomeLegendSignature(buildBiomeLegend(a, theme)));
+    expect(signatureA).toBe(legendSignature(buildBiomeLegend(a, theme)));
+  });
+});
+
+describe('terrain legend builder', () => {
+  it('lists only terrain classes present on LAND cells of the model', () => {
+    const entries = buildTerrainLegend(model, theme);
+    const present = new Set<string>();
+    for (let i = 0; i < model.features.terrain.length; i++) {
+      if (model.features.biomes[i] === 'ocean') continue;
+      present.add(model.features.terrain[i]);
+    }
+    expect(entries.length).toBe(present.size);
+    for (const entry of entries) expect(present.has(entry.id)).toBe(true);
+  });
+
+  it('swatch color = the canonical ramp sampled at the class representative', () => {
+    const ramp = parseTerrainRamp(theme);
+    for (const entry of buildTerrainLegend(model, theme)) {
+      const sample = TERRAIN_LEGEND_SAMPLE[entry.id as keyof typeof TERRAIN_LEGEND_SAMPLE] ?? 0.5;
+      expect(entry.color).toBe(rgbToHex(rampColorAt(ramp, sample)));
+    }
+  });
+
+  it('low ground swatch is distinct from high mountain swatch (relief readable)', () => {
+    const entries = buildTerrainLegend(model, theme);
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const low = byId.get('lowland');
+    const high = byId.get('highMountain');
+    expect(low).toBeDefined();
+    expect(high).toBeDefined();
+    expect(low?.color.toLowerCase()).not.toBe(high?.color.toLowerCase());
+  });
+
+  it('labels come from the theme terrainLabels', () => {
+    const labels = theme.layerColors.terrainLabels as Record<string, string>;
+    for (const entry of buildTerrainLegend(model, theme)) {
+      expect(entry.label).toBe(labels[entry.id] ?? entry.id);
+    }
   });
 });

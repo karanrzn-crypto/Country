@@ -67,16 +67,33 @@ describe('map features generation', () => {
   });
 
   it('classification helpers honor their documented thresholds', () => {
-    expect(classifyTerrain(0.9)).toBe('mountain');
-    expect(classifyTerrain(0.7)).toBe('hills');
-    expect(classifyTerrain(0.4)).toBe('plains');
-    expect(classifyTerrain(0.1)).toBe('valley');
+    expect(classifyTerrain(0.95, 0)).toBe('highMountain');
+    expect(classifyTerrain(0.8, 0.3)).toBe('mountain');
+    // Elevated + FLAT ground reads as a plateau even below the mountain band.
+    expect(classifyTerrain(0.6, 0.02)).toBe('plateau');
+    // Same elevation with rugged neighbors is hills.
+    expect(classifyTerrain(0.6, 0.3)).toBe('hills');
+    expect(classifyTerrain(0.4, 0.1)).toBe('plains');
+    expect(classifyTerrain(0.25, 0.1)).toBe('valley');
+    expect(classifyTerrain(0.1, 0.05)).toBe('lowland');
     expect(classifyBiome(0.1, 0.8)).toBe('tundra');
     expect(classifyBiome(0.9, 0.1)).toBe('desert');
     expect(classifyBiome(0.3, 0.1)).toBe('drylands');
     expect(classifyBiome(0.8, 0.8)).toBe('jungle');
     expect(classifyBiome(0.3, 0.8)).toBe('forest');
     expect(classifyBiome(0.5, 0.5)).toBe('grassland');
+  });
+
+  it('the default map exhibits every terrain class (relief is informative)', () => {
+    const landTerrain = new Set<string>();
+    for (let i = 0; i < cellCount; i++) {
+      if (features.biomes[i] !== 'ocean') landTerrain.add(features.terrain[i]);
+    }
+    for (const terrainClass of [
+      'lowland', 'valley', 'plains', 'plateau', 'hills', 'mountain', 'highMountain'
+    ]) {
+      expect(landTerrain.has(terrainClass)).toBe(true);
+    }
   });
 
   it('rivers start on land and end at the coast or in an inland lake', () => {

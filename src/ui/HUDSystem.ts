@@ -2,7 +2,7 @@ import type { SystemContext } from '../core/GameContext';
 import type { UIElement } from './adapter/UIDomAdapter';
 import { buildHudModel } from './HUDModel';
 import { formatSpeedLabel } from './HUDModel';
-import { formatCalendarDate } from '../time/Calendar';
+import { formatCalendarElapsed } from '../time/Calendar';
 import type { PlayerModeSystem } from '../player/PlayerModeSystem';
 import type { CommandBus } from '../core/CommandBus';
 
@@ -88,7 +88,8 @@ export class HUDSystem {
     }
 
     // —— time bar reflects the clock (read-only view of the source of truth) ——
-    this.dateLabel.setText(formatCalendarDate(context.time.date));
+    // Campaign-elapsed form of the central clock: "Year 1 — Month 1 — Day 1 — 08:00".
+    this.dateLabel.setText(formatCalendarElapsed(context.time.date, context.time.startDate));
     const paused = context.time.isPaused;
     this.pauseButton.setText(paused ? 'Play' : 'Pause');
     this.pauseButton.setClass(paused ? 'time-btn pause stopped' : 'time-btn pause');

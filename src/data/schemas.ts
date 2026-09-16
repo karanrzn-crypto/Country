@@ -195,7 +195,6 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
       type: 'object',
       allowUnknown: false,
       fields: {
-        biomeFillOpacity: { type: 'number', min: 0, max: 1 },
         biomeVariation: {
           type: 'object',
           allowUnknown: false,
@@ -234,16 +233,46 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             jungle: colorField
           }
         },
-        terrainFillOpacity: { type: 'number', min: 0, max: 1 },
-        terrain: {
+        terrainRamp: {
+          type: 'array',
+          minLength: 2,
+          items: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              at: { type: 'number', min: 0, max: 1 },
+              color: colorField
+            }
+          }
+        },
+        terrainShading: {
           type: 'object',
           allowUnknown: false,
           fields: {
-            mountain: colorField,
-            hills: colorField,
-            plains: colorField,
-            valley: colorField
+            exaggeration: { type: 'number', min: 1, max: 200 },
+            strength: { type: 'number', min: 0, max: 2 },
+            minShade: { type: 'number', min: 0.1, max: 2 },
+            maxShade: { type: 'number', min: 0.1, max: 2 }
           }
+        },
+        terrainTintStrength: { type: 'number', min: 0, max: 1 },
+        terrainLabels: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            lowland: { type: 'string', minLength: 1 },
+            valley: { type: 'string', minLength: 1 },
+            plains: { type: 'string', minLength: 1 },
+            plateau: { type: 'string', minLength: 1 },
+            hills: { type: 'string', minLength: 1 },
+            mountain: { type: 'string', minLength: 1 },
+            highMountain: { type: 'string', minLength: 1 }
+          }
+        },
+        terrainLegendOrder: {
+          type: 'array',
+          minLength: 1,
+          items: { type: 'string', minLength: 1 }
         },
         tintFillOpacity: { type: 'number', min: 0, max: 1 },
         populationLow: colorField,
