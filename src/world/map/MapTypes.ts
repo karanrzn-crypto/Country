@@ -202,6 +202,10 @@ export interface MapFeatures {
   readonly elevation: readonly number[];
   /** Per-cell normalized temperature 0..1 (weather-layer hook). */
   readonly temperature: readonly number[];
+  /** Per-cell normalized moisture 0..1 (future precipitation / vegetation
+   *  hook — the SAME field classifyBiome consumed, now persisted so future
+   *  systems never need to re-derive it). */
+  readonly moisture: readonly number[];
   /** Per-cell terrain class ('valley' is used for ocean cells too). */
   readonly terrain: readonly TerrainId[];
   /** Per-cell country owner index (−1 for ocean) — the ground truth for

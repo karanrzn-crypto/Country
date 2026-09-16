@@ -7,7 +7,10 @@ import type { PlayerModeId } from '../player/types';
  */
 export type GameCommand =
   | { readonly type: 'game.togglePause' }
+  | { readonly type: 'game.setPaused'; readonly paused: boolean }
   | { readonly type: 'game.setSpeed'; readonly speed: number }
+  | { readonly type: 'game.setSpeedStep'; readonly index: number }
+  | { readonly type: 'game.cycleSpeed' }
   | { readonly type: 'player.setMode'; readonly mode: PlayerModeId }
   | { readonly type: 'player.focusChunk'; readonly chunkId: string }
   | { readonly type: 'player.select'; readonly entityIds: readonly EntityId[] }

@@ -3,7 +3,10 @@ import { createTestGame } from '../../helpers/testGame';
 
 describe('EconomySystem', () => {
   it('factories produce outputs at data-driven rates', () => {
-    const game = createTestGame({ seed: 9 });
+    // hoursPerTick 1 keeps the "exactly one game day" arithmetic explicit:
+    // the default campaign tick is 15 minutes (0.25h) — rates scale with
+    // real elapsed time either way.
+    const game = createTestGame({ seed: 9, configOverrides: { time: { hoursPerTick: 1 } } });
     const stockpiles = game.gameState.economy.stockpiles;
     const foodBefore = stockpiles.republic.food;
     game.runTicks(24); // exactly one game day

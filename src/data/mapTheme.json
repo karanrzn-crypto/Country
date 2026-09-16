@@ -44,15 +44,29 @@
   "selectionRingColorAlt": "#3a2f22",
   "playerOutlineColor": "#f2c94c",
   "layerColors": {
-    "biomeFillOpacity": 0.6,
+    "biomeFillOpacity": 0.85,
     "biomes": {
-      "forest": "#3f6f3a",
-      "grassland": "#a3b968",
-      "desert": "#d9c27e",
-      "tundra": "#b5c4c9",
-      "drylands": "#c9b476",
-      "jungle": "#2e6b3c"
+      "forest": "#5e7d4a",
+      "grassland": "#a9ad6d",
+      "desert": "#d3c092",
+      "tundra": "#b7c3c5",
+      "drylands": "#c2b07e",
+      "jungle": "#47693f"
     },
+    "biomeVariation": {
+      "patchStrength": 0.055,
+      "cellJitter": 0.03,
+      "elevationLightness": 0.14
+    },
+    "biomeLabels": {
+      "forest": "Forest",
+      "grassland": "Grassland",
+      "desert": "Desert",
+      "tundra": "Tundra",
+      "drylands": "Drylands",
+      "jungle": "Jungle"
+    },
+    "biomeLegendOrder": ["forest", "grassland", "drylands", "desert", "tundra", "jungle"],
     "terrainFillOpacity": 0.45,
     "terrain": {
       "mountain": "#8d8578",

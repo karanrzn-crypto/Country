@@ -196,6 +196,32 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
       allowUnknown: false,
       fields: {
         biomeFillOpacity: { type: 'number', min: 0, max: 1 },
+        biomeVariation: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            patchStrength: { type: 'number', min: 0, max: 0.3 },
+            cellJitter: { type: 'number', min: 0, max: 0.2 },
+            elevationLightness: { type: 'number', min: 0, max: 0.5 }
+          }
+        },
+        biomeLabels: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            forest: { type: 'string', minLength: 1 },
+            grassland: { type: 'string', minLength: 1 },
+            desert: { type: 'string', minLength: 1 },
+            tundra: { type: 'string', minLength: 1 },
+            drylands: { type: 'string', minLength: 1 },
+            jungle: { type: 'string', minLength: 1 }
+          }
+        },
+        biomeLegendOrder: {
+          type: 'array',
+          minLength: 1,
+          items: { type: 'string', minLength: 1 }
+        },
         biomes: {
           type: 'object',
           allowUnknown: false,

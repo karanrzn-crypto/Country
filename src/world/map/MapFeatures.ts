@@ -551,6 +551,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     biomes,
     elevation,
     temperature,
+    moisture,
     terrain,
     cellOwner,
     rivers,

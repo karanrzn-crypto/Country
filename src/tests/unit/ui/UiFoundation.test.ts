@@ -105,20 +105,11 @@ describe('NotificationSystem', () => {
 });
 
 describe('HUD model (pure)', () => {
-  it('formats date, treasury, population and chunk counters', () => {
+  it('builds mode, treasury, population and chunk counters from state', () => {
     const game = createTestGame();
     game.runTicks(30);
     const state = game.gameState;
-    const model = buildHudModel(
-      state,
-      game.gameTime.date,
-      false,
-      2,
-      'President',
-      game.gameWorld.counts()
-    );
-    expect(model.date).toMatch(/^2030-01-0[23] \d{2}:00$/);
-    expect(model.speed).toBe('×2');
+    const model = buildHudModel(state, 'President', game.gameWorld.counts());
     expect(model.mode).toBe('President');
     expect(model.treasury).not.toBe('');
     expect(model.chunks).toMatch(/^A:\d+ S:\d+ U:\d+$/);

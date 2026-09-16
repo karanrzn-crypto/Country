@@ -42,7 +42,7 @@ export class UIManager implements PhaseSystem {
     this.root = this.createRoot(adapter);
 
     this.screens = new ScreenManager(adapter, events);
-    this.hud = new HUDSystem(this.root, adapter, modes);
+    this.hud = new HUDSystem(this.root, adapter, modes, commands);
     this.notifications = new NotificationSystem(
       (() => {
         const container = adapter.create('div', 'notifications');
@@ -94,6 +94,18 @@ export class UIManager implements PhaseSystem {
           else this.screens.open('map');
         } else if (action === 'ui.back') {
           this.screens.closeTop();
+        } else if (action === 'togglePause') {
+          // Ignore pause before the campaign actually starts (country-select
+          // flow owns the pause state until the player confirms a country).
+          if (context.state.player.countryConfirmed) {
+            this.commands.send({ type: 'game.togglePause' });
+          }
+        } else if (action.startsWith('speed')) {
+          // speed1..speedN → the Nth data-driven speed step.
+          const index = Number(action.slice('speed'.length)) - 1;
+          if (Number.isInteger(index) && index >= 0) {
+            this.commands.send({ type: 'game.setSpeedStep', index });
+          }
         }
       }),
       this.events.on('combat.engagementStarted', ({ regionId }) => {

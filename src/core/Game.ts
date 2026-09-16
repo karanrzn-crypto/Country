@@ -422,6 +422,11 @@ export class Game {
     this.time.togglePause();
   }
 
+  setPaused(paused: boolean): void {
+    this.assertInitialized();
+    this.time.setPaused(paused);
+  }
+
   /**
    * Country-selection flow (Part 3): re-opens the "choose your country"
    * phase — the game pauses and the UI opens its countrySelect screen on the
@@ -459,6 +464,16 @@ export class Game {
   setSpeed(speed: number): void {
     this.assertInitialized();
     this.time.setSpeed(speed);
+  }
+
+  setSpeedStep(index: number): void {
+    this.assertInitialized();
+    this.time.setSpeedStep(index);
+  }
+
+  cycleSpeed(): void {
+    this.assertInitialized();
+    this.time.cycleSpeed();
   }
 
   setPlayerMode(mode: Parameters<PlayerModeSystem['setMode']>[1]): boolean {

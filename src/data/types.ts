@@ -165,6 +165,23 @@ export interface MapLabelsThemeData {
 export interface MapLayerColorsData {
   readonly biomeFillOpacity: number;
   readonly biomes: Readonly<Record<'forest' | 'grassland' | 'desert' | 'tundra' | 'drylands' | 'jungle', string>>;
+  /**
+   * Natural-map variation (Part 4): deterministic per-cell tone changes so
+   * biomes read like a physical atlas instead of flat fills. All values are
+   * small multiplicative factors around 0 (no saturation, no neon).
+   */
+  readonly biomeVariation: {
+    /** Large-scale tonal patches (lightness ± factor). */
+    readonly patchStrength: number;
+    /** Per-cell micro jitter (lightness ± factor). */
+    readonly cellJitter: number;
+    /** High cells drift lighter/rockier, low cells darker (± factor / 2). */
+    readonly elevationLightness: number;
+  };
+  /** Display labels for the biome legend (data-driven — UI owns none). */
+  readonly biomeLabels: Readonly<Record<'forest' | 'grassland' | 'desert' | 'tundra' | 'drylands' | 'jungle', string>>;
+  /** Legend display order (biome ids; missing ids append deterministically). */
+  readonly biomeLegendOrder: readonly string[];
   readonly terrainFillOpacity: number;
   readonly terrain: Readonly<Record<'mountain' | 'hills' | 'plains' | 'valley', string>>;
   readonly tintFillOpacity: number;

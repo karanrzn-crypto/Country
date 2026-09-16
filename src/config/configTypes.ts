@@ -21,10 +21,13 @@ export interface SimConfig {
 }
 
 export interface TimeConfig {
+  /** Game hours advanced per fixed simulation tick (0.25 = 15-minute ticks). */
   readonly hoursPerTick: number;
   readonly startYear: number;
   readonly startMonth: number;
   readonly startDay: number;
+  /** Speed multipliers (data-driven; UI + input are generated from this). */
+  readonly speedSteps?: readonly number[];
 }
 
 export interface WorldConfig {
@@ -122,7 +125,7 @@ export interface GameConfig {
 export const DEFAULT_CONFIG: GameConfig = {
   debug: { enabled: true, logLevel: 'info', overlayVisibleByDefault: false },
   sim: { tickRateHz: 5, maxCatchUpSteps: 8 },
-  time: { hoursPerTick: 1, startYear: 2030, startMonth: 1, startDay: 1 },
+  time: { hoursPerTick: 0.25, startYear: 2030, startMonth: 1, startDay: 1 },
   world: {
     chunkSize: 10,
     activeRadius: 2,

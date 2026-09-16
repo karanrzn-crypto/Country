@@ -6,6 +6,7 @@ import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/Ma
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
+import { buildBiomeLegend, biomeLegendSignature } from './biomeLegend';
 
 /**
  * Strategic map UI (Part 1 + 2 + 3):
@@ -39,6 +40,9 @@ export class MapUI {
   };
   private layerButtons = new Map<MapLayerId, UIElement>();
   private confirmButton: UIElement | null = null;
+  private legendContainer: UIElement | null = null;
+  private legendRows: UIElement[] = [];
+  private legendSignature = '';
   private readonly detailChips: UIElement[] = [];
   private readonly detailRelationRows: UIElement[] = [];
 
@@ -52,6 +56,7 @@ export class MapUI {
   register(context: SystemContext, root: UIElement): void {
     this.context = context;
     this.buildInfoPanel(root);
+    this.buildLegend(root);
     this.screens.registerScreen('map', (container) => this.buildMapScreen(container));
     this.screens.registerScreen('countrySelect', (container) => this.buildCountrySelectScreen(container));
     this.refreshInfo();
@@ -158,6 +163,47 @@ export class MapUI {
     }
   }
 
+  // —— biome legend (Part 4) ——
+
+  /**
+   * Legend panel at the right edge of the map. Shown ONLY while the biomes
+   * layer is visible; rows/colors/labels come from buildBiomeLegend (model
+   * + theme — the UI owns no biome data). Rows rebuild only when the
+   * legend's content signature changes.
+   */
+  private buildLegend(root: UIElement): void {
+    this.legendContainer = this.create('div', 'map-legend');
+    const title = this.create('div', 'map-legend-title');
+    title.setText('BIOMES');
+    this.legendContainer.appendChild(title);
+    root.appendChild(this.legendContainer);
+  }
+
+  private refreshLegend(): void {
+    const context = this.context;
+    if (context === null || this.legendContainer === null) return;
+    const visible = context.state.map.layerVisibility.biomes === true;
+    this.legendContainer.setVisible(visible);
+    if (!visible) return;
+    const entries = buildBiomeLegend(context.map, context.data.mapTheme);
+    const signature = biomeLegendSignature(entries);
+    if (signature === this.legendSignature) return;
+    this.legendSignature = signature;
+    for (const row of this.legendRows) row.remove();
+    this.legendRows.length = 0;
+    for (const entry of entries) {
+      const row = this.create('div', 'map-legend-row');
+      const swatch = this.create('span', 'map-legend-swatch');
+      swatch.setAttribute('style', `background: ${entry.color}`);
+      const label = this.create('span', 'map-legend-label');
+      label.setText(entry.label);
+      row.appendChild(swatch);
+      row.appendChild(label);
+      this.legendContainer.appendChild(row);
+      this.legendRows.push(row);
+    }
+  }
+
   /** Re-reads map slice + country slice + model into the panel (observer). */
   refreshInfo(): void {
     const context = this.context;
@@ -243,6 +289,7 @@ export class MapUI {
       const visible = state.layerVisibility[layerId] !== false;
       button.setClass(visible ? 'map-layer-toggle on' : 'map-layer-toggle off');
     }
+    this.refreshLegend();
     if (this.confirmButton !== null) {
       const selectable = state.selectedCountryId !== null;
       this.confirmButton.setClass(selectable ? 'screen-confirm' : 'screen-confirm disabled');

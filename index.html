@@ -30,6 +30,43 @@
       .hud .hud-key { color: #8a94a6; }
       .hud .hud-value { color: #e8edf5; }
 
+      /* —— time bar (top-center): date + play/pause + speed steps —— */
+      .time-bar {
+        position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 5px;
+        background: rgba(13, 18, 28, 0.88);
+        border: 1px solid #2a3446; border-radius: 6px;
+        padding: 6px 10px;
+      }
+      .time-date {
+        color: #e8edf5; font-weight: 700; letter-spacing: 1px; margin-right: 6px;
+        font-variant-numeric: tabular-nums; font-size: 13px;
+      }
+      .time-btn {
+        font: inherit; font-size: 11px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 3px;
+        padding: 3px 9px; color: #cfd8e6; background: #1a2333;
+      }
+      .time-btn:hover { background: #243149; border-color: #4a5f88; }
+      .time-btn.on { border-color: #4a7f4a; color: #b8e6b8; background: #1d2b1d; font-weight: 700; }
+      .time-btn.pause.stopped { border-color: #8a6d2f; color: #ffd27f; background: #2b2312; font-weight: 700; }
+
+      /* —— biome legend (right edge, visible only while the layer is on) —— */
+      .map-legend {
+        position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+        background: rgba(13, 18, 28, 0.88);
+        border: 1px solid #2a3446; border-radius: 6px;
+        padding: 8px 12px; min-width: 132px;
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      .map-legend-title { color: #8a94a6; font-size: 11px; letter-spacing: 2px; font-weight: 700; }
+      .map-legend-row { display: flex; align-items: center; gap: 8px; }
+      .map-legend-swatch {
+        width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+      }
+      .map-legend-label { color: #cfd8e6; font-size: 12px; }
+
       .debug-overlay {
         position: absolute; top: 12px; left: 12px;
         background: rgba(10, 14, 20, 0.88);

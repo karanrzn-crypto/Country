@@ -48,9 +48,10 @@ describe('Headless integration (renderer-independent core)', () => {
     game.gameCommands.send({ type: 'game.setSpeed', speed: 4 });
     game.gameCommands.send({ type: 'player.setMode', mode: 'commander' });
     game.gameCommands.send({ type: 'player.focusChunk', chunkId: 'region_west.c0x0' });
-    // Commands flush on the next frame's state phase:
+    // Commands flush on the next frame's state phase. Speed values snap to
+    // the nearest data-driven speed step: 4 → step ×5.
     game.frame(1 / 60);
-    expect(game.gameTime.speed).toBe(4);
+    expect(game.gameTime.speed).toBe(5);
     expect(game.gameState.player.mode).toBe('commander');
     expect(game.gameState.player.focusChunkId).toBe('region_west.c0x0');
     game.dispose();

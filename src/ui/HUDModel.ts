@@ -1,24 +1,22 @@
 import type { GameState } from '../state/GameState';
 import { regionsOfCountry } from '../state/slices/worldSlice';
 import { totalPopulation } from '../state/slices/populationSlice';
-import type { CalendarDate } from '../time/Calendar';
-import { formatCalendarDate } from '../time/Calendar';
 
 export interface HudModel {
-  readonly date: string;
-  readonly speed: string;
   readonly mode: string;
   readonly treasury: string;
   readonly population: string;
   readonly chunks: string;
 }
 
+/** Pure speed-label formatting — '×1', '×2', '×5', '×10'. */
+export function formatSpeedLabel(speed: number): string {
+  return `×${speed}`;
+}
+
 /** Pure HUD state → strings mapping (unit-testable without DOM). */
 export function buildHudModel(
   state: GameState,
-  date: CalendarDate,
-  paused: boolean,
-  speed: number,
   modeName: string,
   chunkCounts: { active: number; simulated: number; unloaded: number }
 ): HudModel {
@@ -33,8 +31,6 @@ export function buildHudModel(
   void totalPopulation;
 
   return {
-    date: formatCalendarDate(date),
-    speed: paused ? 'PAUSED' : `×${speed}`,
     mode: modeName ?? '—',
     treasury: Math.round(treasury).toLocaleString('en-US'),
     population: Math.round(population).toLocaleString('en-US'),

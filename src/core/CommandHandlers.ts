@@ -13,7 +13,10 @@ type EntityId = string;
  */
 export interface CoreGameApi {
   togglePause(): void;
+  setPaused(paused: boolean): void;
   setSpeed(speed: number): void;
+  setSpeedStep(index: number): void;
+  cycleSpeed(): void;
   setPlayerMode(mode: PlayerModeId): boolean;
   focusChunk(chunkId: string): void;
   selectEntities(entityIds: readonly EntityId[]): void;
@@ -40,7 +43,10 @@ export interface CoreGameApi {
 export function registerCoreCommandHandlers(game: CoreGameApi): void {
   const bus = game.commandBus;
   bus.register('game.togglePause', () => game.togglePause());
+  bus.register('game.setPaused', (cmd) => game.setPaused(cmd.paused));
   bus.register('game.setSpeed', (cmd) => game.setSpeed(cmd.speed));
+  bus.register('game.setSpeedStep', (cmd) => game.setSpeedStep(cmd.index));
+  bus.register('game.cycleSpeed', () => game.cycleSpeed());
   bus.register('player.setMode', (cmd) => game.setPlayerMode(cmd.mode));
   bus.register('player.focusChunk', (cmd) => game.focusChunk(cmd.chunkId));
   bus.register('player.select', (cmd) => game.selectEntities(cmd.entityIds));

@@ -7,8 +7,8 @@ describe('EventBus', () => {
     const bus = new EventBus();
     const received: number[] = [];
     bus.on('game.speedChanged', ({ speed }) => received.push(speed));
-    bus.emit('game.speedChanged', { speed: 2 });
-    bus.emit('game.speedChanged', { speed: 4 });
+    bus.emit('game.speedChanged', { speed: 2, stepIndex: 1 });
+    bus.emit('game.speedChanged', { speed: 4, stepIndex: 3 });
     expect(received).toEqual([2, 4]);
   });
 
@@ -54,9 +54,9 @@ describe('EventBus', () => {
     const bus = new EventBus();
     let count = 0;
     const off = bus.on('time.tick', () => count++);
-    bus.emit('time.tick', { tick: 1, year: 1, month: 1, day: 1, hour: 0 });
+    bus.emit('time.tick', { tick: 1, year: 1, month: 1, day: 1, hour: 0, minute: 0 });
     off();
-    bus.emit('time.tick', { tick: 2, year: 1, month: 1, day: 1, hour: 1 });
+    bus.emit('time.tick', { tick: 2, year: 1, month: 1, day: 1, hour: 1, minute: 15 });
     expect(count).toBe(1);
   });
 

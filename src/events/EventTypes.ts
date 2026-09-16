@@ -17,6 +17,7 @@ export interface TickInfoPayload {
   readonly month: number;
   readonly day: number;
   readonly hour: number;
+  readonly minute: number;
 }
 
 export interface CalendarChangePayload {
@@ -24,6 +25,7 @@ export interface CalendarChangePayload {
   readonly month: number;
   readonly day: number;
   readonly hour: number;
+  readonly minute: number;
 }
 
 export interface GameEventMap {
@@ -31,7 +33,7 @@ export interface GameEventMap {
   'game.ready': { readonly tick: number };
   'game.paused': Record<string, never>;
   'game.resumed': Record<string, never>;
-  'game.speedChanged': { readonly speed: number };
+  'game.speedChanged': { readonly speed: number; readonly stepIndex: number };
   'game.error': { readonly code: string; readonly message: string };
 
   // —— time ——
