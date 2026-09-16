@@ -25,7 +25,7 @@ export interface CoreGameApi {
   mapSetLayerVisible(layer: string, visible: boolean): void;
   mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void;
   mapPanBy(dx: number, dz: number): void;
-  mapZoomBy(factor: number, anchor?: { x: number; z: number }): void;
+  mapZoomBy(factor: number, anchor?: { x: number; z: number }, screen?: { x: number; y: number }): void;
   mapFocusCountry(countryId: string): void;
   mapSetViewport(width: number, height: number): void;
   readonly ui: UIManager | null;
@@ -58,7 +58,8 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('map.zoomBy', (cmd) =>
     game.mapZoomBy(
       cmd.factor,
-      cmd.anchorX !== undefined && cmd.anchorZ !== undefined ? { x: cmd.anchorX, z: cmd.anchorZ } : undefined
+      cmd.anchorX !== undefined && cmd.anchorZ !== undefined ? { x: cmd.anchorX, z: cmd.anchorZ } : undefined,
+      cmd.screenX !== undefined && cmd.screenY !== undefined ? { x: cmd.screenX, y: cmd.screenY } : undefined
     )
   );
   bus.register('map.focusCountry', (cmd) => game.mapFocusCountry(cmd.countryId));

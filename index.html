@@ -80,7 +80,28 @@
         background: rgba(13, 18, 28, 0.88);
         border: 1px solid #2a3446; border-radius: 6px;
         padding: 10px 14px; min-width: 280px;
+        max-height: calc(100% - 24px); overflow: auto;
       }
+      .map-info-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+      .map-info-flag { width: 30px; height: 20px; border: 1px solid #2a3446; border-radius: 2px; display: block; flex: 0 0 auto; }
+      .map-country-detail { display: flex; flex-direction: column; gap: 2px; }
+      .map-country-basic { display: flex; flex-direction: column; gap: 2px; }
+      .map-country-name { color: #e8edf5; font-weight: 700; margin-bottom: 2px; }
+      .map-section-title { color: #8a94a6; margin-top: 7px; font-size: 11px; letter-spacing: 1px; }
+      .map-resource-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+      .map-resource-chip { border: 1px solid #33415c; border-radius: 3px; padding: 1px 5px; font-size: 10px; color: #cfd8e6; }
+      .map-resource-chip.empty { opacity: 0.5; }
+      .map-relations { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+      .map-relation-row { display: flex; justify-content: space-between; gap: 10px; }
+      .map-relation-name { color: #cfd8e6; }
+      .map-relation-band.band-hostile { color: #ff6b6b; }
+      .map-relation-band.band-wary { color: #ffb454; }
+      .map-relation-band.band-neutral { color: #aeb8c8; }
+      .map-relation-band.band-cordial { color: #9fe6a0; }
+      .map-relation-band.band-friendly { color: #52d273; }
+      .map-relation-empty { color: #6b7688; font-size: 11px; }
+      .map-country-row { display: flex; align-items: center; gap: 8px; }
+      .map-row-flag { width: 24px; height: 16px; border: 1px solid #2a3446; border-radius: 2px; display: block; flex: 0 0 auto; }
       .map-info-title { color: #7fb2ff; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
       .map-info-row { display: flex; justify-content: space-between; gap: 16px; }
       .map-info-key { color: #8a94a6; }

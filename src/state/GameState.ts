@@ -18,6 +18,7 @@ import type { WarSlice } from './slices/warSlice';
 import type { EnvironmentSlice } from './slices/environmentSlice';
 import type { PlayerSlice } from './slices/playerSlice';
 import type { MapSlice } from './slices/mapSlice';
+import type { CountrySlice } from './slices/countrySlice';
 
 export interface GameState {
   world: WorldSlice;
@@ -32,6 +33,8 @@ export interface GameState {
   environment: EnvironmentSlice;
   player: PlayerSlice;
   map: MapSlice;
+  /** Part 2 — strategic-map country data foundation (profiles + map join). */
+  countries: CountrySlice;
 }
 
 /** Slice keys in canonical order (save serialization + state hashing). */
@@ -47,5 +50,6 @@ export const STATE_SLICE_KEYS: readonly (keyof GameState)[] = [
   'war',
   'environment',
   'player',
-  'map'
+  'map',
+  'countries'
 ] as const;

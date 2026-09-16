@@ -5,6 +5,7 @@ export class InMemoryUIElement implements UIElement {
   text = '';
   className = '';
   visible = true;
+  readonly attributes = new Map<string, string>();
   readonly children: InMemoryUIElement[] = [];
   parent: InMemoryUIElement | null = null;
   private readonly clickHandlers = new Set<() => void>();
@@ -19,6 +20,10 @@ export class InMemoryUIElement implements UIElement {
 
   setVisible(visible: boolean): void {
     this.visible = visible;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
   }
 
   appendChild(child: UIElement): void {

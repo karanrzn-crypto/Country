@@ -11,6 +11,7 @@ export interface UIElement {
   setText(text: string): void;
   setClass(className: string): void;
   setVisible(visible: boolean): void;
+  setAttribute(name: string, value: string): void;
   appendChild(child: UIElement): void;
   remove(): void;
   onClick(handler: () => void): Unsubscribe;

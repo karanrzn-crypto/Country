@@ -2,8 +2,8 @@ import { DataValidationError } from '../utils/errors';
 import type { Logger } from '../utils/Logger';
 import { validateOrThrow } from '../utils/validation';
 import type { FieldSchema } from '../utils/validation';
-import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA } from './schemas';
-import type { WorldDataJson } from './types';
+import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA, COUNTRY_PROFILE_SCHEMA } from './schemas';
+import type { WorldDataJson, CountryProfileJson } from './types';
 import type { UnitTypeDef, EquipmentDef } from '../military/types';
 import type { FactoryTypeDef, ResourceDef } from '../economy/types';
 import type { AIStrategyDef } from '../ai/types';
@@ -17,6 +17,7 @@ import strategiesJson from './strategies.json';
 import playerModesJson from './playerModes.json';
 import inputBindingsJson from './inputBindings.json';
 import mapThemeJson from './mapTheme.json';
+import countriesJson from './countries.json';
 import demoWorldJson from './worlds/demo-country.json';
 
 export interface EconomyDataBundle {
@@ -44,6 +45,7 @@ export class DataRegistry {
   private readonly playerModes: readonly PlayerModeDef[];
   private readonly bindings: InputBindings;
   private readonly theme: MapThemeData;
+  private readonly countryProfiles: readonly CountryProfileJson[];
   private readonly worlds: Readonly<Record<string, WorldDataJson>>;
 
   constructor(private readonly logger?: Logger) {
@@ -54,6 +56,7 @@ export class DataRegistry {
     this.playerModes = Object.values(playerModesJson) as unknown as PlayerModeDef[];
     this.bindings = inputBindingsJson as unknown as InputBindings;
     this.theme = mapThemeJson as unknown as MapThemeData;
+    this.countryProfiles = countriesJson as unknown as readonly CountryProfileJson[];
     this.worlds = { 'demo-country': demoWorldJson as unknown as WorldDataJson };
 
     this.validateAll();
@@ -87,6 +90,10 @@ export class DataRegistry {
     );
     check(() => validateOrThrow(this.bindings, INPUT_BINDINGS_SCHEMA, 'inputBindings'), 'inputBindings');
     check(() => validateOrThrow(this.theme, MAP_THEME_SCHEMA, 'mapTheme'), 'mapTheme');
+    check(
+      () => validateOrThrow(this.countryProfiles, { type: 'array', minLength: 1, items: COUNTRY_PROFILE_SCHEMA }, 'countries'),
+      'countries'
+    );
     for (const [worldId, world] of Object.entries(this.worlds)) {
       check(() => validateOrThrow(world, WORLD_SCHEMA, `worlds.${worldId}`), `worlds.${worldId}`);
     }
@@ -118,6 +125,24 @@ export class DataRegistry {
       for (const transition of mode.transitions) {
         if (!this.playerModes.some((m) => m.id === transition)) {
           issues.push(`playerModes.${mode.id}: unknown transition target "${transition}"`);
+        }
+      }
+    }
+
+    // Country profiles: unique ids + relations must reference existing ids.
+    const profileIds = new Set(this.countryProfiles.map((profile) => profile.id));
+    if (profileIds.size !== this.countryProfiles.length) {
+      issues.push('countries: duplicate country ids');
+    }
+    for (const profile of this.countryProfiles) {
+      for (const [otherId, value] of Object.entries(profile.foreignRelations)) {
+        if (otherId === profile.id) {
+          issues.push(`countries.${profile.id}: relation to itself`);
+        } else if (!profileIds.has(otherId)) {
+          issues.push(`countries.${profile.id}: relation references unknown country "${otherId}"`);
+        }
+        if (value < -100 || value > 100) {
+          issues.push(`countries.${profile.id}: relation to "${otherId}" outside [-100, +100]`);
         }
       }
     }
@@ -166,6 +191,17 @@ export class DataRegistry {
   /** Visual theme of the strategic map (colors, sizes — data-driven). */
   get mapTheme(): MapThemeData {
     return this.theme;
+  }
+
+  /** Static country profiles (Part 2), keyed implicitly by `id`. */
+  get countryProfileList(): readonly CountryProfileJson[] {
+    return this.countryProfiles;
+  }
+
+  countryProfile(id: string): CountryProfileJson {
+    const profile = this.countryProfiles.find((candidate) => candidate.id === id);
+    if (profile === undefined) throw new DataValidationError(`Unknown country profile "${id}"`);
+    return profile;
   }
 
   world(id: string): WorldDataJson {

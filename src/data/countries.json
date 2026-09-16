@@ -1,0 +1,102 @@
+[
+  {
+    "id": "country_0",
+    "name": "Doroustan",
+    "flag": { "layout": "horizontal-stripes", "colors": ["#b23a48", "#f5efe2", "#b23a48"], "emblem": "star", "emblemColor": "#f0c75e" },
+    "population": 7400000,
+    "economy": { "gdp": 172, "treasury": 980, "income": 46, "expenses": 41 },
+    "resources": { "food": 55, "oil": 70, "iron": 30 },
+    "military": { "manpower": 160000, "armySize": 62000, "equipment": 96, "aircraft": 120, "navy": 24 },
+    "foreignRelations": { "country_1": 35, "country_2": -20, "country_4": 15 }
+  },
+  {
+    "id": "country_1",
+    "name": "Ororeth",
+    "flag": { "layout": "vertical-stripes", "colors": ["#2f6f6f", "#f5efe2", "#2f6f6f"], "emblem": "sun", "emblemColor": "#f0c75e" },
+    "population": 4400000,
+    "economy": { "gdp": 128, "treasury": 1240, "income": 52, "expenses": 38 },
+    "resources": { "food": 40, "oil": 25, "gold": 10 },
+    "military": { "manpower": 96000, "armySize": 38000, "equipment": 74, "aircraft": 90, "navy": 18 },
+    "foreignRelations": { "country_3": 20, "country_4": 25, "country_5": -35 }
+  },
+  {
+    "id": "country_2",
+    "name": "Maraeseleeth",
+    "flag": { "layout": "horizontal-stripes", "colors": ["#3f7a3f", "#f5efe2", "#3f7a3f", "#c9a227"], "emblem": "circle", "emblemColor": "#f5efe2" },
+    "population": 10200000,
+    "economy": { "gdp": 96, "treasury": 410, "income": 24, "expenses": 29 },
+    "resources": { "food": 85, "coal": 35 },
+    "military": { "manpower": 240000, "armySize": 95000, "equipment": 61, "aircraft": 45, "navy": 12 },
+    "foreignRelations": { "country_4": 10 }
+  },
+  {
+    "id": "country_3",
+    "name": "Caluthova",
+    "flag": { "layout": "canton", "colors": ["#5a4fcf", "#f5efe2"], "emblem": "star", "emblemColor": "#f5efe2" },
+    "population": 7100000,
+    "economy": { "gdp": 88, "treasury": 640, "income": 28, "expenses": 27 },
+    "resources": { "food": 60, "oil": 45, "coal": 20 },
+    "military": { "manpower": 130000, "armySize": 51000, "equipment": 58, "aircraft": 60, "navy": 15 },
+    "foreignRelations": {}
+  },
+  {
+    "id": "country_4",
+    "name": "Loreimark",
+    "flag": { "layout": "horizontal-stripes", "colors": ["#8c8c8c", "#f5efe2", "#8c8c8c", "#b23a48"], "emblem": "cross", "emblemColor": "#b23a48" },
+    "population": 9300000,
+    "economy": { "gdp": 118, "treasury": 720, "income": 39, "expenses": 33 },
+    "resources": { "coal": 60, "iron": 65, "food": 30 },
+    "military": { "manpower": 200000, "armySize": 88000, "equipment": 120, "aircraft": 75, "navy": 0 },
+    "foreignRelations": { "country_5": -55, "country_6": 40, "country_8": 20 }
+  },
+  {
+    "id": "country_5",
+    "name": "Rosiafenournium",
+    "flag": { "layout": "vertical-stripes", "colors": ["#c9a227", "#3a2f22", "#c9a227"], "emblem": "crescent", "emblemColor": "#f5efe2" },
+    "population": 4800000,
+    "economy": { "gdp": 54, "treasury": 300, "income": 15, "expenses": 17 },
+    "resources": { "iron": 40, "gold": 55, "coal": 30 },
+    "military": { "manpower": 90000, "armySize": 42000, "equipment": 49, "aircraft": 30, "navy": 0 },
+    "foreignRelations": { "country_7": 30, "country_9": -15 }
+  },
+  {
+    "id": "country_6",
+    "name": "Yariargaleimheim",
+    "flag": { "layout": "horizontal-stripes", "colors": ["#5fb3a1", "#f5efe2"], "emblem": "sun", "emblemColor": "#f0c75e" },
+    "population": 5900000,
+    "economy": { "gdp": 47, "treasury": 520, "income": 14, "expenses": 11 },
+    "resources": { "food": 70, "oil": 15 },
+    "military": { "manpower": 64000, "armySize": 21000, "equipment": 27, "aircraft": 24, "navy": 8 },
+    "foreignRelations": {}
+  },
+  {
+    "id": "country_7",
+    "name": "Zelaumland",
+    "flag": { "layout": "canton", "colors": ["#7e9fd9", "#f5efe2"], "emblem": "star", "emblemColor": "#c9a227" },
+    "population": 4100000,
+    "economy": { "gdp": 33, "treasury": 260, "income": 9, "expenses": 10 },
+    "resources": { "food": 35, "oil": 80, "gold": 15 },
+    "military": { "manpower": 52000, "armySize": 18000, "equipment": 21, "aircraft": 16, "navy": 9 },
+    "foreignRelations": {}
+  },
+  {
+    "id": "country_8",
+    "name": "Aririum",
+    "flag": { "layout": "horizontal-stripes", "colors": ["#a678c4", "#f5efe2", "#a678c4"], "emblem": "circle", "emblemColor": "#f0c75e" },
+    "population": 5200000,
+    "economy": { "gdp": 71, "treasury": 580, "income": 22, "expenses": 21 },
+    "resources": { "iron": 35, "coal": 25, "food": 40 },
+    "military": { "manpower": 110000, "armySize": 44000, "equipment": 66, "aircraft": 85, "navy": 14 },
+    "foreignRelations": { "country_6": 25, "country_9": 45 }
+  },
+  {
+    "id": "country_9",
+    "name": "Eleia",
+    "flag": { "layout": "vertical-stripes", "colors": ["#2f6f9f", "#f5efe2", "#b23a48"], "emblem": "cross", "emblemColor": "#f5efe2" },
+    "population": 9000000,
+    "economy": { "gdp": 105, "treasury": 860, "income": 31, "expenses": 28 },
+    "resources": { "food": 50, "oil": 30, "gold": 20 },
+    "military": { "manpower": 175000, "armySize": 58000, "equipment": 83, "aircraft": 95, "navy": 31 },
+    "foreignRelations": { "country_7": 20 }
+  }
+]

@@ -38,6 +38,10 @@ class BrowserUIElement implements UIElement {
     this.element.style.display = visible ? '' : 'none';
   }
 
+  setAttribute(name: string, value: string): void {
+    this.element.setAttribute(name, value);
+  }
+
   appendChild(child: UIElement): void {
     if (child instanceof BrowserUIElement) {
       this.element.appendChild(child.element);

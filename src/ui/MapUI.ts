@@ -3,21 +3,43 @@ import type { SystemContext } from '../core/GameContext';
 import type { UIElement } from './adapter/UIDomAdapter';
 import type { ScreenManager } from './ScreenManager';
 import { MAP_LAYER_ORDER, type MapLayerId } from '../world/map/MapLayers';
+import { relationBand } from '../state/slices/countrySlice';
+import type { CountryState } from '../state/slices/countrySlice';
+import { flagDataUrl } from './flags';
 
 /**
- * Strategic map UI (Part 1):
- * - selection info panel (Country Name / Capital / Province Count / City
- *   Count — nothing more, per spec);
+ * Strategic map UI (Part 1 + Part 2):
+ * - country info panel: flag, capital, population, economy, resources,
+ *   military and foreign relations — all read from Game State (countrySlice
+ *   + static map model); the UI owns no country data;
  * - layer toggle row (each map layer independently switchable);
- * - the 'map' screen lists countries; clicking selects + focuses it.
+ * - the 'map' screen lists countries (flag + core stats); clicking selects +
+ *   focuses it.
  *
  * UI observes state + sends commands only — it never mutates state directly.
  */
 export class MapUI {
   private context: SystemContext | null = null;
-  private infoRows: { label: string; value: UIElement }[] = [];
+  private readonly infoRows: { label: string; value: UIElement }[] = [];
   private infoTitle: UIElement | null = null;
+  private detailContainer: UIElement | null = null;
+  private basicContainer: UIElement | null = null;
+  private detailNodes: {
+    flagImg: UIElement;
+    name: UIElement;
+    rows: Map<string, UIElement>;
+    resources: UIElement;
+    relations: UIElement;
+  } = {
+    flagImg: null as unknown as UIElement,
+    name: null as unknown as UIElement,
+    rows: new Map(),
+    resources: null as unknown as UIElement,
+    relations: null as unknown as UIElement
+  };
   private layerButtons = new Map<MapLayerId, UIElement>();
+  private readonly detailChips: UIElement[] = [];
+  private readonly detailRelationRows: UIElement[] = [];
 
   constructor(
     private readonly screens: ScreenManager,
@@ -33,25 +55,83 @@ export class MapUI {
     this.refreshInfo();
   }
 
+  // —— info panel ——
+
   private buildInfoPanel(root: UIElement): void {
     const panel = this.create('div', 'map-info-panel');
     root.appendChild(panel);
 
+    // —— header: flag + title ——
+    const header = this.create('div', 'map-info-header');
+    const flagImg = this.create('img', 'map-info-flag');
+    flagImg.setAttribute('alt', 'flag');
+    header.appendChild(flagImg);
     const title = this.create('div', 'map-info-title');
+    header.appendChild(title);
+    panel.appendChild(header);
     this.infoTitle = title;
-    panel.appendChild(title);
 
-    for (const label of ['Country', 'Capital', 'Provinces', 'Cities', 'Selection']) {
+    // —— country detail (Part 2) ——
+    const detail = this.create('div', 'map-country-detail');
+    const detailName = this.create('div', 'map-country-name');
+    detail.appendChild(detailName);
+    panel.appendChild(detail);
+
+    const addRow = (parent: UIElement, key: string, className = 'map-info-row'): UIElement => {
+      const row = this.create('div', className);
+      const keyEl = this.create('span', 'map-info-key');
+      keyEl.setText(key);
+      const valueEl = this.create('span', 'map-info-value');
+      row.appendChild(keyEl);
+      row.appendChild(valueEl);
+      parent.appendChild(row);
+      return valueEl;
+    };
+
+    const section = (title: string): UIElement => {
+      const el = this.create('div', 'map-section-title');
+      el.setText(title);
+      detail.appendChild(el);
+      return el;
+    };
+
+    const rows = new Map<string, UIElement>();
+    rows.set('Capital', addRow(detail, 'Capital'));
+    rows.set('Population', addRow(detail, 'Population'));
+    section('Economy');
+    for (const key of ['GDP', 'Treasury', 'Income', 'Expenses'] as const) {
+      rows.set(key, addRow(detail, key));
+    }
+    section('Military');
+    for (const key of ['Manpower', 'Army', 'Equipment', 'Aircraft', 'Navy'] as const) {
+      rows.set(key, addRow(detail, key));
+    }
+    section('Resources');
+    const resources = this.create('div', 'map-resource-chips');
+    detail.appendChild(resources);
+    section('Foreign Relations');
+    const relations = this.create('div', 'map-relations');
+    detail.appendChild(relations);
+
+    this.detailNodes = { flagImg, name: detailName, rows, resources, relations };
+    this.detailContainer = detail;
+
+    // —— basic rows (no country selected) ——
+    const basic = this.create('div', 'map-country-basic');
+    panel.appendChild(basic);
+    for (const label of ['Country', 'Provinces', 'Cities', 'Selection']) {
       const row = this.create('div', 'map-info-row');
       const key = this.create('span', 'map-info-key');
       key.setText(label);
       const value = this.create('span', 'map-info-value');
       row.appendChild(key);
       row.appendChild(value);
-      panel.appendChild(row);
+      basic.appendChild(row);
       this.infoRows.push({ label, value });
     }
+    this.basicContainer = basic;
 
+    // —— layer toggles ——
     const layerTitle = this.create('div', 'map-layers-title');
     layerTitle.setText('Layers');
     panel.appendChild(layerTitle);
@@ -70,24 +150,69 @@ export class MapUI {
     panel.appendChild(layerRow);
   }
 
-  /** Re-reads the map slice + model into the info panel (observer, cheap). */
+  /** Re-reads map slice + country slice + model into the panel (observer). */
   refreshInfo(): void {
     const context = this.context;
-    if (context === null || this.infoTitle === null) return;
+    if (context === null || this.basicContainer === null) return;
     const state = context.state.map;
     const model = context.map;
+    const countrySlice = context.state.countries.countries;
 
-    this.infoTitle.setText(`STRATEGIC MAP — ${model.continentName.toUpperCase()}`);
-
+    const selectedCountryId = state.selectedCountryId;
     const country =
-      state.selectedCountryId !== null ? model.countries[state.selectedCountryId] : undefined;
+      selectedCountryId !== null ? model.countries[selectedCountryId] : undefined;
+    const countryState: CountryState | undefined =
+      selectedCountryId !== null ? countrySlice[selectedCountryId] : undefined;
     const province =
       state.selectedProvinceId !== null ? model.provinces[state.selectedProvinceId] : undefined;
     const city = state.selectedCityId !== null ? model.cities[state.selectedCityId] : undefined;
 
+    const hasDetail = country !== undefined && countryState !== undefined;
+    this.detailContainer?.setVisible(hasDetail);
+    this.basicContainer.setVisible(!hasDetail);
+    // The flag asset only exists for a selected country — hide the placeholder.
+    this.detailNodes.flagImg.setVisible(hasDetail);
+
+    if (country !== undefined && countryState !== undefined) {
+      this.detailNodes.flagImg.setAttribute('src', flagDataUrl(countryState.flag));
+      this.detailNodes.name.setText(countryState.name);
+      const fill = (key: string, value: string): void => {
+        const node = this.detailNodes.rows.get(key);
+        if (node !== undefined) node.setText(value);
+      };
+      const capital =
+        countryState.capitalId !== null ? model.cities[countryState.capitalId] : undefined;
+      fill('Capital', capital !== undefined ? capital.name : '—');
+      fill('Population', formatCompact(countryState.population));
+      fill('GDP', `${countryState.economy.gdp}B`);
+      fill('Treasury', `${countryState.economy.treasury}`);
+      fill('Income', `+${countryState.economy.income}`);
+      fill('Expenses', `-${countryState.economy.expenses}`);
+      fill('Manpower', formatCompact(countryState.military.manpower));
+      fill('Army', formatCompact(countryState.military.armySize));
+      fill('Equipment', `${countryState.military.equipment}`);
+      fill('Aircraft', `${countryState.military.aircraft}`);
+      fill('Navy', `${countryState.military.navy}`);
+
+      this.detailNodes.resources.setText('');
+      for (const chip of this.detailChips) chip.remove();
+      this.detailChips.length = 0;
+      for (const row of this.detailRelationRows) row.remove();
+      this.detailRelationRows.length = 0;
+      rebuildChips(this.detailNodes.resources, countryState, this.create, this.detailChips);
+      rebuildRelations(
+        this.detailNodes.relations,
+        countryState,
+        model,
+        countrySlice,
+        this.create,
+        this.detailRelationRows
+      );
+    }
+
+    // Basic rows (only visible without a selection, but keep them fresh).
     const values: Record<string, string> = {
       Country: country !== undefined ? country.name : '—',
-      Capital: country !== undefined ? model.cities[country.capitalCityId].name : '—',
       Provinces: country !== undefined ? String(country.provinceIds.length) : '—',
       Cities: country !== undefined ? String(country.cityIds.length) : '—',
       Selection:
@@ -103,12 +228,16 @@ export class MapUI {
       row.value.setText(values[row.label] ?? '');
     }
 
+    const title = this.context !== null ? model.continentName.toUpperCase() : 'STRATEGIC MAP';
+    this.infoTitle?.setText(`STRATEGIC MAP — ${title}`);
+
     for (const [layerId, button] of this.layerButtons) {
       const visible = state.layerVisibility[layerId] !== false;
       button.setClass(visible ? 'map-layer-toggle on' : 'map-layer-toggle off');
     }
   }
 
+  /** The 'map' screen: flag + core stats per country; click selects + focuses. */
   private buildMapScreen(container: UIElement): void {
     const context = this.context;
     const title = this.create('h2');
@@ -119,12 +248,19 @@ export class MapUI {
     const list = this.create('div', 'map-country-list');
     for (const countryId of context.map.countryOrder) {
       const country = context.map.countries[countryId];
+      const countryState = context.state.countries.countries[countryId];
       const capital = context.map.cities[country.capitalCityId];
-      const button = this.create('button');
-      button.setText(
-        `${country.name} — capital ${capital.name}, ${country.provinceIds.length} provinces, ` +
-          `${country.cityIds.length} cities${country.coastal ? '' : ' (landlocked)'}`
+      const button = this.create('button', 'map-country-row');
+      const flag = this.create('img', 'map-row-flag');
+      flag.setAttribute('alt', '');
+      flag.setAttribute('src', flagDataUrl(countryState.flag));
+      button.appendChild(flag);
+      const label = this.create('span');
+      label.setText(
+        `${countryState.name} — capital ${capital.name}, ${formatCompact(countryState.population)}` +
+          `${country.coastal ? '' : ' (landlocked)'}`
       );
+      button.appendChild(label);
       button.onClick(() => {
         this.commands.send({ type: 'map.select', countryId: country.id });
         this.commands.send({ type: 'map.focusCountry', countryId: country.id });
@@ -133,5 +269,73 @@ export class MapUI {
       list.appendChild(button);
     }
     container.appendChild(list);
+  }
+}
+
+// —— formatting + small DOM builders (module-scope, DOM-free logic where possible) ——
+
+export function formatCompact(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return `${trim(value / 1_000_000_000)}B`;
+  if (abs >= 1_000_000) return `${trim(value / 1_000_000)}M`;
+  if (abs >= 10_000) return `${trim(value / 1_000)}k`;
+  return String(Math.round(value));
+}
+
+function trim(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function rebuildChips(
+  container: UIElement,
+  countryState: CountryState,
+  create: (tag: string, className?: string) => UIElement,
+  tracker: UIElement[]
+): void {
+  const entries = Object.entries(countryState.resources).sort((a, b) => b[1] - a[1]);
+  for (const [resourceId, amount] of entries.slice(0, 6)) {
+    const chip = create('span', 'map-resource-chip');
+    chip.setText(`${resourceId} ${amount}`);
+    container.appendChild(chip);
+    tracker.push(chip);
+  }
+  if (entries.length === 0) {
+    const empty = create('span', 'map-resource-chip empty');
+    empty.setText('none');
+    container.appendChild(empty);
+    tracker.push(empty);
+  }
+}
+
+function rebuildRelations(
+  container: UIElement,
+  countryState: CountryState,
+  model: SystemContext['map'],
+  countrySlice: Readonly<Record<string, CountryState>>,
+  create: (tag: string, className?: string) => UIElement,
+  tracker: UIElement[]
+): void {
+  const entries = Object.entries(countryState.foreignRelations).sort(
+    (a, b) => Math.abs(b[1]) - Math.abs(a[1]) || a[0].localeCompare(b[0])
+  );
+  for (const [otherId, value] of entries.slice(0, 6)) {
+    const otherProfile = countrySlice[otherId];
+    const row = create('div', 'map-relation-row');
+    const name = create('span', 'map-relation-name');
+    name.setText(otherProfile !== undefined ? otherProfile.name : model.countries[otherId]?.name ?? otherId);
+    const band = create('span', `map-relation-band band-${relationBand(value)}`);
+    band.setText(`${relationBand(value)} ${value > 0 ? '+' : ''}${value}`);
+    row.appendChild(name);
+    row.appendChild(band);
+    container.appendChild(row);
+    tracker.push(row);
+  }
+  if (entries.length === 0) {
+    const empty = create('span', 'map-relation-empty');
+    empty.setText('no established relations');
+    container.appendChild(empty);
+    tracker.push(empty);
   }
 }

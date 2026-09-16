@@ -23,6 +23,7 @@ import { isKnownMapLayer } from '../world/map/MapLayers';
 import { MapCameraController } from '../world/map/MapCameraController';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import { clearMapSelection, setMapSelection } from '../state/slices/mapSlice';
+import { syncCountryCapitals } from '../state/slices/countrySlice';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
 import { AssetManager } from '../assets/AssetManager';
@@ -130,14 +131,16 @@ export class Game {
     this.perf = new PerformanceManager(this.config.performance, this.events);
     this.data = new DataRegistry(this.logger.child('data'));
     this.time = new TimeSystem(this.config.time, this.events);
-    this.state = createInitialState(this.data, this.config, this.ids);
-    this.world = new WorldManager(this.state.world, this.events, this.config.world);
     // Static political map (Part 1) — deterministic, immutable, renderer-free.
+    // Generated BEFORE the initial state so the country data slice (Part 2)
+    // can join capitals + id space at construction time.
     const mapGeneration = generateStrategicMap(this.config.map);
     this.mapModel = mapGeneration.model;
     for (const warning of mapGeneration.warnings) {
       this.logger.warn(`map: ${warning}`);
     }
+    this.state = createInitialState(this.data, this.config, this.ids, this.mapModel);
+    this.world = new WorldManager(this.state.world, this.events, this.config.world);
     this.assets = new AssetManager(new AssetRegistry(), new AssetCache(), this.events, this.logger.child('assets'));
     this.assets.registerLoader(new GeneratedAssetLoader());
     this.playerModeSystem = new PlayerModeSystem(this.data.playerModeList, this.events);
@@ -364,6 +367,9 @@ export class Game {
     for (const key of STATE_SLICE_KEYS) {
       Object.assign(this.state[key] as object, data.state[key] as object);
     }
+    // Country capitals are joined from the live map model — heals migrated
+    // saves whose stored join may come from a different map config.
+    syncCountryCapitals(this.state.countries.countries, this.mapModel);
     this.time.setTick(data.runtime.tick);
     this.rng.setState(data.runtime.rngState);
     this.ids.restore(data.runtime.ids);
@@ -522,8 +528,15 @@ export class Game {
     this.events.emit('map.layerVisibilityChanged', { layer, visible });
   }
 
-  mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void {
-    this.assertInitialized();
+  /**
+   * Applies a logical camera TARGET (the single mutation path for the map
+   * camera state). When `cancelGesture` is set, an active cursor-anchored
+   * zoom gesture is released first — explicit centering intents win.
+   */
+  private applyCameraTarget(
+    view: { x?: number; z?: number; viewHeight?: number },
+    cancelGesture: boolean
+  ): void {
     const camera = this.state.map.camera;
     const aspect = this.state.map.viewport.width / this.state.map.viewport.height;
     const clamped = clampCamera(
@@ -537,6 +550,9 @@ export class Game {
       this.config.map.minViewHeight,
       this.config.map.maxViewHeight
     );
+    if (cancelGesture) {
+      this.events.emit('map.zoomGesture', { anchor: null });
+    }
     camera.x = clamped.x;
     camera.z = clamped.z;
     camera.viewHeight = clamped.viewHeight;
@@ -547,25 +563,48 @@ export class Game {
     });
   }
 
+  mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void {
+    this.assertInitialized();
+    this.applyCameraTarget(view, true);
+  }
+
   mapPanBy(dx: number, dz: number): void {
     this.assertInitialized();
     const camera = this.state.map.camera;
-    this.mapSetCamera({ x: camera.x + dx, z: camera.z + dz });
+    this.applyCameraTarget({ x: camera.x + dx, z: camera.z + dz }, true);
   }
 
-  mapZoomBy(factor: number, anchor?: { x: number; z: number }): void {
+  /**
+   * Zoom the logical camera target by `factor`.
+   *
+   * With an anchor + cursor pixel the new target center is solved EXACTLY so
+   * the anchor world point stays under the cursor at the target view height;
+   * a `map.zoomGesture` lets the presentation rig reproduce that anchoring
+   * for every intermediate frame of the smoothed animation. Without an anchor
+   * (keyboard zoom) the current center is kept and any active gesture is
+   * preserved so wheel + keyboard zoom compose naturally.
+   */
+  mapZoomBy(factor: number, anchor?: { x: number; z: number }, screen?: { x: number; y: number }): void {
     this.assertInitialized();
     const camera = this.state.map.camera;
-    if (anchor === undefined) {
-      this.mapSetCamera({ viewHeight: camera.viewHeight * factor });
+    const newViewHeight = camera.viewHeight * factor;
+    if (anchor === undefined || screen === undefined) {
+      this.applyCameraTarget({ viewHeight: newViewHeight }, false);
       return;
     }
-    // Zoom-to-cursor: keep the anchor world point at the same screen spot.
-    const newViewHeight = camera.viewHeight * factor;
-    const ratio = newViewHeight / camera.viewHeight;
-    const x = anchor.x + (camera.x - anchor.x) * ratio;
-    const z = anchor.z + (camera.z - anchor.z) * ratio;
-    this.mapSetCamera({ x, z, viewHeight: newViewHeight });
+    const viewport = this.state.map.viewport;
+    const aspect = viewport.width / viewport.height;
+    const ndcX = (screen.x / viewport.width) * 2 - 1;
+    const ndcY = (screen.y / viewport.height) * 2 - 1;
+    const halfWidth = (newViewHeight * aspect) / 2;
+    const halfHeight = newViewHeight / 2;
+    // Inverse of screenToWorld: keep `anchor` at the cursor pixel.
+    const x = anchor.x - ndcX * halfWidth;
+    const z = anchor.z + ndcY * halfHeight;
+    this.events.emit('map.zoomGesture', {
+      anchor: { x: anchor.x, z: anchor.z, screenX: screen.x, screenY: screen.y }
+    });
+    this.applyCameraTarget({ x, z, viewHeight: newViewHeight }, false);
   }
 
   mapFocusCountry(countryId: string): void {

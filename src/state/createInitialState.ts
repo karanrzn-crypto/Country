@@ -11,10 +11,27 @@ import type { DataRegistry } from '../data/DataRegistry';
 import { createUnitFromType } from '../military/spawnUnit';
 import { buildWorldSlice } from './slices/worldSlice';
 import { createDefaultMapSlice } from './slices/mapSlice';
+import { buildCountrySlice } from './slices/countrySlice';
+import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { GameState } from './GameState';
 import { validateGameStateOrThrow } from './validate';
 
-export function createInitialState(data: DataRegistry, config: GameConfig, ids: IdGenerator): GameState {
+/**
+ * Builds the initial GameState from static data + config.
+ *
+ * Referential integrity of the world JSON is validated here (regions,
+ * factories, units, characters, relations must point at existing records).
+ *
+ * `mapModel` (Part 2): the generated strategic map, used to join each
+ * country's capital city and id space into the country data slice. Pass it
+ * whenever the strategic map exists (always, in Game.init).
+ */
+export function createInitialState(
+  data: DataRegistry,
+  config: GameConfig,
+  ids: IdGenerator,
+  mapModel?: StrategicMapModel
+): GameState {
   const worldData = data.world(config.world.defaultWorldId);
   const world = buildWorldSlice(worldData);
   const countryIds = worldData.countries.map((country) => country.id);
@@ -113,7 +130,8 @@ export function createInitialState(data: DataRegistry, config: GameConfig, ids: 
       focusChunkId: null,
       selection: []
     },
-    map: createDefaultMapSlice(config.map.columns, config.map.rows, config.map.cellSize)
+    map: createDefaultMapSlice(config.map.columns, config.map.rows, config.map.cellSize),
+    countries: buildCountrySlice(data.countryProfileList, mapModel ?? null)
   };
 
   validateGameStateOrThrow(state);

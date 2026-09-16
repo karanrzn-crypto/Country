@@ -230,6 +230,53 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
           }
         }
       }
+    },
+    countries: {
+      type: 'object',
+      fields: {
+        countries: {
+          type: 'record',
+          values: {
+            type: 'object',
+            fields: {
+              id: { type: 'string' },
+              name: { type: 'string', minLength: 1 },
+              flag: {
+                type: 'object',
+                fields: {
+                  layout: { type: 'enum', values: ['solid', 'horizontal-stripes', 'vertical-stripes', 'canton'] },
+                  colors: { type: 'array', minLength: 1, items: { type: 'string' } },
+                  emblem: { type: 'enum', values: ['none', 'star', 'circle', 'crescent', 'sun', 'cross'] },
+                  emblemColor: { type: 'string' }
+                }
+              },
+              capitalId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+              population: positiveNumber,
+              economy: {
+                type: 'object',
+                fields: {
+                  gdp: positiveNumber,
+                  treasury: positiveNumber,
+                  income: positiveNumber,
+                  expenses: positiveNumber
+                }
+              },
+              resources: { type: 'record', values: positiveNumber },
+              military: {
+                type: 'object',
+                fields: {
+                  manpower: positiveNumber,
+                  armySize: positiveNumber,
+                  equipment: positiveNumber,
+                  aircraft: positiveNumber,
+                  navy: positiveNumber
+                }
+              },
+              foreignRelations: { type: 'record', values: { type: 'number', min: -100, max: 100 } }
+            }
+          }
+        }
+      }
     }
   }
 };
