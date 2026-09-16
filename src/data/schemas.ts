@@ -155,6 +155,8 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
     countryBorderStroke: colorField,
     provinceBorderStroke: colorField,
     provinceBorderOpacity: { type: 'number', min: 0, max: 1 },
+    cityAreaStroke: colorField,
+    cityAreaOpacity: { type: 'number', min: 0, max: 1 },
     cityFill: colorField,
     cityStroke: colorField,
     capitalFill: colorField,

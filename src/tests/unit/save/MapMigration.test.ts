@@ -100,4 +100,40 @@ describe('save migrations (v1 → v2 → v3)', () => {
     game.dispose();
     game2.dispose();
   });
+
+  it('heals map selections that reference ids missing from the live map (generation drift)', () => {
+    const storage = new MemorySaveStorage();
+    const game = new Game({ seed: 4242, saveStorage: storage });
+    game.init();
+    const countryId = game.strategicMap.countryOrder[0];
+    game.commandBus.send({ type: 'map.select', countryId });
+    game.commandBus.flush();
+    game.saveToSlot('drift-slot');
+
+    // Simulate an older save whose generated city/province/country ids no
+    // longer exist after a map-generation change (config/seed drift).
+    const raw = JSON.parse(storage.load('drift-slot') as string) as {
+      meta: { checksum: number };
+      data: { state: { map: Record<string, unknown> } };
+    };
+    raw.data.state.map.selectedCountryId = 'country_does_not_exist';
+    raw.data.state.map.selectedProvinceId = 'prov_does_not_exist';
+    raw.data.state.map.selectedCityId = 'city_does_not_exist';
+    // Re-seal the tampered payload with a VALID checksum: the save must be
+    // structurally fine — only the referenced ids are stale.
+    raw.meta.checksum = fnv1a32(stableStringify(raw.data));
+    storage.save('drift-slot', JSON.stringify(raw));
+
+    const game2 = new Game({ seed: 1, saveStorage: storage });
+    game2.init();
+    expect(() => game2.loadFromSlot('drift-slot')).not.toThrow();
+    expect(game2.gameState.map.selectedCountryId).toBeNull();
+    expect(game2.gameState.map.selectedProvinceId).toBeNull();
+    expect(game2.gameState.map.selectedCityId).toBeNull();
+    // The rest of the slice survives the heal.
+    expect(game2.gameState.map.camera).toBeDefined();
+    expect(game2.gameState.map.layerVisibility).toBeDefined();
+    game.dispose();
+    game2.dispose();
+  });
 });

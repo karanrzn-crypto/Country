@@ -370,6 +370,22 @@ export class Game {
     // Country capitals are joined from the live map model — heals migrated
     // saves whose stored join may come from a different map config.
     syncCountryCapitals(this.state.countries.countries, this.mapModel);
+    // Map selection references generated ids — heal selections that no longer
+    // exist in the live model (seed/config drift across versions), keeping the
+    // hierarchy consistent: city ⇒ province ⇒ country.
+    const map = this.state.map;
+    if (map.selectedCityId !== null && this.mapModel.cities[map.selectedCityId] === undefined) {
+      map.selectedCityId = null;
+    }
+    if (map.selectedProvinceId !== null && this.mapModel.provinces[map.selectedProvinceId] === undefined) {
+      map.selectedProvinceId = null;
+      map.selectedCityId = null;
+    }
+    if (map.selectedCountryId !== null && this.mapModel.countries[map.selectedCountryId] === undefined) {
+      map.selectedCountryId = null;
+      map.selectedProvinceId = null;
+      map.selectedCityId = null;
+    }
     this.time.setTick(data.runtime.tick);
     this.rng.setState(data.runtime.rngState);
     this.ids.restore(data.runtime.ids);
@@ -598,9 +614,10 @@ export class Game {
     const ndcY = (screen.y / viewport.height) * 2 - 1;
     const halfWidth = (newViewHeight * aspect) / 2;
     const halfHeight = newViewHeight / 2;
-    // Inverse of screenToWorld: keep `anchor` at the cursor pixel.
+    // Exact inverse of MapCamera.screenToWorld (north = -Z = screen top):
+    // keep `anchor` under the cursor pixel for the whole animation.
     const x = anchor.x - ndcX * halfWidth;
-    const z = anchor.z + ndcY * halfHeight;
+    const z = anchor.z - ndcY * halfHeight;
     this.events.emit('map.zoomGesture', {
       anchor: { x: anchor.x, z: anchor.z, screenX: screen.x, screenY: screen.y }
     });

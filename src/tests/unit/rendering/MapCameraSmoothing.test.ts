@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { MapCamera } from '../../../rendering/map/MapCamera';
 import type { MapBounds } from '../../../world/map/MapTypes';
+import { generateStrategicMap } from '../../../world/map/MapGenerator';
+import { DEFAULT_MAP_CONFIG } from '../../helpers/mapTestConfig';
+import { pickAt, pointInRing } from '../../../world/map/MapQueries';
 
 /**
  * Part 2 camera rework — behavioral spec:
@@ -62,7 +65,7 @@ describe('MapCamera smoothing rig', () => {
     const ndcY = (screenY / viewport.height) * 2 - 1;
     return {
       x: anchor.x - ndcX * ((targetViewHeight * aspect) / 2),
-      z: anchor.z + ndcY * (targetViewHeight / 2),
+      z: anchor.z - ndcY * (targetViewHeight / 2),
       viewHeight: targetViewHeight
     };
   }
@@ -171,5 +174,90 @@ describe('MapCamera smoothing rig', () => {
     const under = camera.screenToWorld(300, 200);
     expect(under.x).toBeCloseTo(world.x, 3);
     expect(under.z).toBeCloseTo(world.z, 3);
+  });
+
+  // —— orientation contract (click-selection regression) ——
+  // The rig renders with up = (0,0,-1): NORTH (-Z) is the TOP of the screen.
+  // screenToWorld MUST match that convention or clicks land on the mirrored
+  // world position (the Part 2 selection bug: clicks picked the country
+  // mirrored across the horizontal screen center line).
+  describe('screenToWorld orientation contract (north = -Z = screen top)', () => {
+    it('maps the four screen quadrants to the correct world quadrants', () => {
+      const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+      const topLeft = camera.screenToWorld(0, 0);
+      const topRight = camera.screenToWorld(viewport.width, 0);
+      const bottomLeft = camera.screenToWorld(0, viewport.height);
+      const bottomRight = camera.screenToWorld(viewport.width, viewport.height);
+      expect(topLeft.x).toBeLessThan(camera.view.x);
+      expect(topRight.x).toBeGreaterThan(camera.view.x);
+      // Screen top = world -Z: top-of-screen pixels are NORTH of the center.
+      expect(topLeft.z).toBeLessThan(camera.view.z);
+      expect(bottomLeft.z).toBeGreaterThan(camera.view.z);
+      expect(bottomRight.x).toBeGreaterThan(camera.view.x);
+      expect(bottomRight.z).toBeGreaterThan(camera.view.z);
+    });
+
+    it('screenToWorld(center pixel) returns the camera center exactly', () => {
+      const camera = makeCamera({ x: 150, z: 100, viewHeight: 90 });
+      const world = camera.screenToWorld(viewport.width / 2, viewport.height / 2);
+      expect(world.x).toBeCloseTo(150, 6);
+      expect(world.z).toBeCloseTo(100, 6);
+    });
+
+    it('zoom-anchoring keeps the VISUALLY displayed point under the cursor (not the mirrored one)', () => {
+      // Anchor a point that is NORTH of the center, then verify the gesture
+      // keeps THAT point under the cursor at settle time.
+      const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+      const screenX = 640;
+      const screenY = 100; // upper part of the screen → world z must be < 100
+      const anchor = camera.screenToWorld(screenX, screenY);
+      expect(anchor.z).toBeLessThan(100); // orientation sanity for the anchor itself
+      camera.beginZoomGesture({ anchorX: anchor.x, anchorZ: anchor.z, screenX, screenY });
+      const target = coreZoomTarget(screenX, screenY, anchor, 40);
+      for (let i = 0; i < 240; i++) camera.update(1 / 60, target);
+      const under = camera.screenToWorld(screenX, screenY);
+      expect(under.x).toBeCloseTo(anchor.x, 2);
+      expect(under.z).toBeCloseTo(anchor.z, 2);
+    });
+
+    it('integrated: clicking (screenToWorld → pickAt) selects the country actually under the cursor', () => {
+      const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
+      const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+      const pickRadius = DEFAULT_MAP_CONFIG.pickRadiusFraction * 200;
+      for (const countryId of model.countryOrder) {
+        const country = model.countries[countryId];
+        // Deep interior probe: the country's own label point.
+        const world = { x: country.labelPoint.x, z: country.labelPoint.z };
+        // world → screen (the rendering convention, north = -Z = up)…
+        const halfHeight = camera.view.viewHeight / 2;
+        const halfWidth = halfHeight * (viewport.width / viewport.height);
+        const sx = viewport.width / 2 + ((world.x - camera.view.x) / halfWidth) * (viewport.width / 2);
+        const sy = viewport.height / 2 + ((world.z - camera.view.z) / halfHeight) * (viewport.height / 2);
+        // …then back through the camera the way MapPointerInput does.
+        const roundTripped = camera.screenToWorld(sx, sy);
+        expect(roundTripped.x).toBeCloseTo(world.x, 4);
+        expect(roundTripped.z).toBeCloseTo(world.z, 4);
+        const pick = pickAt(model, roundTripped, pickRadius);
+        expect(pick.countryId).toBe(countryId);
+      }
+    });
+
+    it('integrated: picks resolve correctly in ALL FOUR screen quadrants of the real map', () => {
+      const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
+      const camera = makeCamera({ x: 150, z: 100, viewHeight: 200 });
+      const pickRadius = DEFAULT_MAP_CONFIG.pickRadiusFraction * 200;
+      let samples = 0;
+      for (const [fx, fy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]] as const) {
+        const sx = viewport.width * fx;
+        const sy = viewport.height * fy;
+        const world = camera.screenToWorld(sx, sy);
+        const expected = model.countryOrder.find((id) => pointInRing(world, model.countries[id].ring.points));
+        if (expected === undefined) continue; // ocean sample
+        const pick = pickAt(model, world, pickRadius);
+        expect(pick.countryId).toBe(expected);
+        samples++;
+      }
+      expect(samples).toBeGreaterThanOrEqual(2); // the full view covers the continent
+    });
   });
 });

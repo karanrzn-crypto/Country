@@ -45,18 +45,20 @@ function alphaOf(frames: ReturnType<typeof updateLabels>, id: string): number {
 }
 
 describe('label LOD tiers (zoom-dependent visibility)', () => {
-  // Positions are spread so collision never suppresses a tier member:
+  // Positions are spread so collision never suppresses a tier member that the
+  // test expects visible (bigger labels + offset need more separation now):
   // at near zoom (26) the viewport covers z 87–113, x 127–173.
   const records = [
-    record({ id: 'country', tier: 'country', x: 150, z: 92 }),
-    record({ id: 'province', tier: 'province', x: 140, z: 104 }),
-    record({ id: 'capital', tier: 'capital', population: 1_500_000 }),
-    record({ id: 'major', tier: 'majorCity', population: 900_000, x: 162, z: 96 }),
+    record({ id: 'country', tier: 'country', x: 150, z: 89 }),
+    record({ id: 'province', tier: 'province', x: 140, z: 98 }),
+    record({ id: 'capital', tier: 'capital', population: 1_500_000, z: 104 }),
+    record({ id: 'major', tier: 'majorCity', population: 900_000, x: 162, z: 95 }),
     record({ id: 'small', tier: 'city', population: 120_000, x: 140, z: 94 })
   ];
 
   it('far zoom: countries + capitals only — no province/major/city labels', () => {
-    const { frames } = settled(records, view(260));
+    // Just above the province tier's cutoff — everything below it is hidden.
+    const { frames } = settled(records, view((labels.tiers.province.maxViewHeight as number) + 1));
     expect(alphaOf(frames, 'country')).toBeGreaterThan(0.9);
     expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
     expect(alphaOf(frames, 'province')).toBe(0);
@@ -65,7 +67,9 @@ describe('label LOD tiers (zoom-dependent visibility)', () => {
   });
 
   it('mid zoom: provinces + capitals + major cities; plain cities still hidden', () => {
-    const { frames } = settled(records, view(100));
+    // Just above the city tier's cutoff — plain cities stay hidden while
+    // provinces/majors are fully faded in.
+    const { frames } = settled(records, view((labels.tiers.city.maxViewHeight as number) + 1));
     expect(alphaOf(frames, 'country')).toBeGreaterThan(0.9);
     expect(alphaOf(frames, 'capital')).toBeGreaterThan(0.9);
     expect(alphaOf(frames, 'province')).toBeGreaterThan(0.9);
@@ -88,10 +92,12 @@ describe('label LOD tiers (zoom-dependent visibility)', () => {
 
   it('tierAlpha fades over the span instead of popping', () => {
     const city = labels.tiers.city;
-    expect(tierAlpha(city, 95 + 1, labels.fadeSpanViewHeight)).toBe(0); // above threshold
-    expect(tierAlpha(city, 94.5, labels.fadeSpanViewHeight)).toBeGreaterThan(0);
-    expect(tierAlpha(city, 94.5, labels.fadeSpanViewHeight)).toBeLessThan(1);
-    expect(tierAlpha(city, 95 - labels.fadeSpanViewHeight, labels.fadeSpanViewHeight)).toBe(1);
+    const maxV = city.maxViewHeight as number;
+    const span = labels.fadeSpanViewHeight;
+    expect(tierAlpha(city, maxV + 1, span)).toBe(0); // above threshold
+    expect(tierAlpha(city, maxV - span / 2, span)).toBeGreaterThan(0);
+    expect(tierAlpha(city, maxV - span / 2, span)).toBeLessThan(1);
+    expect(tierAlpha(city, maxV - span, span)).toBe(1);
   });
 });
 
@@ -113,12 +119,15 @@ describe('label LOD fading (no sudden pops)', () => {
 
   it('alpha is continuous across the tier boundary (crossing takes the whole span)', () => {
     const records = [record({ id: 'capital', tier: 'capital' })];
-    // Capital tier: max 280, fade span 22 → fade happens between 258 and 280.
-    const at270 = settled(records, view(270)).frames;
-    const at265 = settled(records, view(265)).frames;
-    expect(alphaOf(at270, 'capital')).toBeGreaterThan(0);
-    expect(alphaOf(at270, 'capital')).toBeLessThan(1);
-    expect(alphaOf(at265, 'capital')).toBeGreaterThan(alphaOf(at270, 'capital'));
+    // Both probe points sit INSIDE the fade zone [max-span, max] so the
+    // comparison exercises the fade itself (not the saturated ends).
+    const maxV = labels.tiers.capital.maxViewHeight as number;
+    const span = labels.fadeSpanViewHeight;
+    const atUpper = settled(records, view(maxV - span * 0.25)).frames; // α ≈ 0.25
+    const atLower = settled(records, view(maxV - span * 0.75)).frames; // α ≈ 0.75
+    expect(alphaOf(atUpper, 'capital')).toBeGreaterThan(0);
+    expect(alphaOf(atUpper, 'capital')).toBeLessThan(1);
+    expect(alphaOf(atLower, 'capital')).toBeGreaterThan(alphaOf(atUpper, 'capital'));
   });
 });
 

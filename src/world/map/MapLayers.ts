@@ -12,6 +12,7 @@ export type MapLayerId =
   | 'countries'
   | 'countryBorders'
   | 'provinceBorders'
+  | 'cityAreas'
   | 'cities'
   | 'capitals'
   | 'labels';
@@ -22,6 +23,7 @@ export const MAP_LAYER_ORDER: readonly MapLayerId[] = [
   'land',
   'countries',
   'provinceBorders',
+  'cityAreas',
   'countryBorders',
   'cities',
   'capitals',
@@ -34,6 +36,7 @@ export const DEFAULT_LAYER_VISIBILITY: Readonly<Record<MapLayerId, boolean>> = {
   countries: true,
   countryBorders: true,
   provinceBorders: true,
+  cityAreas: true,
   cities: true,
   capitals: true,
   labels: true

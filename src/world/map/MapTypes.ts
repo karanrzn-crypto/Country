@@ -39,7 +39,7 @@ export type EdgeKind =
   | 'coast' // land on one side, ocean on the other
   | 'country' // land on both sides, different countries
   | 'province' // same country, different provinces
-  | 'interior'; // same province (never rendered, never part of a ring)
+  | 'interior'; // same province (city-district rings may reference it)
 
 /**
  * A shared boundary edge. `polyline` is the SINGLE source of geometry for
@@ -113,6 +113,13 @@ export interface MapCity {
   readonly isCapital: boolean;
   /** Light display-only value (no economy system in Part 1). */
   readonly population: number;
+  /**
+   * District boundary — a closed ring built from the SAME shared lattice
+   * geometry (province cells partitioned among their cities). A future real
+   * city polygon can replace it without touching renderer or state: this
+   * ring IS the renderer-facing contract.
+   */
+  readonly areaRing: MapRing;
 }
 
 export interface MapStats {
@@ -144,7 +151,8 @@ export interface StrategicMapModel {
   readonly cities: Readonly<Record<CityId, MapCity>>;
   /** Stable insertion order (palette assignment, UI lists, hashing). */
   readonly countryOrder: readonly CountryId[];
-  /** All shared non-interior boundary edges keyed by EdgeKey. */
+  /** All shared boundary edges (coast/country/province AND interior — the
+   *  interior ones are referenced by city-district rings) keyed by EdgeKey. */
   readonly edges: Readonly<Record<EdgeKey, MapEdge>>;
   /** Jittered lattice points by index (geometry provenance / tests). */
   readonly lattice: readonly MapPoint[];

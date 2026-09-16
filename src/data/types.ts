@@ -178,6 +178,9 @@ export interface MapThemeData {
   readonly countryBorderStroke: string;
   readonly provinceBorderStroke: string;
   readonly provinceBorderOpacity: number;
+  /** City-district boundary line (subtle — must not read as a country border). */
+  readonly cityAreaStroke: string;
+  readonly cityAreaOpacity: number;
   readonly cityFill: string;
   readonly cityStroke: string;
   readonly capitalFill: string;

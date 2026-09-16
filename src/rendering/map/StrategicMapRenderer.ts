@@ -99,6 +99,7 @@ export class StrategicMapRenderer {
       land: this.countryLayer.landGroup,
       countries: this.countryLayer.countryGroup,
       provinceBorders: this.borderLayer.provinceGroup,
+      cityAreas: this.cityLayer.cityAreasGroup,
       countryBorders: this.borderLayer.countryGroup,
       cities: this.cityLayer.citiesGroup,
       capitals: this.cityLayer.capitalsGroup,

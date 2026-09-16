@@ -4,18 +4,61 @@ import type { MapTheme } from './MapTheme';
 
 /**
  * CityLayer — city markers (instanced) + capitals (instanced, larger, dark
- * red with ring) + the selection ring. Marker positions come straight from
- * the city data (validated interior points), so zoom can never displace them.
+ * red with ring) + the selection ring + city-district boundaries.
+ *
+ * Marker positions and district boundaries come straight from the map data
+ * (validated interior points + area rings built from the shared lattice
+ * edges), so zoom can never displace them. District boundaries are ONE
+ * merged LineSegments (single geometry, single draw call) where every shared
+ * edge stretch is emitted EXACTLY ONCE (deduped by edge key across all
+ * districts) — same guarantee as the border layers. Only 'interior' edges
+ * are drawn: district stretches that coincide with province/coast/country
+ * borders are already rendered by those layers, so nothing is double-drawn.
  */
 export class CityLayer {
   readonly citiesGroup = new THREE.Group();
   readonly capitalsGroup = new THREE.Group();
+  /** Subtle district-boundary lines ('cityAreas' layer). */
+  readonly cityAreasGroup = new THREE.Group();
   readonly selectionRing: THREE.Mesh;
 
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
 
   constructor(model: StrategicMapModel, theme: MapTheme) {
+    // —— city-district boundaries (ONE LineSegments, built once) ——
+    const areaMaterial = new THREE.LineBasicMaterial({
+      color: theme.cityAreaStroke,
+      transparent: true,
+      opacity: theme.cityAreaOpacity,
+      depthWrite: false
+    });
+    this.materials.push(areaMaterial);
+    const emittedKeys = new Set<string>();
+    const areaSegments: number[] = [];
+    for (const city of Object.values(model.cities) as readonly MapCity[]) {
+      for (const segment of city.areaRing.segments) {
+        if (emittedKeys.has(segment.key)) continue;
+        emittedKeys.add(segment.key);
+        const edge = model.edges[segment.key];
+        if (edge === undefined || edge.kind !== 'interior') continue;
+        for (let i = 1; i < edge.polyline.length; i++) {
+          const a = edge.polyline[i - 1];
+          const b = edge.polyline[i];
+          areaSegments.push(a.x, 0.9, a.z, b.x, 0.9, b.z);
+        }
+      }
+    }
+    if (areaSegments.length > 0) {
+      const areaGeometry = new THREE.BufferGeometry();
+      areaGeometry.setAttribute('position', new THREE.Float32BufferAttribute(areaSegments, 3));
+      areaGeometry.computeBoundingSphere();
+      this.geometries.push(areaGeometry);
+      const areaLines = new THREE.LineSegments(areaGeometry, areaMaterial);
+      areaLines.renderOrder = 13;
+      this.cityAreasGroup.add(areaLines);
+    }
+
     const cityGeometry = new THREE.CircleGeometry(theme.cityRadius, 12);
     cityGeometry.rotateX(-Math.PI / 2);
     const capitalGeometry = new THREE.CircleGeometry(theme.capitalRadius, 20);
@@ -83,5 +126,6 @@ export class CityLayer {
     this.materials.length = 0;
     this.citiesGroup.clear();
     this.capitalsGroup.clear();
+    this.cityAreasGroup.clear();
   }
 }

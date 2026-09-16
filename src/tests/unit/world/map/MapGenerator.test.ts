@@ -211,3 +211,105 @@ describe('MapGenerator — Definition of Done geometry quality', () => {
     expect(warnings).toEqual([]);
   });
 });
+
+describe('MapGenerator — city spacing (natural, readable layout)', () => {
+  const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
+  const cities = Object.values(model.cities);
+
+  it('keeps every city pair at least the configured separation apart', () => {
+    const minSeparation = DEFAULT_MAP_CONFIG.citySeparationFraction * DEFAULT_MAP_CONFIG.cellSize;
+    for (let i = 0; i < cities.length; i++) {
+      for (let j = i + 1; j < cities.length; j++) {
+        const d = Math.hypot(
+          cities[i].position.x - cities[j].position.x,
+          cities[i].position.z - cities[j].position.z
+        );
+        expect(d).toBeGreaterThanOrEqual(minSeparation - 0.01);
+      }
+    }
+  });
+
+  it('city count scales with province area (small provinces stay readable)', () => {
+    const { cellsPerCity, citiesPerProvinceMax } = DEFAULT_MAP_CONFIG;
+    for (const province of Object.values(model.provinces)) {
+      const expected = Math.min(
+        citiesPerProvinceMax,
+        Math.max(1, Math.floor(province.cellIds.length / cellsPerCity))
+      );
+      // cityIds includes the capital when the capital province matches.
+      expect(province.cityIds.length).toBeGreaterThanOrEqual(expected);
+      expect(province.cityIds.length).toBeLessThanOrEqual(expected + 1);
+    }
+    // Large provinces get noticeably more cities than minimal ones.
+    const big = Object.values(model.provinces).filter((p) => p.cellIds.length >= cellsPerCity * 3);
+    expect(big.some((p) => p.cityIds.length >= 3)).toBe(true);
+  });
+
+  it('is deterministic under the new placement too', () => {
+    const again = generateStrategicMap(DEFAULT_MAP_CONFIG);
+    for (const [cityId, city] of Object.entries(model.cities)) {
+      expect(again.model.cities[cityId].position).toEqual(city.position);
+      expect(again.model.cities[cityId].provinceId).toBe(city.provinceId);
+      expect(again.model.cities[cityId].isCapital).toBe(city.isCapital);
+    }
+  });
+});
+
+describe('MapGenerator — city districts (visible, extensible city boundaries)', () => {
+  const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
+
+  it('every city has a closed district ring of at least 3 shared-edge segments', () => {
+    for (const city of Object.values(model.cities)) {
+      expect(city.areaRing).toBeDefined();
+      expect(city.areaRing.segments.length).toBeGreaterThanOrEqual(3);
+      expect(city.areaRing.points.length).toBeGreaterThanOrEqual(3);
+      // Ring references registered edges only (renderer can resolve them).
+      for (const segment of city.areaRing.segments) {
+        expect(model.edges[segment.key]).toBeDefined();
+      }
+    }
+  });
+
+  it('districts never leave their province or country', () => {
+    for (const city of Object.values(model.cities)) {
+      const province = model.provinces[city.provinceId];
+      const country = model.countries[city.countryId];
+      for (const point of city.areaRing.points) {
+        expect(pointInRing(point, province.ring.points)).toBe(true);
+        expect(pointInRing(point, country.ring.points)).toBe(true);
+      }
+    }
+  });
+
+  it('each city position lies inside its OWN district', () => {
+    for (const city of Object.values(model.cities)) {
+      expect(pointInRing(city.position, city.areaRing.points)).toBe(true);
+    }
+  });
+
+  it('districts of the same province are disjoint (centroid of one never inside another)', () => {
+    for (const province of Object.values(model.provinces)) {
+      const districts = province.cityIds.map((cityId) => model.cities[cityId].areaRing);
+      for (let i = 0; i < districts.length; i++) {
+        const centroidA = districts[i].points.reduce(
+          (acc, p) => ({ x: acc.x + p.x / districts[i].points.length, z: acc.z + p.z / districts[i].points.length }),
+          { x: 0, z: 0 }
+        );
+        for (let j = 0; j < districts.length; j++) {
+          if (i === j) continue;
+          expect(pointInRing(centroidA, districts[j].points)).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('interior edges stay in the shared registry (district boundaries are renderable)', () => {
+    const interior = Object.values(model.edges).filter((edge) => edge.kind === 'interior');
+    expect(interior.length).toBeGreaterThan(0);
+    // District rings actually use them.
+    const usedByDistricts = new Set(
+      Object.values(model.cities).flatMap((city) => city.areaRing.segments.map((s) => s.key))
+    );
+    expect([...usedByDistricts].some((key) => model.edges[key].kind === 'interior')).toBe(true);
+  });
+});

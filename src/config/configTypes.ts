@@ -91,6 +91,10 @@ export interface MapConfig {
   readonly provincesPerCountryMin: number;
   readonly provincesPerCountryMax: number;
   readonly citiesPerProvinceMax: number;
+  /** Province cell count per extra city — scales city density with area. */
+  readonly cellsPerCity: number;
+  /** Minimum city-to-city distance as a fraction of cellSize. */
+  readonly citySeparationFraction: number;
   readonly minCountryCells: number;
   readonly minProvinceCells: number;
   /** Camera zoom bounds: visible world height (smaller = closer). */
@@ -155,6 +159,8 @@ export const DEFAULT_CONFIG: GameConfig = {
     provincesPerCountryMin: 3,
     provincesPerCountryMax: 5,
     citiesPerProvinceMax: 3,
+    cellsPerCity: 6,
+    citySeparationFraction: 0.8,
     minCountryCells: 10,
     minProvinceCells: 2,
     minViewHeight: 26,

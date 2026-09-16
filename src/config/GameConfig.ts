@@ -119,6 +119,8 @@ const CONFIG_SCHEMA: FieldSchema = {
         provincesPerCountryMin: { type: 'number', min: 1, max: 24, integer: true },
         provincesPerCountryMax: { type: 'number', min: 1, max: 48, integer: true },
         citiesPerProvinceMax: { type: 'number', min: 1, max: 12, integer: true },
+        cellsPerCity: { type: 'number', min: 1, max: 64, integer: true },
+        citySeparationFraction: { type: 'number', min: 0.1, max: 2 },
         minCountryCells: { type: 'number', min: 1, max: 4096, integer: true },
         minProvinceCells: { type: 'number', min: 1, max: 1024, integer: true },
         minViewHeight: { type: 'number', min: 1 },

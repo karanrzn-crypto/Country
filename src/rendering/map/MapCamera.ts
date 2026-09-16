@@ -141,16 +141,25 @@ export class MapCamera {
     this.syncProjection();
   }
 
-  /** Converts viewport pixels (0,0 = top-left) to world ground coordinates. */
+  /**
+   * Converts viewport pixels (0,0 = top-left) to world ground coordinates.
+   *
+   * Orientation contract (must match the Three.js rig): the camera looks
+   * straight down with `up = (0,0,-1)`, so NORTH (-Z) is the TOP of the
+   * screen — a pixel ABOVE the center must map to a world z BELOW the
+   * camera center. ndcY here is +1 at the top, hence `z = center - ndcY·h`.
+   * The inverse of this function is `solveAnchoredCenter` — keep the two
+   * sign-exact (regression-tested against the rendered orientation).
+   */
   screenToWorld(px: number, py: number): { x: number; z: number } {
     const ndcX = (px / this.viewportWidth) * 2 - 1;
     const ndcY = (py / this.viewportHeight) * 2 - 1;
     const halfHeight = (this.camera.top - this.camera.bottom) / 2;
     const halfWidth = (this.camera.right - this.camera.left) / 2;
-    // Screen up = world -Z → negative sign on the Z axis.
+    // Screen up = world -Z → a top-of-screen pixel (ndcY = -1) is north.
     return {
       x: this.camera.position.x + ndcX * halfWidth,
-      z: this.camera.position.z - ndcY * halfHeight
+      z: this.camera.position.z + ndcY * halfHeight
     };
   }
 
@@ -164,7 +173,8 @@ export class MapCamera {
 
   /**
    * Center that keeps `gesture.anchor` under the gesture cursor pixel when the
-   * visible height is `viewHeight` (inverse of screenToWorld at the center).
+   * visible height is `viewHeight` — the EXACT inverse of `screenToWorld`:
+   * anchor.x = cx + ndcX·halfWidth and anchor.z = cz + ndcY·halfHeight.
    */
   private solveAnchoredCenter(gesture: MapZoomGesture, viewHeight: number): { x: number; z: number } {
     const halfHeight = viewHeight / 2;
@@ -173,7 +183,7 @@ export class MapCamera {
     const ndcY = (gesture.screenY / this.viewportHeight) * 2 - 1;
     return {
       x: gesture.anchorX - ndcX * halfWidth,
-      z: gesture.anchorZ + ndcY * halfHeight
+      z: gesture.anchorZ - ndcY * halfHeight
     };
   }
 

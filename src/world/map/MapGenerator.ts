@@ -828,7 +828,7 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
   // 7. cities (capital + cities at validated interior points)
   const countries: Record<string, CountryBuilder> = {};
   const provinces: Record<string, ProvinceBuilder> = {};
-  const cities: Record<string, MapCity> = {};
+  const cities: Record<string, Omit<MapCity, "areaRing">> = {};
   const countryOrder: string[] = [];
   const provinceIdsOfCountry: string[][] = Array.from({ length: countryCount }, () => []);
 
@@ -846,6 +846,9 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
   let provinceCounter = 0;
   let cityCounter = 0;
   const usedCityPositions: MapPoint[] = [];
+  // City-district rings, built after each country's cities are placed (step 8).
+  const cityAreaRingById: Record<string, MapRing> = {};
+  const districtRng = new Random((seed ^ 0x2f9e3a1b) >>> 0);
 
   // Build provinces first (ids, rings, label points), then countries.
   for (let countryIndex = 0; countryIndex < countryCount; countryIndex++) {
@@ -892,34 +895,94 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     }
 
     const countryCityIds: string[] = [];
-    const createCity = (provinceId: string, isCapital: boolean): string => {
+
+    // —— city placement (reworked) ——
+    // Cities spread over the province's validated interior cell points with a
+    // greedy MAX-MIN rule: every new city takes the candidate point farthest
+    // from every already-placed city (map-wide), never closer than the
+    // separation floor. Deterministic: candidates are ordered deepest-interior
+    // first (ties by cell index) and strict `>` keeps the earliest winner.
+    const minSeparation = config.citySeparationFraction * config.cellSize;
+    const hostCellOfCity = new Map<string, number>();
+
+    const candidatePoints = (provinceId: string): { cell: number; point: MapPoint }[] => {
       const province = provinces[provinceId];
-      const candidateCells = [...province.cellIds].sort((a, b) => {
-        const ca = cellCentroid(lattice, cells[a]);
-        const cb = cellCentroid(lattice, cells[b]);
-        return distanceToRing(cb, ring.points) - distanceToRing(ca, ring.points);
+      const ordered = [...province.cellIds].sort((a, b) => {
+        const da = distanceToRing(cellCentroid(lattice, cells[a]), ring.points);
+        const db = distanceToRing(cellCentroid(lattice, cells[b]), ring.points);
+        return db - da; // deepest interior first
       });
-      const isFreeSpot = (point: MapPoint): boolean =>
-        !usedCityPositions.some((used) => Math.hypot(used.x - point.x, used.z - point.z) < 1.5);
-      let position: MapPoint | null = null;
-      for (const cellIndex of candidateCells) {
+      const result: { cell: number; point: MapPoint }[] = [];
+      for (const cellIndex of ordered) {
         const centroid = cellCentroid(lattice, cells[cellIndex]);
+        // Cities never hug the country border.
         if (distanceToRing(centroid, ring.points) < 1.2) continue;
-        // City must sit inside BOTH rings and must not stack on another city.
-        const candidate = interiorPointNearRings([province.ring.points, ring.points], centroid);
-        if (isFreeSpot(candidate)) {
-          position = candidate;
-          break;
+        result.push({
+          cell: cellIndex,
+          point: interiorPointNearRings([province.ring.points, ring.points], centroid)
+        });
+      }
+      return result;
+    };
+
+    const nearestUsedDistance = (point: MapPoint): number => {
+      let nearest = Number.POSITIVE_INFINITY;
+      for (const used of usedCityPositions) {
+        const d = Math.hypot(used.x - point.x, used.z - point.z);
+        if (d < nearest) nearest = d;
+      }
+      return nearest;
+    };
+
+    const placeCity = (provinceId: string): { position: MapPoint; hostCell: number } => {
+      const candidates = candidatePoints(provinceId);
+      if (candidates.length === 0) {
+        // Degenerate province (every cell hugs the border): spiral in from the
+        // deepest cell — still deterministic.
+        const province = provinces[provinceId];
+        const ordered = [...province.cellIds].sort((a, b) => {
+          const da = distanceToRing(cellCentroid(lattice, cells[a]), ring.points);
+          const db = distanceToRing(cellCentroid(lattice, cells[b]), ring.points);
+          return db - da;
+        });
+        const seed = cellCentroid(lattice, cells[ordered[0]]);
+        return {
+          position: interiorPointNearRings([province.ring.points, ring.points], seed),
+          hostCell: ordered[0]
+        };
+      }
+      // Greedy max-min among candidates that respect the separation floor.
+      let best: { cell: number; point: MapPoint; score: number } | null = null;
+      for (const candidate of candidates) {
+        const nearest = nearestUsedDistance(candidate.point);
+        if (nearest < minSeparation) continue;
+        if (best === null || nearest > best.score) {
+          best = { cell: candidate.cell, point: candidate.point, score: nearest };
         }
       }
-      if (position === null && candidateCells.length > 0) {
-        const seed = cellCentroid(lattice, cells[candidateCells[0]]);
-        position = interiorPointNearRings([province.ring.points, ring.points], seed);
+      if (best !== null) return { position: best.point, hostCell: best.cell };
+      // Fallback (packed tiny province): keep the least-bad candidate.
+      let fallback = candidates[0];
+      let worstNearest = -1;
+      for (const candidate of candidates) {
+        const nearest = nearestUsedDistance(candidate.point);
+        if (nearest <= 1e-6) continue; // never stack two cities on one point
+        if (nearest > worstNearest) {
+          worstNearest = nearest;
+          fallback = candidate;
+        }
       }
-      if (position === null) throw new Error(`No valid city position for province ${provinceId}`);
+      return { position: fallback.point, hostCell: fallback.cell };
+    };
+
+    const createCity = (provinceId: string, isCapital: boolean): string => {
+      const province = provinces[provinceId];
+      const { position, hostCell } = placeCity(provinceId);
       usedCityPositions.push(position);
       const cityId = `city_${cityCounter++}`;
-      const city: MapCity = {
+      // areaRing is attached at model assembly (districts need every city of
+      // the province to exist first).
+      const city: Omit<MapCity, 'areaRing'> = {
         id: cityId,
         name: generateCityName(nameRng, cityNamesUsed),
         countryId,
@@ -931,14 +994,56 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
       cities[cityId] = city;
       province.cityIds.push(cityId);
       countryCityIds.push(cityId);
+      hostCellOfCity.set(cityId, hostCell);
       return cityId;
     };
 
+    // Capital FIRST (deepest interior of the largest province, spread-aware):
+    // regular cities then arrange around it instead of stealing its spot.
+    const capitalCityId = createCity(capitalProvinceId, true);
+
+    // Regular cities: the count scales with province AREA (cellsPerCity cells
+    // per city), so small provinces stay readable and large ones fill out.
     for (const provinceId of provinceIds) {
-      const count = 1 + nameRng.int(config.citiesPerProvinceMax);
+      const cellCount = provinces[provinceId].cellIds.length;
+      const count = Math.min(
+        config.citiesPerProvinceMax,
+        Math.max(1, Math.floor(cellCount / config.cellsPerCity))
+      );
       for (let i = 0; i < count; i++) createCity(provinceId, false);
     }
-    const capitalCityId = createCity(capitalProvinceId, true);
+
+    // —— city districts ——
+    // Partition each province's cells among its cities (multi-source BFS from
+    // every city's host cell) and extract each district ring from the SAME
+    // shared edge registry. Districts are therefore ⊆ province ⊆ country by
+    // construction and share exact edges with every other boundary.
+    for (const provinceId of provinceIds) {
+      const province = provinces[provinceId];
+      if (province.cityIds.length === 0) continue;
+      const provinceCellSet = new Set(province.cellIds);
+      const usedHosts = new Set<number>();
+      const seeds: number[] = [];
+      for (const cityId of province.cityIds) {
+        let host = hostCellOfCity.get(cityId) ?? province.cellIds[0];
+        if (usedHosts.has(host)) {
+          host = province.cellIds.find((cell) => !usedHosts.has(cell)) ?? host;
+        }
+        usedHosts.add(host);
+        seeds.push(host);
+      }
+      const districtPartition = partitionByGrowth(provinceCellSet, seeds, columns, rows, districtRng);
+      province.cityIds.forEach((cityId, localIndex) => {
+        cityAreaRingById[cityId] = extractRegionRing(
+          cells,
+          districtPartition,
+          localIndex,
+          columns,
+          rows,
+          edgeResult.edges
+        );
+      });
+    }
 
     countries[countryId] = {
       id: countryId,
@@ -1005,7 +1110,15 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
 
   const edges: Record<string, (typeof edgeResult.edges)[string]> = {};
   for (const [key, edge] of Object.entries(edgeResult.edges)) {
-    if (edge.kind !== 'interior') edges[key] = edge;
+    // Interior edges stay in the model: city-district rings reference them.
+    edges[key] = edge;
+  }
+
+  const finalCities: Record<string, MapCity> = {};
+  for (const [cityId, city] of Object.entries(cities)) {
+    const areaRing = cityAreaRingById[cityId];
+    if (areaRing === undefined) throw new Error(`City "${cityId}" has no district ring`);
+    finalCities[cityId] = { ...city, areaRing };
   }
 
   const model: StrategicMapModel = {
@@ -1014,7 +1127,7 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     bounds,
     countries: countries as unknown as Readonly<Record<string, MapCountry>>,
     provinces: provinces as unknown as Readonly<Record<string, MapProvince>>,
-    cities,
+    cities: finalCities,
     countryOrder,
     edges,
     lattice: lattice.points,
