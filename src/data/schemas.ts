@@ -245,34 +245,14 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             }
           }
         },
-        terrainShading: {
+        elevationLegend: {
           type: 'object',
           allowUnknown: false,
           fields: {
-            exaggeration: { type: 'number', min: 1, max: 200 },
-            strength: { type: 'number', min: 0, max: 2 },
-            minShade: { type: 'number', min: 0.1, max: 2 },
-            maxShade: { type: 'number', min: 0.1, max: 2 }
+            lowLabel: { type: 'string', minLength: 1 },
+            highLabel: { type: 'string', minLength: 1 },
+            samples: { type: 'number', min: 2, max: 256 }
           }
-        },
-        terrainTintStrength: { type: 'number', min: 0, max: 1 },
-        terrainLabels: {
-          type: 'object',
-          allowUnknown: false,
-          fields: {
-            lowland: { type: 'string', minLength: 1 },
-            valley: { type: 'string', minLength: 1 },
-            plains: { type: 'string', minLength: 1 },
-            plateau: { type: 'string', minLength: 1 },
-            hills: { type: 'string', minLength: 1 },
-            mountain: { type: 'string', minLength: 1 },
-            highMountain: { type: 'string', minLength: 1 }
-          }
-        },
-        terrainLegendOrder: {
-          type: 'array',
-          minLength: 1,
-          items: { type: 'string', minLength: 1 }
         },
         tintFillOpacity: { type: 'number', min: 0, max: 1 },
         populationLow: colorField,
@@ -283,6 +263,15 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
         riverOpacity: { type: 'number', min: 0, max: 1 },
         lakeFill: colorField,
         lakeOpacity: { type: 'number', min: 0, max: 1 },
+        riverWidth: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            source: { type: 'number', min: 0.05, max: 10 },
+            perCell: { type: 'number', min: 0, max: 5 },
+            max: { type: 'number', min: 0.1, max: 20 }
+          }
+        },
         roadColors: {
           type: 'object',
           allowUnknown: false,

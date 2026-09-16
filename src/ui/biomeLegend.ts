@@ -1,15 +1,9 @@
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { MapThemeData } from '../data/types';
-import {
-  biomeBaseColor,
-  parseTerrainRamp,
-  rampColorAt,
-  rgbToHex,
-  TERRAIN_LEGEND_SAMPLE
-} from '../rendering/map/MapSurface';
+import { biomeBaseColor, rampGradientStops, rgbToHex, type GradientStopHex } from '../rendering/map/MapSurface';
 
 /**
- * Map legends (biomes + terrain) — PURE data builders, no DOM.
+ * Map legends (biomes + elevation) — PURE data builders, no DOM.
  *
  * Both builders are fully data-driven and consume THE SAME central color
  * definitions the land-surface renderer uses (MapSurface):
@@ -26,6 +20,17 @@ export interface MapLegendEntry {
   readonly label: string;
   /** Exact display color — the same definition the map surface paints. */
   readonly color: string;
+}
+
+/**
+ * The elevation legend as ONE continuous gradient (Low → High): sampled
+ * from the very same ramp function the terrain surface paints with, so the
+ * bar's colors ARE the map's colors at every elevation.
+ */
+export interface ElevationLegendData {
+  readonly stops: readonly GradientStopHex[];
+  readonly lowLabel: string;
+  readonly highLabel: string;
 }
 
 /** Present land biomes in theme legend order (missing ids append sorted). */
@@ -54,39 +59,35 @@ export function buildBiomeLegend(model: StrategicMapModel, theme: MapThemeData):
 }
 
 /**
- * Present LAND terrain classes in theme legend order (missing ids append
- * sorted). Swatch color = the canonical elevation ramp sampled at the
- * class's representative elevation — exactly what the terrain surface
- * paints there (flat ground is unshaded, so colors match 1:1).
+ * The elevation legend: ONE simple continuous gradient bar from the lowest
+ * ground (blue) to the highest (red) — sampled from THE SAME central ramp
+ * the terrain surface paints with (rampGradientStops → rampColorAt), so
+ * legend and map are identical by construction.
  */
-export function buildTerrainLegend(model: StrategicMapModel, theme: MapThemeData): MapLegendEntry[] {
-  const present = new Set<string>();
-  const biomes = model.features.biomes;
-  const terrain = model.features.terrain;
-  for (let index = 0; index < terrain.length; index++) {
-    if (biomes[index] === 'ocean') continue; // sea floor classes are not land terrain
-    present.add(terrain[index]);
-  }
-  const labels = theme.layerColors.terrainLabels as Readonly<Record<string, string>>;
-  const ramp = parseTerrainRamp(theme);
-  const entries: MapLegendEntry[] = [];
-  const used = new Set<string>();
-  for (const id of theme.layerColors.terrainLegendOrder) {
-    if (!present.has(id) || used.has(id)) continue;
-    used.add(id);
-    const sample = TERRAIN_LEGEND_SAMPLE[id as keyof typeof TERRAIN_LEGEND_SAMPLE] ?? 0.5;
-    entries.push({ id, label: labels[id] ?? id, color: rgbToHex(rampColorAt(ramp, sample)) });
-  }
-  for (const id of [...present].sort()) {
-    if (used.has(id)) continue;
-    used.add(id);
-    const sample = TERRAIN_LEGEND_SAMPLE[id as keyof typeof TERRAIN_LEGEND_SAMPLE] ?? 0.5;
-    entries.push({ id, label: labels[id] ?? id, color: rgbToHex(rampColorAt(ramp, sample)) });
-  }
-  return entries;
+export function buildElevationLegend(theme: MapThemeData): ElevationLegendData {
+  const legend = theme.layerColors.elevationLegend;
+  return {
+    stops: rampGradientStops(theme, legend.samples),
+    lowLabel: legend.lowLabel,
+    highLabel: legend.highLabel
+  };
+}
+
+/** CSS linear-gradient stops for the elevation bar (same sampled colors). */
+export function elevationGradientCss(stops: readonly GradientStopHex[]): string {
+  const parts = stops.map((stop) => `${stop.color} ${(stop.at * 100).toFixed(2)}%`);
+  return `linear-gradient(to right, ${parts.join(', ')})`;
 }
 
 /** Stable signature of a legend's content (used to skip DOM rebuilds). */
 export function legendSignature(entries: readonly MapLegendEntry[]): string {
   return entries.map((entry) => `${entry.id}:${entry.color}:${entry.label}`).join('|');
+}
+
+/** Stable signature of the elevation legend (gradient stops + labels). */
+export function elevationLegendSignature(data: ElevationLegendData): string {
+  return (
+    data.stops.map((stop) => `${stop.at.toFixed(4)}:${stop.color}`).join('|') +
+    `#${data.lowLabel}#${data.highLabel}`
+  );
 }

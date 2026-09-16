@@ -67,43 +67,31 @@
     },
     "biomeLegendOrder": ["forest", "grassland", "drylands", "desert", "tundra", "jungle"],
     "terrainRamp": [
-      { "at": 0.0,  "color": "#a9bf8a" },
-      { "at": 0.18, "color": "#bcc493" },
-      { "at": 0.35, "color": "#cfc9a0" },
-      { "at": 0.52, "color": "#c4b184" },
-      { "at": 0.68, "color": "#b39a75" },
-      { "at": 0.8,  "color": "#a08a72" },
-      { "at": 0.9,  "color": "#b9b2a8" },
-      { "at": 1.0,  "color": "#eceae4" }
+      { "at": 0.0,  "color": "#4d9de0" },
+      { "at": 0.25, "color": "#57a95c" },
+      { "at": 0.5,  "color": "#e3cf5c" },
+      { "at": 0.75, "color": "#e08a3e" },
+      { "at": 1.0,  "color": "#c43c33" }
     ],
-    "terrainShading": {
-      "exaggeration": 45,
-      "strength": 0.5,
-      "minShade": 0.72,
-      "maxShade": 1.2
+    "elevationLegend": {
+      "lowLabel": "Low Elevation",
+      "highLabel": "High Elevation",
+      "samples": 24
     },
-    "terrainTintStrength": 0.42,
-    "terrainLabels": {
-      "lowland": "Lowlands",
-      "valley": "Valleys",
-      "plains": "Plains",
-      "plateau": "Plateaus",
-      "hills": "Hills",
-      "mountain": "Mountains",
-      "highMountain": "High Mountains"
-    },
-    "terrainLegendOrder": [
-      "highMountain", "mountain", "hills", "plateau", "plains", "valley", "lowland"
-    ],
     "tintFillOpacity": 0.4,
     "populationLow": "#fdf6d8",
     "populationHigh": "#a02c2c",
     "economyLow": "#ece7d4",
     "economyHigh": "#2e6b4f",
-    "riverStroke": "#3f7fae",
-    "riverOpacity": 0.9,
-    "lakeFill": "#3f7fae",
-    "lakeOpacity": 0.9,
+    "riverStroke": "#2e78b8",
+    "riverOpacity": 0.92,
+    "lakeFill": "#2e78b8",
+    "lakeOpacity": 0.92,
+    "riverWidth": {
+      "source": 0.35,
+      "perCell": 0.09,
+      "max": 2.4
+    },
     "roadColors": {
       "highway": "#8a3f22",
       "secondary": "#a06a3f",

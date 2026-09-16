@@ -6,8 +6,14 @@ import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/Ma
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
-import { buildBiomeLegend, buildTerrainLegend, legendSignature } from './biomeLegend';
-import type { MapLegendEntry } from './biomeLegend';
+import {
+  buildBiomeLegend,
+  buildElevationLegend,
+  elevationGradientCss,
+  elevationLegendSignature,
+  legendSignature
+} from './biomeLegend';
+import type { MapLegendEntry, ElevationLegendData } from './biomeLegend';
 
 /**
  * Strategic map UI (Part 1 + 2 + 3):
@@ -164,15 +170,16 @@ export class MapUI {
     }
   }
 
-  // —— map legends (biomes + terrain) ——
+  // —— map legends (biomes / elevation) ——
 
   /**
-   * Legend panel at the right edge of the map. Shown while the biomes and/or
-   * terrain layer is visible; one titled section per active layer. Rows,
-   * colors and labels come from the legend builders (model + theme via the
-   * SAME central color definitions the renderer paints with) — the UI owns
-   * no biome/terrain data. Rows rebuild only when the content signature
-   * changes.
+   * Legend panel at the right edge of the map. Biomes and Terrain are
+   * EXCLUSIVE surface layers (layer-state policy), so exactly ONE legend is
+   * shown at a time — the one matching the active surface coloring. Rows,
+   * colors, labels and the elevation gradient all come from the legend
+   * builders (model + theme via the SAME central color definitions the
+   * renderer paints with) — the UI owns no biome/terrain data. Content
+   * rebuilds only when the signature changes.
    */
   private buildLegend(root: UIElement): void {
     this.legendContainer = this.create('div', 'map-legend');
@@ -183,18 +190,22 @@ export class MapUI {
     const context = this.context;
     if (context === null || this.legendContainer === null) return;
     const visibility = context.state.map.layerVisibility;
-    const sections: { title: string; entries: MapLegendEntry[] }[] = [];
+    // Exclusive surface layers → at most ONE section is ever active.
+    const sections: { title: string; rows?: MapLegendEntry[]; gradient?: ElevationLegendData }[] = [];
     if (visibility.biomes === true) {
-      sections.push({ title: 'BIOMES', entries: buildBiomeLegend(context.map, context.data.mapTheme) });
-    }
-    if (visibility.terrain === true) {
-      sections.push({ title: 'TERRAIN', entries: buildTerrainLegend(context.map, context.data.mapTheme) });
+      sections.push({ title: 'BIOMES', rows: buildBiomeLegend(context.map, context.data.mapTheme) });
+    } else if (visibility.terrain === true) {
+      sections.push({ title: 'ELEVATION', gradient: buildElevationLegend(context.data.mapTheme) });
     }
     const visible = sections.length > 0;
     this.legendContainer.setVisible(visible);
     if (!visible) return;
     const signature = sections
-      .map((section) => `${section.title}#${legendSignature(section.entries)}`)
+      .map((section) =>
+        section.rows !== undefined
+          ? `${section.title}#${legendSignature(section.rows)}`
+          : `${section.title}#${elevationLegendSignature(section.gradient as ElevationLegendData)}`
+      )
       .join('||');
     if (signature === this.legendSignature) return;
     this.legendSignature = signature;
@@ -205,16 +216,33 @@ export class MapUI {
       title.setText(section.title);
       this.legendContainer.appendChild(title);
       this.legendRows.push(title);
-      for (const entry of section.entries) {
-        const row = this.create('div', 'map-legend-row');
-        const swatch = this.create('span', 'map-legend-swatch');
-        swatch.setAttribute('style', `background: ${entry.color}`);
-        const label = this.create('span', 'map-legend-label');
-        label.setText(entry.label);
-        row.appendChild(swatch);
-        row.appendChild(label);
-        this.legendContainer.appendChild(row);
-        this.legendRows.push(row);
+      if (section.rows !== undefined) {
+        for (const entry of section.rows) {
+          const row = this.create('div', 'map-legend-row');
+          const swatch = this.create('span', 'map-legend-swatch');
+          swatch.setAttribute('style', `background: ${entry.color}`);
+          const label = this.create('span', 'map-legend-label');
+          label.setText(entry.label);
+          row.appendChild(swatch);
+          row.appendChild(label);
+          this.legendContainer.appendChild(row);
+          this.legendRows.push(row);
+        }
+      } else {
+        const gradient = section.gradient as ElevationLegendData;
+        const bar = this.create('div', 'map-legend-gradient');
+        bar.setAttribute('style', `background: ${elevationGradientCss(gradient.stops)}`);
+        this.legendContainer.appendChild(bar);
+        this.legendRows.push(bar);
+        const labels = this.create('div', 'map-legend-gradient-labels');
+        const low = this.create('span', 'map-legend-gradient-label');
+        low.setText(gradient.lowLabel);
+        const high = this.create('span', 'map-legend-gradient-label');
+        high.setText(gradient.highLabel);
+        labels.appendChild(low);
+        labels.appendChild(high);
+        this.legendContainer.appendChild(labels);
+        this.legendRows.push(labels);
       }
     }
   }

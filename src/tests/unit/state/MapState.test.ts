@@ -148,18 +148,86 @@ describe('map state slice + commands (selection, layers, camera)', () => {
     game.dispose();
   });
 
-  it('layer toggles update the slice and emit events for every layer', () => {
+  it('layer toggles update the slice and emit events for every layer (only on actual change)', () => {
     const game = createTestGame();
     const layerEvents: unknown[] = [];
     game.gameEvents.on('map.layerVisibilityChanged', (payload) => layerEvents.push(payload));
+    // Pass 1: only the layers that are DEFAULT-VISIBLE actually change → event.
+    const defaultVisible = MAP_LAYER_ORDER.filter(
+      (layer) => DEFAULT_LAYER_VISIBILITY[layer] === true
+    );
     for (const layer of MAP_LAYER_ORDER) {
       expect(isKnownMapLayer(layer)).toBe(true);
       game.commandBus.send({ type: 'map.setLayerVisible', layer, visible: false });
       game.commandBus.flush();
       expect(game.gameState.map.layerVisibility[layer]).toBe(false);
     }
-    expect(layerEvents).toHaveLength(MAP_LAYER_ORDER.length);
+    expect(layerEvents).toHaveLength(defaultVisible.length);
+    // Pass 2: idempotent no-op toggles emit NOTHING (no spurious refreshes).
+    layerEvents.length = 0;
+    for (const layer of MAP_LAYER_ORDER) {
+      game.commandBus.send({ type: 'map.setLayerVisible', layer, visible: false });
+      game.commandBus.flush();
+    }
+    expect(layerEvents).toHaveLength(0);
     game.dispose();
+  });
+
+  it('exclusive surface layers: enabling Biomes turns Terrain off and vice versa (state-level policy)', () => {
+    const game = createTestGame();
+    const layerEvents: { layer: string; visible: boolean }[] = [];
+    game.gameEvents.on('map.layerVisibilityChanged', (payload) => layerEvents.push(payload));
+
+    // Terrain ON first (biomes already off → no fallout event).
+    game.commandBus.send({ type: 'map.setLayerVisible', layer: 'terrain', visible: true });
+    game.commandBus.flush();
+    expect(game.gameState.map.layerVisibility.terrain).toBe(true);
+    expect(layerEvents).toEqual([{ layer: 'terrain', visible: true }]);
+
+    // Biomes ON → Terrain OFF automatically; one event per CHANGED layer.
+    layerEvents.length = 0;
+    game.commandBus.send({ type: 'map.setLayerVisible', layer: 'biomes', visible: true });
+    game.commandBus.flush();
+    expect(game.gameState.map.layerVisibility.biomes).toBe(true);
+    expect(game.gameState.map.layerVisibility.terrain).toBe(false);
+    expect(layerEvents).toEqual([
+      { layer: 'biomes', visible: true },
+      { layer: 'terrain', visible: false }
+    ]);
+
+    // Disabling Terrain leaves Biomes EXACTLY as it was (no side effects).
+    game.commandBus.send({ type: 'map.setLayerVisible', layer: 'terrain', visible: false });
+    game.commandBus.flush();
+    expect(game.gameState.map.layerVisibility.terrain).toBe(false);
+    expect(game.gameState.map.layerVisibility.biomes).toBe(true);
+
+    // Non-member layers are untouched by the exclusivity policy.
+    game.commandBus.send({ type: 'map.setLayerVisible', layer: 'rivers', visible: false });
+    game.commandBus.flush();
+    expect(game.gameState.map.layerVisibility.rivers).toBe(false);
+    expect(game.gameState.map.layerVisibility.biomes).toBe(true); // unchanged
+    expect(game.gameState.map.layerVisibility.terrain).toBe(false);
+    game.dispose();
+  });
+
+  it('old saves carrying BOTH exclusive layers ON are normalized on load', () => {
+    const storage = new MemorySaveStorage();
+    const game = new Game({ seed: 42, saveStorage: storage });
+    game.init();
+    // Hand-crafted impossible state (bypasses the command path — as an old
+    // version's save would contain): both biomes and terrain visible.
+    game.gameState.map.layerVisibility.biomes = true;
+    game.gameState.map.layerVisibility.terrain = true;
+    game.saveToSlot('exclusivity-slot');
+
+    const game2 = new Game({ seed: 999, saveStorage: storage });
+    game2.init();
+    game2.loadFromSlot('exclusivity-slot');
+    // Registry order decides: the FIRST group member (biomes) survives.
+    expect(game2.gameState.map.layerVisibility.biomes).toBe(true);
+    expect(game2.gameState.map.layerVisibility.terrain).toBe(false);
+    game.dispose();
+    game2.dispose();
   });
 
   it('map selection survives a save/load roundtrip', () => {

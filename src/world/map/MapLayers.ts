@@ -94,3 +94,69 @@ export function layerDef(layer: MapLayerId): MapLayerDef {
 export function isKnownMapLayer(layer: string): layer is MapLayerId {
   return (MAP_LAYER_ORDER as readonly string[]).includes(layer);
 }
+
+// ———————————————— exclusive surface layers ————————————————
+
+/**
+ * Mutually-exclusive layer groups — a PRESENTATION policy, but owned by the
+ * layer registry (core, data-driven) and enforced in the LAYER STATE, not by
+ * hiding UI. Each group is one "surface mode": the members color the same
+ * pixels, so showing two of them at once would blend unrelated colorings
+ * into noise. Enabling one member automatically disables the others.
+ *
+ * Extensible: a future exclusive pair (e.g. two weather renderings) is one
+ * new array here — every toggle path (commands, saves, UI) follows without
+ * further changes. The layer DATA (biome/elevation/terrain per cell) is
+ * untouched by this: it stays complete in the map model for composable
+ * future uses; only the surface coloring is exclusive.
+ */
+export const EXCLUSIVE_LAYER_GROUPS: readonly (readonly MapLayerId[])[] = [
+  ['biomes', 'terrain']
+];
+
+/**
+ * Next visibility record after toggling `layer` to `visible`. When the
+ * toggled layer joins an exclusive group, the other group members are
+ * switched off in the SAME record (one atomic state change). Disabling a
+ * layer never re-enables anything.
+ *
+ * Pure function — the caller owns the slice mutation and event emission.
+ */
+export function applyLayerToggle(
+  visibility: Readonly<Record<MapLayerId, boolean>>,
+  layer: MapLayerId,
+  visible: boolean
+): Record<MapLayerId, boolean> {
+  const next: Record<MapLayerId, boolean> = { ...visibility, [layer]: visible };
+  if (!visible) return next;
+  for (const group of EXCLUSIVE_LAYER_GROUPS) {
+    if (!(group as readonly string[]).includes(layer)) continue;
+    for (const other of group) {
+      if (other !== layer) next[other] = false;
+    }
+  }
+  return next;
+}
+
+/**
+ * Repairs IMPOSSIBLE saved/hand-made states in place (e.g. two exclusive
+ * members both on — allowed by older versions): per group only the FIRST
+ * member survives (deterministic, registry order defines priority).
+ * @returns the number of layers flipped off.
+ */
+export function normalizeLayerVisibility(visibility: Record<MapLayerId, boolean>): number {
+  let changed = 0;
+  for (const group of EXCLUSIVE_LAYER_GROUPS) {
+    let firstOn: MapLayerId | null = null;
+    for (const member of group) {
+      if (visibility[member] !== true) continue;
+      if (firstOn === null) {
+        firstOn = member;
+        continue;
+      }
+      visibility[member] = false;
+      changed++;
+    }
+  }
+  return changed;
+}

@@ -19,7 +19,13 @@ import { DataRegistry } from '../data/DataRegistry';
 import { WorldManager } from '../world/WorldManager';
 import { generateStrategicMap } from '../world/map/MapGenerator';
 import { pickAt, clampCamera } from '../world/map/MapQueries';
-import { isKnownMapLayer, DEFAULT_LAYER_VISIBILITY } from '../world/map/MapLayers';
+import {
+  isKnownMapLayer,
+  DEFAULT_LAYER_VISIBILITY,
+  applyLayerToggle,
+  normalizeLayerVisibility,
+  type MapLayerId
+} from '../world/map/MapLayers';
 import { MapCameraController } from '../world/map/MapCameraController';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import { clearMapSelection, setMapSelection } from '../state/slices/mapSlice';
@@ -386,6 +392,10 @@ export class Game {
     for (const [layer, visible] of Object.entries(DEFAULT_LAYER_VISIBILITY)) {
       if (typeof visibility[layer] !== 'boolean') visibility[layer] = visible;
     }
+    // Exclusivity heal: older saves may carry two exclusive surface layers
+    // ON at once (a composite this version no longer renders). Normalize to
+    // the registry policy so the loaded state is always a valid surface mode.
+    normalizeLayerVisibility(this.state.map.layerVisibility);
     // Defensive heal: migration v3→v4 normally injects this, but hand-made
     // saves / external tooling may miss the field.
     if (typeof this.state.player.countryConfirmed !== 'boolean') {
@@ -604,14 +614,32 @@ export class Game {
     this.emitSelectionChanged();
   }
 
+  /**
+   * THE single mutation path for layer visibility (command → here). Applies
+   * the layer registry's exclusivity policy (e.g. enabling Biomes disables
+   * Terrain and vice versa) AT THE STATE LEVEL — not by hiding UI — and
+   * emits one event per actually-changed layer so every listener stays in
+   * sync with the final visibility record.
+   */
   mapSetLayerVisible(layer: string, visible: boolean): void {
     this.assertInitialized();
     if (!isKnownMapLayer(layer)) {
       this.logger.warn(`mapSetLayerVisible: unknown layer "${layer}"`);
       return;
     }
-    this.state.map.layerVisibility[layer] = visible;
-    this.events.emit('map.layerVisibilityChanged', { layer, visible });
+    const next = applyLayerToggle(this.state.map.layerVisibility, layer, visible);
+    // Toggled layer first (the user's action), then exclusivity fallout.
+    if (this.state.map.layerVisibility[layer] !== next[layer]) {
+      this.state.map.layerVisibility[layer] = next[layer];
+      this.events.emit('map.layerVisibilityChanged', { layer, visible: next[layer] });
+    }
+    for (const id of Object.keys(next) as MapLayerId[]) {
+      if (id === layer) continue;
+      if (this.state.map.layerVisibility[id] !== next[id]) {
+        this.state.map.layerVisibility[id] = next[id];
+        this.events.emit('map.layerVisibilityChanged', { layer: id, visible: next[id] });
+      }
+    }
   }
 
   /**

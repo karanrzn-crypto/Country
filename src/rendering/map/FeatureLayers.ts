@@ -1,8 +1,15 @@
 import * as THREE from 'three';
-import type { StrategicMapModel, MapSite } from '../../world/map/MapTypes';
+import type { StrategicMapModel, MapSite, MapRiver } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
 import { type MapTheme } from './MapTheme';
-import { type RGB, rgb, lerpColor } from './MapSurface';
+import {
+  type RGB,
+  rgb,
+  lerpColor,
+  buildVertexElevationGrid,
+  SURFACE_FILL_Y,
+  SURFACE_RELIEF_AMPLITUDE
+} from './MapSurface';
 
 /**
  * FeatureLayers — Part-3 information-layer visuals EXCEPT the land surface
@@ -286,7 +293,97 @@ export function createSeaRoutesLayer(theme: MapTheme): LineFeatureLayer {
   );
 }
 
-/** Rivers (lines) + lake basin cells (filled quads) — the water layer. */
+// ———————————————————————————— water features ————————————————————————————
+
+/** Small lift keeping water ON TOP of the (relief-lifted) land surface. */
+const WATER_LIFT = 0.05;
+
+/**
+ * Height of the water surface for a cell: ABOVE the rendered land surface
+ * within that cell (the surface's height is a convex blend of the cell's
+ * four corner heights — the max corner therefore dominates everywhere in
+ * the cell), so rivers/lakes stay visible in EVERY mode and never sink
+ * into lifted relief.
+ */
+function waterSurfaceY(heights: Float64Array, columns: number, cellIndex: number): number {
+  const cz = Math.floor(cellIndex / columns);
+  const cx = cellIndex - cz * columns;
+  const stride = columns + 1;
+  const maxCorner = Math.max(
+    heights[cz * stride + cx],
+    heights[cz * stride + cx + 1],
+    heights[(cz + 1) * stride + cx + 1],
+    heights[(cz + 1) * stride + cx]
+  );
+  return SURFACE_FILL_Y + maxCorner * SURFACE_RELIEF_AMPLITUDE + WATER_LIFT;
+}
+
+/** Natural river width (world units): tapers source → mouth, grows with length. */
+export function riverWidthAt(
+  river: MapRiver,
+  t: number,
+  width: { readonly source: number; readonly perCell: number; readonly max: number }
+): number {
+  const mouth = Math.min(width.max, width.source + width.perCell * river.cells.length);
+  const clamped = Math.max(0, Math.min(1, t));
+  return Math.max(0.05, width.source + (mouth - width.source) * clamped);
+}
+
+/**
+ * ONE merged ribbon mesh for ALL rivers — a triangle strip along each
+ * river polyline with a natural, tapering width (narrow at the source,
+ * widest at the mouth) and smooth per-point normals, so rivers read as
+ * flowing water instead of artificial 1-px lines. Ribbon height follows
+ * the terrain surface (water stays on the ground in every mode).
+ */
+export function buildRiverRibbons(
+  model: StrategicMapModel,
+  columns: number,
+  theme: MapTheme
+): THREE.BufferGeometry | null {
+  if (model.features.rivers.length === 0) return null;
+  const heights = buildVertexElevationGrid(model, columns);
+  const width = theme.layerColors.riverWidth;
+  const positions: number[] = [];
+  for (const river of model.features.rivers) {
+    const polyline = river.polyline;
+    if (polyline.length < 2) continue;
+    // Per-point frame: tangent (central difference) → perpendicular normal.
+    const left: { x: number; y: number; z: number }[] = [];
+    const right: { x: number; y: number; z: number }[] = [];
+    for (let i = 0; i < polyline.length; i++) {
+      const previous = polyline[Math.max(0, i - 1)];
+      const next = polyline[Math.min(polyline.length - 1, i + 1)];
+      const tx = next.x - previous.x;
+      const tz = next.z - previous.z;
+      const length = Math.hypot(tx, tz) || 1;
+      const nx = -tz / length;
+      const nz = tx / length;
+      const halfWidth = riverWidthAt(river, i / (polyline.length - 1), width) / 2;
+      const point = polyline[i];
+      const y = waterSurfaceY(heights, columns, river.cells[i]);
+      left.push({ x: point.x + nx * halfWidth, y, z: point.z + nz * halfWidth });
+      right.push({ x: point.x - nx * halfWidth, y, z: point.z - nz * halfWidth });
+    }
+    for (let i = 1; i < polyline.length; i++) {
+      const li = left[i];
+      const ri = right[i];
+      const liPrev = left[i - 1];
+      const riPrev = right[i - 1];
+      // Two triangles per segment (DoubleSide — winding-free).
+      for (const vertex of [liPrev, riPrev, ri, liPrev, ri, li]) {
+        positions.push(vertex.x, vertex.y, vertex.z);
+      }
+    }
+  }
+  if (positions.length === 0) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Rivers (natural ribbon meshes) + lake basin cells (filled quads). */
 export class RiverLayer {
   readonly group = new THREE.Group();
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -302,29 +399,30 @@ export class RiverLayer {
     if (this.built) return;
     this.built = true;
     const riverColor = rgb(this.theme.layerColors.riverStroke);
-    const riverGeometry = lineSegmentsFromPolylines(
-      model.features.rivers.map((river) => river.polyline),
-      riverColor,
-      0.8
-    );
+    const riverGeometry = buildRiverRibbons(model, this.columns, this.theme);
     if (riverGeometry !== null) {
       this.geometries.push(riverGeometry);
-      const material = new THREE.LineBasicMaterial({
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(riverColor.r, riverColor.g, riverColor.b),
         transparent: true,
         opacity: this.theme.layerColors.riverOpacity,
-        depthWrite: false
+        depthWrite: false,
+        side: THREE.DoubleSide
       });
       this.materials.push(material);
-      const lines = new THREE.LineSegments(riverGeometry, material);
-      lines.renderOrder = 6;
-      this.group.add(lines);
+      const mesh = new THREE.Mesh(riverGeometry, material);
+      mesh.renderOrder = 6;
+      this.group.add(mesh);
     }
-    // Lakes: filled quads of the basin cells (same shared lattice geometry).
+    // Lakes: filled quads of the basin cells (same shared lattice geometry),
+    // lifted exactly like the rivers so they always sit ON the surface.
     if (model.features.lakeCells.length > 0) {
+      const heights = buildVertexElevationGrid(model, this.columns);
       const positions: number[] = [];
       for (const cellIndex of model.features.lakeCells) {
         const [nw, ne, se, sw] = cellCornerPoints(cellIndex, model.lattice, this.columns);
-        for (const point of [nw, sw, se, nw, se, ne]) positions.push(point.x, 0.75, point.z);
+        const y = waterSurfaceY(heights, this.columns, cellIndex);
+        for (const point of [nw, sw, se, nw, se, ne]) positions.push(point.x, y, point.z);
       }
       const lakeGeometry = new THREE.BufferGeometry();
       lakeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -339,7 +437,7 @@ export class RiverLayer {
       });
       this.materials.push(lakeMaterial);
       const lakeMesh = new THREE.Mesh(lakeGeometry, lakeMaterial);
-      lakeMesh.renderOrder = 5;
+      lakeMesh.renderOrder = 6;
       this.group.add(lakeMesh);
     }
   }

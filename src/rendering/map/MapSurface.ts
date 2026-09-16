@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { StrategicMapModel, TerrainId } from '../../world/map/MapTypes';
+import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
 import type { MapTheme } from './MapTheme';
 
@@ -10,21 +10,23 @@ import type { MapTheme } from './MapTheme';
  * from this module, so a legend swatch can never drift from what the map
  * actually draws:
  * - `biomeBaseColor`  — the canonical color of a biome (theme-owned data);
- * - `parseTerrainRamp` + `rampColorAt` — the canonical elevation→color ramp
- *   the terrain layer paints (and the terrain legend samples);
- * - `TERRAIN_LEGEND_SAMPLE` — the representative elevation each terrain
- *   class is sampled at for its legend swatch.
+ * - `parseTerrainRamp` + `rampColorAt` — THE elevation→color gradient:
+ *   one simple continuous ramp, blue (lowest) → green → yellow → orange →
+ *   red (highest), interpolated directly from the elevation value;
+ * - `rampGradientStops` — the same ramp sampled for the legend's gradient
+ *   bar (map and legend are the same definition by construction).
  *
  * The SurfaceLayer mesh itself:
  * - ONE merged, vertex-colored mesh (one geometry, one material) built
  *   LAZILY on first visibility;
  * - subdivided (3×3 per cell) so the elevation field reads as GRADUAL,
- *   geographic relief instead of flat per-cell patches;
- * - HILLSHADED from a north-west light: shading is NORMALIZED so flat
- *   ground keeps the exact ramp/biome color (legend match), while slopes
- *   lighten or darken — hills, mountains and valleys stay distinguishable;
- * - composable: `mode` selects biomes / terrain / BOTH — activating one
- *   never destroys the other (biome hue × terrain relief in composite);
+ *   geographic transitions instead of flat per-cell patches;
+ * - terrain mode paints the ramp color EXACTLY (no shading, no global
+ *   filters) — every pixel's color is a pure function of elevation, so the
+ *   legend gradient matches the map 1:1;
+ * - `mode` is ONE surface coloring at a time (political | biomes | terrain)
+ *   — biomes and terrain are exclusive SURFACE renderings (enforced in the
+ *   layer state), while their DATA stays independent in the map model;
  * - rebuilt ONLY when the mode changes; zero per-frame cost.
  *
  * Pure view: all data comes from the static model + theme.
@@ -119,20 +121,28 @@ export function rampColorAt(ramp: readonly RampStop[], elevation: number): RGB {
   return last.color;
 }
 
+export interface GradientStopHex {
+  readonly at: number;
+  /** Display sRGB hex — exactly what rampColorAt renders at `at`. */
+  readonly color: string;
+}
+
 /**
- * Representative elevation each terrain class is SAMPLED at for legend
- * swatches — the same ramp the map paints, so "Lowland" on the legend is
- * exactly the color low ground has on the map.
+ * The elevation gradient as DISPLAY stops for the legend's CSS gradient bar.
+ * Samples THE SAME canonical `rampColorAt` the surface paints with (the map
+ * interpolates in linear space; browsers in sRGB) — with enough samples the
+ * legend bar is visually identical to the map's coloring, from one source.
  */
-export const TERRAIN_LEGEND_SAMPLE: Record<TerrainId, number> = {
-  lowland: 0.1,
-  valley: 0.25,
-  plains: 0.42,
-  plateau: 0.64,
-  hills: 0.68,
-  mountain: 0.82,
-  highMountain: 0.95
-};
+export function rampGradientStops(theme: MapTheme, sampleCount?: number): GradientStopHex[] {
+  const ramp = parseTerrainRamp(theme);
+  const samples = Math.max(2, Math.floor(sampleCount ?? theme.layerColors.elevationLegend.samples));
+  const stops: GradientStopHex[] = [];
+  for (let index = 0; index < samples; index++) {
+    const at = index / (samples - 1);
+    stops.push({ at, color: rgbToHex(rampColorAt(ramp, at)) });
+  }
+  return stops;
+}
 
 // ———————————————————— deterministic variation noise ————————————————————
 
@@ -221,46 +231,6 @@ export function naturalBiomeColor(
   };
 }
 
-// ———————————————————— relief shading ————————————————————
-
-/** Normalized light direction: from the NORTH-WEST, above the map. */
-const LIGHT = normalize3({ x: -0.55, y: 0.72, z: -0.42 });
-/** Lambert term a perfectly FLAT surface receives (its normal is straight up). */
-const FLAT_LAMBERT = LIGHT.y;
-
-function normalize3(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
-  const length = Math.hypot(v.x, v.y, v.z) || 1;
-  return { x: v.x / length, y: v.y / length, z: v.z / length };
-}
-
-/**
- * Relief shade from the local height-field GRADIENT (elevation units per
- * world unit), vertically exaggerated by the theme factor so realistic
- * gentle slopes become visible shading:
- * normal = normalize(−dh/dx·K, 1, −dh/dz·K).
- * Normalized so FLAT ground receives exactly 1.0 — the canonical legend
- * color — while slopes toward the north-west light brighten and slopes
- * away darken. Pure relief contrast, zero global color shift.
- */
-function shadeOfGradient(
-  dhDx: number,
-  dhDz: number,
-  shading: { exaggeration: number; strength: number; minShade: number; maxShade: number }
-): number {
-  const normal = normalize3({
-    x: -dhDx * shading.exaggeration,
-    y: 1,
-    z: -dhDz * shading.exaggeration
-  });
-  const lambert = Math.max(0, normal.x * LIGHT.x + normal.y * LIGHT.y + normal.z * LIGHT.z);
-  const shade = 1 + shading.strength * (lambert - FLAT_LAMBERT) / Math.max(1e-6, 1 - FLAT_LAMBERT);
-  return Math.max(shading.minShade, Math.min(shading.maxShade, shade));
-}
-
-function shadeColor(color: RGB, shade: number): RGB {
-  return { r: clamp01(color.r * shade), g: clamp01(color.g * shade), b: clamp01(color.b * shade) };
-}
-
 // ———————————————————— elevation vertex grid ————————————————————
 
 /**
@@ -299,20 +269,23 @@ export function buildVertexElevationGrid(model: StrategicMapModel, columns: numb
 
 // ———————————————————— the surface layer ————————————————————
 
-/** Which information layers contribute to the land surface right now. */
-export type SurfaceMode = 'political' | 'biomes' | 'terrain' | 'biomes+terrain';
+/** The ONE surface coloring currently shown (exclusive, layer-state driven). */
+export type SurfaceMode = 'political' | 'biomes' | 'terrain';
 
-/** Sub-quads per cell edge — 3×3 keeps relief smooth at trivial cost. */
-const SUBDIVISIONS = 3;
+/** Base height of the land surface — above all base fills, below water/borders. */
+export const SURFACE_FILL_Y = 0.7;
 /** Max geometric lift of the highest ground above the surface plane. */
-const RELIEF_AMPLITUDE = 0.3;
+export const SURFACE_RELIEF_AMPLITUDE = 0.3;
+/** Sub-quads per cell edge — 3×3 keeps the gradient smooth at trivial cost. */
+const SUBDIVISIONS = 3;
 
 /**
- * The composited land surface (biomes and/or terrain). ONE merged mesh,
- * rebuilt only when the contributing layer set changes; toggling one of the
- * two layers off/on never destroys the other's contribution — the composite
- * mode blends biome hue with terrain relief so "mountain + forest" reads as
- * a shaded green mountain, not a gray filter over the biomes.
+ * The land surface (political base / biomes / terrain elevation gradient).
+ * ONE merged mesh, rebuilt only when the mode changes. Biomes and terrain
+ * are EXCLUSIVE surface colorings (layer-state policy) — the terrain mode
+ * paints the continuous elevation ramp EXACTLY (color = pure function of
+ * elevation), so the legend gradient matches the map 1:1. Rivers/water are
+ * painted by RiverLayer above this surface, never tinted by the ramp.
  */
 export class SurfaceLayer {
   readonly group = new THREE.Group();
@@ -322,7 +295,7 @@ export class SurfaceLayer {
   private material: THREE.MeshBasicMaterial | null = null;
 
   /** Base height of the surface — above all base fills, below borders/rivers. */
-  private static readonly FILL_Y = 0.7;
+  private static readonly FILL_Y = SURFACE_FILL_Y;
 
   constructor(private readonly columns: number) {}
 
@@ -336,8 +309,6 @@ export class SurfaceLayer {
     this.disposeGeometry();
     const columns = this.columns;
     const biomeVariation = theme.layerColors.biomeVariation ?? DEFAULT_BIOME_VARIATION;
-    const shading = theme.layerColors.terrainShading;
-    const tint = theme.layerColors.terrainTintStrength;
     const ramp = parseTerrainRamp(theme);
     const heights = buildVertexElevationGrid(model, columns);
     const stride = columns + 1;
@@ -352,13 +323,14 @@ export class SurfaceLayer {
       const cz = Math.floor(cellIndex / columns);
       const cx = cellIndex - cz * columns;
       const [nw, ne, se, sw] = cellCornerPoints(cellIndex, model.lattice, columns);
-      const hNW = heights[cz * stride + cx];
-      const hNE = heights[cz * stride + cx + 1];
-      const hSE = heights[(cz + 1) * stride + cx + 1];
-      const hSW = heights[(cz + 1) * stride + cx];
-      const cornerHeights = [hNW, hNE, hSE, hSW];
+      const cornerHeights = [
+        heights[cz * stride + cx],
+        heights[cz * stride + cx + 1],
+        heights[(cz + 1) * stride + cx + 1],
+        heights[(cz + 1) * stride + cx]
+      ];
 
-      // Per-cell biome color (biomes-only and composite modes).
+      // Per-cell biome color (biomes mode only).
       const base = biomeBaseColor(theme, biome);
       const elevation = model.features.elevation[cellIndex] ?? 0.5;
       const biomeColor =
@@ -381,7 +353,7 @@ export class SurfaceLayer {
         const bottomZ = lerp(sw.z, se.z, u);
         return {
           x: lerp(topX, bottomX, v),
-          y: SurfaceLayer.FILL_Y + sampleHeight(u, v) * RELIEF_AMPLITUDE,
+          y: SurfaceLayer.FILL_Y + sampleHeight(u, v) * SURFACE_RELIEF_AMPLITUDE,
           z: lerp(topZ, bottomZ, v)
         };
       };
@@ -397,29 +369,13 @@ export class SurfaceLayer {
           const p2 = sample(u1, v1);
           const p3 = sample(u0, v1);
 
-          // Height-field gradient over the sub-quad (elevation / world unit)
-          // — the real input to hillshading (NOT the tiny geometric lift).
-          const um = (u0 + u1) / 2;
-          const vm = (v0 + v1) / 2;
-          const spanX = Math.abs(p1.x - p0.x) || 1e-6;
-          const spanZ = Math.abs(p3.z - p0.z) || 1e-6;
-          const dhDx = (sampleHeight(u1, vm) - sampleHeight(u0, vm)) / spanX;
-          const dhDz = (sampleHeight(um, v1) - sampleHeight(um, v0)) / spanZ;
-          const shade = this.mode === 'biomes' ? 1 : shadeOfGradient(dhDx, dhDz, shading);
-
-          let color: RGB;
-          if (this.mode === 'terrain') {
-            const midElevation = (sampleHeight(u0, v0) + sampleHeight(u1, v1)) / 2;
-            color = shadeColor(rampColorAt(ramp, midElevation), shade);
-          } else if (this.mode === 'biomes') {
-            color = biomeColor as RGB;
-          } else {
-            // Composite: biome hue shifted toward the elevation ramp, then
-            // shaded — mountains read as shaded rocky ground over the biome.
-            const midElevation = (sampleHeight(u0, v0) + sampleHeight(u1, v1)) / 2;
-            const ramped = shadeColor(rampColorAt(ramp, midElevation), shade);
-            color = shadeColor(lerpColor(biomeColor as RGB, ramped, tint), shade);
-          }
+          // Terrain = THE elevation gradient: the color is computed DIRECTLY
+          // from the elevation value — continuous blue → green → yellow →
+          // orange → red, no shading, no extra tones, legend-exact.
+          const color =
+            this.mode === 'terrain'
+              ? rampColorAt(ramp, (sampleHeight(u0, v0) + sampleHeight(u1, v1)) / 2)
+              : (biomeColor as RGB);
 
           for (const point of [p0, p3, p2, p0, p2, p1]) {
             positions.push(point.x, point.y, point.z);

@@ -93,9 +93,9 @@ export class StrategicMapRenderer {
     this.disposables.push(this.countryLayer, this.borderLayer, this.cityLayer, this.labelLayer);
 
     // —— Part-3 information layers (lazy, data-driven colors from the theme) ——
-    // The land SURFACE (biomes and/or terrain) is ONE composited mesh whose
-    // mode follows the two layer flags — enabling one never destroys the
-    // other, and enabling both blends biome hue with relief shading.
+    // The land SURFACE is ONE merged mesh whose exclusive mode follows the
+    // layer flags (biomes XOR terrain — enforced by the layer-state policy;
+    // rivers/water render ABOVE the surface as their own layer).
     const surfaceLayer = new SurfaceLayer(this.columns);
     this.surfaceLayer = surfaceLayer;
     const populationLayer = createPopulationFillLayer(this.columns, theme);
@@ -179,7 +179,8 @@ export class StrategicMapRenderer {
     // Fixed layer order (bottom → top) — borders/cities/labels can never be
     // hidden by fills because they sit above them in both order and height.
     // The biomes and terrain layer groups are THE SAME SurfaceLayer group:
-    // one composited land-surface mesh serves both (and their combination).
+    // one land-surface mesh serves both (only ONE is ever active — they are
+    // exclusive surface colorings, enforced in the layer state).
     const groups: Record<MapLayerId, THREE.Group> = {
       ocean: new THREE.Group(),
       land: this.countryLayer.landGroup,
@@ -249,18 +250,14 @@ export class StrategicMapRenderer {
       group.visible = visible;
     }
 
-    // 2b. The composited land surface: mode follows BOTH layer flags so the
-    // two layers combine instead of overwriting each other. The mesh rebuilds
-    // ONLY when the contributing set changes (SurfaceLayer checks internally).
+    // 2b. The land surface: exclusive mode follows the layer flags (biomes
+    // XOR terrain — the layer-state policy guarantees at most one is on; if
+    // a hand-crafted state ever carries both, the registry's FIRST member
+    // wins, matching normalizeLayerVisibility). The mesh rebuilds ONLY when
+    // the mode changes (SurfaceLayer checks internally).
     const biomesOn = map.layerVisibility.biomes === true;
     const terrainOn = map.layerVisibility.terrain === true;
-    const mode: SurfaceMode = biomesOn && terrainOn
-      ? 'biomes+terrain'
-      : biomesOn
-        ? 'biomes'
-        : terrainOn
-          ? 'terrain'
-          : 'political';
+    const mode: SurfaceMode = biomesOn ? 'biomes' : terrainOn ? 'terrain' : 'political';
     const surfaceGroup = this.layerGroups.get('biomes');
     if (surfaceGroup !== undefined) {
       surfaceGroup.visible = biomesOn || terrainOn;

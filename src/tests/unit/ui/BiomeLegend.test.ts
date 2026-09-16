@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildBiomeLegend, buildTerrainLegend, legendSignature } from '../../../ui/biomeLegend';
-import { parseTerrainRamp, rampColorAt, rgbToHex, TERRAIN_LEGEND_SAMPLE } from '../../../rendering/map/MapSurface';
+import { buildBiomeLegend, buildElevationLegend, elevationGradientCss, elevationLegendSignature, legendSignature } from '../../../ui/biomeLegend';
+import type { ElevationLegendData } from '../../../ui/biomeLegend';
+import { parseTerrainRamp, rampColorAt, rgbToHex, rgb } from '../../../rendering/map/MapSurface';
 import { generateStrategicMap } from '../../../world/map/MapGenerator';
 import { DEFAULT_MAP_CONFIG } from '../../helpers/mapTestConfig';
 import themeJson from '../../../data/mapTheme.json';
@@ -86,40 +87,52 @@ describe('biome legend builder', () => {
   });
 });
 
-describe('terrain legend builder', () => {
-  it('lists only terrain classes present on LAND cells of the model', () => {
-    const entries = buildTerrainLegend(model, theme);
-    const present = new Set<string>();
-    for (let i = 0; i < model.features.terrain.length; i++) {
-      if (model.features.biomes[i] === 'ocean') continue;
-      present.add(model.features.terrain[i]);
-    }
-    expect(entries.length).toBe(present.size);
-    for (const entry of entries) expect(present.has(entry.id)).toBe(true);
-  });
-
-  it('swatch color = the canonical ramp sampled at the class representative', () => {
+describe('elevation legend builder (one continuous gradient, same color source)', () => {
+  it('gradient stops are sampled from THE SAME canonical ramp the map paints', () => {
+    const data = buildElevationLegend(theme);
     const ramp = parseTerrainRamp(theme);
-    for (const entry of buildTerrainLegend(model, theme)) {
-      const sample = TERRAIN_LEGEND_SAMPLE[entry.id as keyof typeof TERRAIN_LEGEND_SAMPLE] ?? 0.5;
-      expect(entry.color).toBe(rgbToHex(rampColorAt(ramp, sample)));
+    expect(data.stops.length).toBe(theme.layerColors.elevationLegend.samples);
+    expect(data.stops[0].at).toBe(0);
+    expect(data.stops[data.stops.length - 1].at).toBe(1);
+    for (const stop of data.stops) {
+      // Legend color flows through the SAME rampColorAt the surface paints.
+      expect(stop.color).toBe(rgbToHex(rampColorAt(ramp, stop.at)));
     }
   });
 
-  it('low ground swatch is distinct from high mountain swatch (relief readable)', () => {
-    const entries = buildTerrainLegend(model, theme);
-    const byId = new Map(entries.map((entry) => [entry.id, entry]));
-    const low = byId.get('lowland');
-    const high = byId.get('highMountain');
-    expect(low).toBeDefined();
-    expect(high).toBeDefined();
-    expect(low?.color.toLowerCase()).not.toBe(high?.color.toLowerCase());
+  it('the bar spans blue (Low) → red (High) continuously', () => {
+    const data = buildElevationLegend(theme);
+    const first = rgb(data.stops[0].color);
+    const last = rgb(data.stops[data.stops.length - 1].color);
+    expect(first.b).toBeGreaterThan(first.r); // blue low end
+    expect(last.r).toBeGreaterThan(last.b); // red high end
+    for (let i = 1; i < data.stops.length; i++) {
+      expect(data.stops[i].at).toBeGreaterThan(data.stops[i - 1].at);
+    }
   });
 
-  it('labels come from the theme terrainLabels', () => {
-    const labels = theme.layerColors.terrainLabels as Record<string, string>;
-    for (const entry of buildTerrainLegend(model, theme)) {
-      expect(entry.label).toBe(labels[entry.id] ?? entry.id);
+  it('labels come from the theme', () => {
+    const data = buildElevationLegend(theme);
+    expect(data.lowLabel).toBe(theme.layerColors.elevationLegend.lowLabel);
+    expect(data.highLabel).toBe(theme.layerColors.elevationLegend.highLabel);
+  });
+
+  it('CSS gradient is built from the sampled stop colors', () => {
+    const data = buildElevationLegend(theme);
+    const css = elevationGradientCss(data.stops);
+    expect(css.startsWith('linear-gradient(to right,')).toBe(true);
+    for (const stop of [data.stops[0], data.stops[data.stops.length - 1]]) {
+      expect(css).toContain(`${stop.color} ${(stop.at * 100).toFixed(2)}%`);
     }
+  });
+
+  it('signature covers stops and labels (DOM rebuild gate)', () => {
+    const data = buildElevationLegend(theme);
+    expect(elevationLegendSignature(data)).toBe(elevationLegendSignature(data));
+    const changed: ElevationLegendData = {
+      ...data,
+      lowLabel: 'Bottom'
+    };
+    expect(elevationLegendSignature(changed)).not.toBe(elevationLegendSignature(data));
   });
 });

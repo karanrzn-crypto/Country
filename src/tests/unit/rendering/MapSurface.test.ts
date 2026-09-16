@@ -6,9 +6,13 @@ import {
   biomeBaseColor,
   parseTerrainRamp,
   rampColorAt,
+  rampGradientStops,
   rgb,
   rgbToHex,
+  buildVertexElevationGrid,
   SurfaceLayer,
+  SURFACE_FILL_Y,
+  SURFACE_RELIEF_AMPLITUDE,
   type RGB
 } from '../../../rendering/map/MapSurface';
 import { generateStrategicMap } from '../../../world/map/MapGenerator';
@@ -26,7 +30,10 @@ const theme = themeJson as unknown as MapThemeData;
  *   drift — all SYMMETRIC and small, so the legend's base color always
  *   reads as the same color the map shows (no hue shift, no neon);
  * - one central color definition (MapSurface) for renderer AND legends;
- * - the SurfaceLayer composites biomes/terrain in ONE merged mesh.
+ * - terrain mode = ONE simple continuous elevation gradient
+ *   (blue → green → yellow → orange → red), computed DIRECTLY from the
+ *   elevation value — no shading, no composite — so the legend gradient
+ *   matches the map exactly.
  */
 describe('natural biome coloring', () => {
   it('hash01 is deterministic and well-spread', () => {
@@ -90,26 +97,67 @@ describe('central color definitions (renderer ⇄ legend single source)', () => 
       expect(rgbToHex(rgb(hex))).toBe(hex.toLowerCase());
     }
   });
+});
 
-  it('the elevation ramp interpolates monotonically between stops', () => {
+describe('the elevation gradient (blue → green → yellow → orange → red)', () => {
+  it('is ONE simple continuous 5-stop ramp, low = blue, high = red', () => {
     const ramp = parseTerrainRamp(theme);
-    expect(ramp.length).toBeGreaterThanOrEqual(2);
-    const low = rampColorAt(ramp, 0);
-    const high = rampColorAt(ramp, 1);
-    // Low end dark/green-ish, high end near-white snow (rocky peaks read out).
-    const luminance = (color: RGB): number => 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
-    expect(luminance(high)).toBeGreaterThan(luminance(low));
-    expect(rampColorAt(ramp, -0.5)).toEqual(low);
-    expect(rampColorAt(ramp, 1.5)).toEqual(high);
+    expect(ramp.map((stop) => stop.at)).toEqual([0, 0.25, 0.5, 0.75, 1]);
+    const [blue, green, yellow, orange, red] = ramp.map((stop) => stop.color);
+    // blue (lowest): clearly blue-dominant
+    expect(blue.b).toBeGreaterThan(blue.g);
+    expect(blue.g).toBeGreaterThan(blue.r);
+    // green: green-dominant
+    expect(green.g).toBeGreaterThan(green.r);
+    expect(green.g).toBeGreaterThan(green.b);
+    // yellow: warm, blue nearly gone
+    expect(yellow.r).toBeGreaterThan(yellow.b);
+    expect(yellow.g).toBeGreaterThan(yellow.b);
+    // orange: red > green > blue
+    expect(orange.r).toBeGreaterThan(orange.g);
+    expect(orange.g).toBeGreaterThan(orange.b);
+    // red (highest): red-dominant
+    expect(red.r).toBeGreaterThan(red.g);
+    expect(red.g).toBeGreaterThanOrEqual(red.b);
   });
 
-  it('ramp sampling is deterministic', () => {
+  it('interpolates CONTINUOUSLY between stops (not discrete color buckets)', () => {
     const ramp = parseTerrainRamp(theme);
+    // A sample between two stops is a genuine mix of its neighbours.
+    const quarter = rampColorAt(ramp, 0.125);
+    const blue = rampColorAt(ramp, 0);
+    const green = rampColorAt(ramp, 0.25);
+    expect(quarter.b).toBeGreaterThan(green.b); // still carries blue
+    expect(quarter.g).toBeGreaterThan(blue.g); // already carries green
+    expect(quarter.b).toBeLessThan(blue.b);
+    // The blue channel NEVER rises as elevation grows — cold tones only at
+    // the bottom, warm tones only at the top (linear-space monotonicity).
+    const blueChannel = (elevation: number): number => rampColorAt(ramp, elevation).b;
+    for (let i = 1; i <= 10; i++) {
+      expect(blueChannel(i / 10)).toBeLessThanOrEqual(blueChannel((i - 1) / 10) + 1e-9);
+    }
+  });
+
+  it('clamps below the first and above the last stop; deterministic', () => {
+    const ramp = parseTerrainRamp(theme);
+    expect(rampColorAt(ramp, -0.5)).toEqual(ramp[0].color);
+    expect(rampColorAt(ramp, 1.5)).toEqual(ramp[ramp.length - 1].color);
     expect(rampColorAt(ramp, 0.42)).toEqual(rampColorAt(ramp, 0.42));
+  });
+
+  it('rampGradientStops samples THE SAME canonical function for the legend', () => {
+    const ramp = parseTerrainRamp(theme);
+    const stops = rampGradientStops(theme, 12);
+    expect(stops.length).toBe(12);
+    expect(stops[0].at).toBe(0);
+    expect(stops[stops.length - 1].at).toBe(1);
+    for (const stop of stops) {
+      expect(stop.color).toBe(rgbToHex(rampColorAt(ramp, stop.at)));
+    }
   });
 });
 
-describe('SurfaceLayer (composited land surface)', () => {
+describe('SurfaceLayer (exclusive surface colorings)', () => {
   it('biomes mode: ONE merged mesh covering exactly the land cells (9 sub-quads each)', () => {
     const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
     const columns = DEFAULT_MAP_CONFIG.columns;
@@ -146,7 +194,7 @@ describe('SurfaceLayer (composited land surface)', () => {
     layer.dispose();
   });
 
-  it('terrain mode: every painted color lies in the shaded ramp band', () => {
+  it('terrain mode paints the ramp EXACTLY — color is a pure function of elevation (legend match)', () => {
     const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
     const columns = DEFAULT_MAP_CONFIG.columns;
     const layer = new SurfaceLayer(columns);
@@ -154,60 +202,65 @@ describe('SurfaceLayer (composited land surface)', () => {
     layer.ensureBuilt(model, theme);
     const mesh = layer.group.children[0] as THREE.Mesh;
     const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
-    expect(attr.count).toBeGreaterThan(0);
     const ramp = parseTerrainRamp(theme);
-    const shading = theme.layerColors.terrainShading;
-    // Land elevations on this map span a known range; the painted color for
-    // any vertex must be the ramp color at SOME elevation in [0,1] scaled by
-    // a shade in [minShade, maxShade]. Approximate: compare channel-wise
-    // against the ramp extremes scaled by the shade bounds.
-    const rampColors = ramp.map((stop) => stop.color);
-    const minChannel = (channel: 'r' | 'g' | 'b'): number =>
-      Math.min(...rampColors.map((color) => color[channel]));
-    const maxChannel = (channel: 'r' | 'g' | 'b'): number =>
-      Math.max(...rampColors.map((color) => color[channel]));
-    const verticesPerCell = 54;
-    const cells = attr.count / verticesPerCell;
-    expect(cells).toBe(model.stats.landCells);
-    for (let vertex = 0; vertex < attr.count; vertex += 7) { // sparse, ALIGNED sample
-      const base = vertex * 3; // 3 floats (r,g,b) per vertex
-      const channels = ['r', 'g', 'b'] as const;
-      for (let c = 0; c < 3; c++) {
-        const value = attr.array[base + c];
-        const channel = channels[c];
-        expect(value).toBeGreaterThanOrEqual(minChannel(channel) * shading.minShade - 1e-4);
-        expect(value).toBeLessThanOrEqual(maxChannel(channel) * shading.maxShade + 1e-4);
-      }
+    const heights = buildVertexElevationGrid(model, columns);
+    const stride = columns + 1;
+    const sampleHeight = (ch: number[], u: number, v: number): number => {
+      const hTop = ch[0] + (ch[1] - ch[0]) * u;
+      const hBottom = ch[3] + (ch[2] - ch[3]) * u;
+      return hTop + (hBottom - hTop) * v;
+    };
+    // Replicate the renderer's color for the FIRST sub-quad of many cells
+    // and require EXACT agreement (no shading may perturb the ramp color).
+    let landIndex = 0;
+    let checked = 0;
+    for (
+      let cellIndex = 0;
+      cellIndex < model.features.biomes.length && checked < 40;
+      cellIndex++
+    ) {
+      if (model.features.biomes[cellIndex] === 'ocean') continue;
+      const cz = Math.floor(cellIndex / columns);
+      const cx = cellIndex - cz * columns;
+      const ch = [
+        heights[cz * stride + cx],
+        heights[cz * stride + cx + 1],
+        heights[(cz + 1) * stride + cx + 1],
+        heights[(cz + 1) * stride + cx]
+      ];
+      const mid = (sampleHeight(ch, 0, 0) + sampleHeight(ch, 1 / 3, 1 / 3)) / 2;
+      const expected = rampColorAt(ramp, mid);
+      const offset = (landIndex * 54 + 0) * 3; // cell 54 verts, sub-quad 0, vertex 0
+      expect(Math.abs(attr.array[offset] - expected.r)).toBeLessThan(1e-5);
+      expect(Math.abs(attr.array[offset + 1] - expected.g)).toBeLessThan(1e-5);
+      expect(Math.abs(attr.array[offset + 2] - expected.b)).toBeLessThan(1e-5);
+      landIndex++;
+      checked++;
     }
+    expect(checked).toBe(40);
     layer.dispose();
   });
 
-  it('composite mode differs from both single modes (layers truly combine)', () => {
+  it('low ground is blue-ish, high ground red-ish — elevation reads at a glance', () => {
     const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
     const columns = DEFAULT_MAP_CONFIG.columns;
-    const build = (mode: 'biomes' | 'terrain' | 'biomes+terrain'): Float32Array => {
-      const layer = new SurfaceLayer(columns);
-      layer.setMode(mode);
-      layer.ensureBuilt(model, theme);
-      const mesh = layer.group.children[0] as THREE.Mesh;
-      const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
-      const copy = new Float32Array(attr.array as Float32Array);
-      layer.dispose();
-      return copy;
-    };
-    const biomes = build('biomes');
-    const terrain = build('terrain');
-    const composite = build('biomes+terrain');
-    // Composite must NOT equal either single mode — it blends both inputs.
-    let differsFromBiomes = false;
-    let differsFromTerrain = false;
-    for (let i = 0; i < composite.length; i += 3) {
-      if (Math.abs(composite[i] - biomes[i]) > 1e-4) differsFromBiomes = true;
-      if (Math.abs(composite[i] - terrain[i]) > 1e-4) differsFromTerrain = true;
-      if (differsFromBiomes && differsFromTerrain) break;
+    const layer = new SurfaceLayer(columns);
+    layer.setMode('terrain');
+    layer.ensureBuilt(model, theme);
+    const mesh = layer.group.children[0] as THREE.Mesh;
+    const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+    let hasBlue = false;
+    let hasRed = false;
+    for (let vertex = 0; vertex < attr.count; vertex += 54) { // one vertex per cell
+      const base = vertex * 3;
+      const r = attr.array[base];
+      const b = attr.array[base + 2];
+      if (b > r + 0.15) hasBlue = true;
+      if (r > b + 0.15) hasRed = true;
     }
-    expect(differsFromBiomes).toBe(true);
-    expect(differsFromTerrain).toBe(true);
+    expect(hasBlue).toBe(true);
+    expect(hasRed).toBe(true);
+    layer.dispose();
   });
 
   it('mesh geometry is shared-safe: dispose clears GPU objects and rebuild works', () => {
@@ -222,6 +275,17 @@ describe('SurfaceLayer (composited land surface)', () => {
     layer.setMode('biomes');
     layer.ensureBuilt(model, theme);
     expect(layer.isBuilt).toBe(true);
+    layer.dispose();
+  });
+
+  it('political mode builds nothing; surface plane constants stay shared', () => {
+    const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
+    const layer = new SurfaceLayer(DEFAULT_MAP_CONFIG.columns);
+    layer.setMode('political');
+    layer.ensureBuilt(model, theme);
+    expect(layer.isBuilt).toBe(false);
+    expect(SURFACE_FILL_Y).toBe(0.7);
+    expect(SURFACE_RELIEF_AMPLITUDE).toBeGreaterThan(0);
     layer.dispose();
   });
 });

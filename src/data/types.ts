@@ -187,31 +187,19 @@ export interface MapLayerColorsData {
   /** Legend display order (biome ids; missing ids append deterministically). */
   readonly biomeLegendOrder: readonly string[];
   /**
-   * Hypsometric elevation ramp — THE single terrain color definition: the
-   * land surface interpolates it by elevation, and the terrain legend
-   * samples it at each class's representative elevation.
+   * THE elevation gradient — one simple, CONTINUOUS ramp from the lowest
+   * ground (blue) through green / yellow / orange to the highest (red).
+   * The terrain surface interpolates it directly from the elevation value
+   * (no shading, no extra classes), and the elevation legend renders the
+   * SAME definition as a gradient bar — map and legend can never diverge.
    */
   readonly terrainRamp: readonly { readonly at: number; readonly color: string }[];
-  /**
-   * Hillshading of the relief, normalized so flat ground shows the exact
-   * ramp color (legend match): `exaggeration` scales the height-field
-   * gradient into a visible slope, `strength` the light contrast, clamped
-   * to [minShade, maxShade].
-   */
-  readonly terrainShading: {
-    readonly exaggeration: number;
-    readonly strength: number;
-    readonly minShade: number;
-    readonly maxShade: number;
+  /** Elevation-legend presentation (labels + gradient sampling density). */
+  readonly elevationLegend: {
+    readonly lowLabel: string;
+    readonly highLabel: string;
+    readonly samples: number;
   };
-  /** Biome↔terrain composite: how far biome hue shifts toward the ramp. */
-  readonly terrainTintStrength: number;
-  /** Display labels for the terrain legend (data-driven — UI owns none). */
-  readonly terrainLabels: Readonly<
-    Record<'lowland' | 'valley' | 'plains' | 'plateau' | 'hills' | 'mountain' | 'highMountain', string>
-  >;
-  /** Legend display order (terrain ids; missing ids append deterministically). */
-  readonly terrainLegendOrder: readonly string[];
   readonly tintFillOpacity: number;
   readonly populationLow: string;
   readonly populationHigh: string;
@@ -221,6 +209,12 @@ export interface MapLayerColorsData {
   readonly riverOpacity: number;
   readonly lakeFill: string;
   readonly lakeOpacity: number;
+  /**
+   * Natural river ribbons: width at the SOURCE, width added PER RIVER CELL
+   * (longer = more flow = wider, tapering source → mouth), and a cap.
+   * World units — cells are ~10 units wide.
+   */
+  readonly riverWidth: { readonly source: number; readonly perCell: number; readonly max: number };
   readonly roadColors: Readonly<Record<'highway' | 'secondary' | 'dirt', string>>;
   readonly roadOpacity: number;
   readonly railwayStroke: string;
