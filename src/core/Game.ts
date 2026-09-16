@@ -13,7 +13,7 @@ import { hashValue } from '../utils/hash';
 import { WorldError, StateError } from '../utils/errors';
 import { TimeSystem } from '../time/TimeSystem';
 import type { TimeMode } from '../time/TimeSystem';
-import { createInitialState } from '../state/createInitialState';
+import { createInitialState, healPhase2State } from '../state/createInitialState';
 import { STATE_SLICE_KEYS } from '../state/GameState';
 import type { GameState } from '../state/GameState';
 import { DataRegistry } from '../data/DataRegistry';
@@ -53,6 +53,10 @@ import { MemorySaveStorage } from '../save/SaveStorage';
 import type { SaveStorage } from '../save/SaveStorage';
 import type { SaveData } from '../save/SaveTypes';
 import { registerCoreCommandHandlers } from './CommandHandlers';
+import { absoluteMonthIndex } from '../time/Calendar';
+import { setTaxRate, setSpendingShare, setMinistryFunding } from '../state/slices/governmentSlice';
+import { decisionBlockReason, enactDecision } from '../government/DecisionEngine';
+import { resolvePendingEvent } from '../government/EventEngine';
 import { registerDebugCommandHandlers } from '../debug/DebugCommands';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import type { IGameRenderer } from './RendererAdapter';
@@ -400,6 +404,9 @@ export class Game {
     // Country capitals are joined from the live map model — heals migrated
     // saves whose stored join may come from a different map config.
     syncCountryCapitals(this.state.countries.countries, this.mapModel);
+    // Phase 2 heal: government/macro/treasury/political records per live
+    // country + City Areas re-synced (runtime fields overlay by id).
+    healPhase2State(this.state, this.mapModel, this.config.map.columns, this.data);
     // New map layers (Part 3): fill in registry defaults ONLY for keys the
     // save does not carry — saved toggles always win over defaults.
     const visibility = this.state.map.layerVisibility as Record<string, boolean | undefined>;
@@ -918,6 +925,70 @@ export class Game {
     this.state.map.viewport.height = height;
     // Re-clamp: the visible world rectangle changed with the aspect ratio.
     this.mapSetCamera({});
+  }
+
+  // ——————————————————— Phase 2 — presidency & governance —————————————————
+
+  /** Absolute campaign month index (the government sim's time unit). */
+  private currentMonth(): number {
+    return absoluteMonthIndex(this.time.date, this.time.startDate);
+  }
+
+  governmentSetTaxRate(countryId: string, category: 'income' | 'corporate' | 'trade', value: number): void {
+    this.assertInitialized();
+    const applied = setTaxRate(this.state.government, countryId, category, value);
+    this.events.emit('government.budgetChanged', { countryId, kind: 'tax', category, value: applied });
+  }
+
+  governmentSetSpending(
+    countryId: string,
+    category: 'military' | 'healthcare' | 'education' | 'infrastructure' | 'welfare' | 'government' | 'other',
+    value: number
+  ): void {
+    this.assertInitialized();
+    const applied = setSpendingShare(this.state.government, countryId, category, value);
+    this.events.emit('government.budgetChanged', { countryId, kind: 'spending', category, value: applied });
+  }
+
+  governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void {
+    this.assertInitialized();
+    const applied = setMinistryFunding(this.state.government, countryId, ministryId, value);
+    if (applied > 0 || value <= 0) {
+      this.events.emit('government.ministryFundingChanged', { countryId, ministryId, value: applied });
+    }
+  }
+
+  /**
+   * Attempts to enact a decision. Returns false (and logs why) when blocked
+   * by cooldown, cost or preconditions — the UI previews the same reason.
+   */
+  governmentEnactDecision(countryId: string, decisionId: string): boolean {
+    this.assertInitialized();
+    let decision;
+    try {
+      decision = this.data.decision(decisionId);
+    } catch {
+      this.log.warn(`enactDecision: unknown decision "${decisionId}"`);
+      return false;
+    }
+    const reason = decisionBlockReason(this.state, countryId, decision, this.currentMonth());
+    if (reason !== null) {
+      this.log.debug(`decision "${decisionId}" blocked: ${reason}`);
+      return false;
+    }
+    enactDecision(this.state, countryId, decision, this.currentMonth());
+    this.events.emit('government.decisionEnacted', { countryId, decisionId });
+    return true;
+  }
+
+  /** Resolves a pending event with a choice. Returns false when unknown. */
+  governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean {
+    this.assertInitialized();
+    const resolved = resolvePendingEvent(this.state, countryId, instanceId, choiceId, this.data.eventList);
+    if (resolved) {
+      this.events.emit('government.eventResolved', { countryId, instanceId, choiceId });
+    }
+    return resolved;
   }
 
   private emitSelectionChanged(): void {

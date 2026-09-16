@@ -53,4 +53,27 @@ export type GameCommand =
       readonly screenY?: number;
     }
   | { readonly type: 'map.focusCountry'; readonly countryId: string }
-  | { readonly type: 'map.setViewport'; readonly width: number; readonly height: number };
+  | { readonly type: 'map.setViewport'; readonly width: number; readonly height: number }
+  // —— Phase 2 — presidency & governance ——
+  | {
+      readonly type: 'government.setTaxRate';
+      readonly countryId: string;
+      readonly category: 'income' | 'corporate' | 'trade';
+      readonly value: number;
+    }
+  | {
+      readonly type: 'government.setSpending';
+      readonly countryId: string;
+      readonly category:
+        | 'military'
+        | 'healthcare'
+        | 'education'
+        | 'infrastructure'
+        | 'welfare'
+        | 'government'
+        | 'other';
+      readonly value: number;
+    }
+  | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
+  | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
+  | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string };

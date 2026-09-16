@@ -200,6 +200,73 @@
         padding: 6px 14px; color: #cfd8e6; background: #1a2333;
       }
       .map-country-list { max-height: 46vh; overflow-y: auto; }
+
+      /* —— president dashboard (Phase 2) —— */
+      .president-dashboard {
+        width: min(680px, 92vw); max-height: min(640px, 88vh);
+        padding: 16px 20px; gap: 8px; overflow: hidden;
+      }
+      .pd-header { display: flex; align-items: center; justify-content: space-between; }
+      .pd-header h2 { letter-spacing: 2px; color: #7fb2ff; }
+      .pd-close {
+        font: inherit; cursor: pointer; color: #cfd8e6; background: #1a2333;
+        border: 1px solid #33415c; border-radius: 4px; padding: 4px 10px;
+      }
+      .pd-close:hover { background: #243149; }
+      .pd-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+      .pd-tab {
+        font: inherit; font-size: 11px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 3px;
+        padding: 3px 9px; color: #cfd8e6; background: #1a2333;
+      }
+      .pd-tab:hover { background: #243149; }
+      .pd-tab.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
+      .pd-body { overflow-y: auto; min-height: 320px; max-height: calc(min(640px, 88vh) - 120px); }
+      .pd-section { display: none; flex-direction: column; gap: 3px; }
+      .pd-subtitle { color: #8a94a6; font-size: 11px; letter-spacing: 1px; margin-top: 8px; }
+      .pd-row { display: flex; justify-content: space-between; gap: 14px; }
+      .pd-key { color: #8a94a6; flex: 0 0 auto; }
+      .pd-value { color: #e8edf5; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+      .pd-stepper { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+      .pd-stepper-label { color: #cfd8e6; flex: 1 1 auto; }
+      .pd-stepper-value { color: #e8edf5; font-weight: 700; min-width: 44px; text-align: right; }
+      .pd-step-btn {
+        font: inherit; cursor: pointer; width: 26px; height: 22px;
+        border: 1px solid #33415c; border-radius: 3px;
+        color: #e8edf5; background: #1a2333; padding: 0;
+      }
+      .pd-step-btn:hover { background: #243149; border-color: #4a5f88; }
+      .pd-parties, .pd-ministries, .pd-decision-list, .pd-event-list, .pd-election-results {
+        display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
+      }
+      .pd-party, .pd-result-row { color: #cfd8e6; }
+      .pd-party.in-gov { color: #b8e6b8; font-weight: 700; }
+      .pd-ministry-row { display: flex; align-items: center; gap: 8px; }
+      .pd-ministry-name { color: #cfd8e6; flex: 1 1 auto; }
+      .pd-ministry-value { color: #e8edf5; font-weight: 700; min-width: 44px; text-align: right; }
+      .pd-decision { border: 1px solid #22304a; border-radius: 5px; padding: 6px 9px; }
+      .pd-decision.ok { border-color: #3d5a3d; }
+      .pd-decision.blocked { opacity: 0.62; }
+      .pd-decision-name { color: #e8edf5; font-weight: 700; }
+      .pd-decision-desc { color: #9aa6ba; font-size: 11px; margin-top: 2px; }
+      .pd-decision-reason { color: #ffb454; font-size: 11px; margin-top: 2px; }
+      .pd-enact {
+        font: inherit; font-size: 12px; cursor: pointer; margin-top: 4px;
+        border: 1px solid #4a7f4a; border-radius: 3px; padding: 3px 12px;
+        color: #b8e6b8; background: #1d2b1d; font-weight: 700;
+      }
+      .pd-enact:hover { background: #243724; }
+      .pd-event { border: 1px solid #6a4a2a; border-radius: 5px; padding: 6px 9px; background: rgba(60, 42, 18, 0.25); }
+      .pd-event-title { color: #ffd27f; font-weight: 700; }
+      .pd-event-desc { color: #aeb8c8; font-size: 11px; margin: 2px 0 4px; }
+      .pd-choice {
+        font: inherit; font-size: 11px; cursor: pointer; display: block; width: 100%;
+        text-align: left; margin-top: 3px;
+        border: 1px solid #33415c; border-radius: 3px; padding: 4px 8px;
+        color: #e8edf5; background: #1a2333;
+      }
+      .pd-choice:hover { background: #243149; border-color: #4a5f88; }
+      .pd-empty { color: #6b7688; font-size: 12px; }
     </style>
   </head>
   <body>

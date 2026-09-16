@@ -149,3 +149,8 @@ export function minutesAfterOneYear(elapsedMinutes: number, start: CalendarStart
     start
   );
 }
+
+/** ABSOLUTE month index since campaign start — the simulation's month math unit. */
+export function absoluteMonthIndex(date: CalendarDate, start: CalendarStart): number {
+  return (date.year - start.year) * 12 + (date.month - start.month);
+}

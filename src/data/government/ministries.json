@@ -1,0 +1,11 @@
+{
+  "finance": { "id": "finance", "name": "Ministry of Finance", "portfolio": "government", "focus": "taxEfficiency" },
+  "defense": { "id": "defense", "name": "Ministry of Defense", "portfolio": "military", "focus": "militaryPower" },
+  "interior": { "id": "interior", "name": "Ministry of Interior", "portfolio": "government", "focus": "corruption" },
+  "health": { "id": "health", "name": "Ministry of Health", "portfolio": "healthcare", "focus": "services" },
+  "education": { "id": "education", "name": "Ministry of Education", "portfolio": "education", "focus": "productivity" },
+  "industry": { "id": "industry", "name": "Ministry of Industry", "portfolio": "government", "focus": "sector.industry" },
+  "energy": { "id": "energy", "name": "Ministry of Energy", "portfolio": "government", "focus": "sector.energy" },
+  "infrastructure": { "id": "infrastructure", "name": "Ministry of Infrastructure", "portfolio": "infrastructure", "focus": "capacity" },
+  "foreign": { "id": "foreign", "name": "Ministry of Foreign Affairs", "portfolio": "government", "focus": "trade" }
+}

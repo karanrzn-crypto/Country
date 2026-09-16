@@ -1,0 +1,305 @@
+{
+  "economic_crisis": {
+    "id": "economic_crisis",
+    "title": "Economic Crisis",
+    "description": "Credit markets seize and growth forecasts collapse. Business leaders demand a rescue package.",
+    "category": "economic",
+    "weight": 10,
+    "conditions": [{ "metric": "gdpGrowth", "op": "lt", "value": 0.01 }],
+    "cooldownMonths": 18,
+    "once": false,
+    "expireMonths": 3,
+    "choices": [
+      {
+        "id": "stimulus",
+        "text": "Massive stimulus program",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -4000 },
+          { "target": "gdpGrowth", "mode": "add", "value": 0.01 },
+          { "target": "approval", "mode": "add", "value": 0.03 }
+        ]
+      },
+      {
+        "id": "austerity",
+        "text": "Hold the line — austerity",
+        "effects": [
+          { "target": "gdpGrowth", "mode": "add", "value": -0.008 },
+          { "target": "approval", "mode": "add", "value": -0.05 },
+          { "target": "protestPressure", "mode": "add", "value": 0.15 }
+        ]
+      }
+    ]
+  },
+  "worker_strike": {
+    "id": "worker_strike",
+    "title": "General Strike",
+    "description": "Unions walk out over wages and conditions. Ports and factories are slowing down.",
+    "category": "social",
+    "weight": 12,
+    "conditions": [{ "metric": "unemployment", "op": "gte", "value": 0.08 }],
+    "cooldownMonths": 12,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "negotiate",
+        "text": "Negotiate with the unions",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -800 },
+          { "target": "strikePressure", "mode": "add", "value": -0.2 },
+          { "target": "approval", "mode": "add", "value": 0.02 }
+        ]
+      },
+      {
+        "id": "stand_firm",
+        "text": "Refuse concessions",
+        "effects": [
+          { "target": "sector.industry", "mode": "add", "value": -400 },
+          { "target": "strikePressure", "mode": "add", "value": 0.1 },
+          { "target": "protestPressure", "mode": "add", "value": 0.08 }
+        ]
+      }
+    ]
+  },
+  "oil_price_crash": {
+    "id": "oil_price_crash",
+    "title": "Oil Price Crash",
+    "description": "World oil prices collapse. Energy revenues shrink; industry celebrates cheap inputs.",
+    "category": "economic",
+    "weight": 9,
+    "conditions": [],
+    "cooldownMonths": 24,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "absorb",
+        "text": "Absorb the shock",
+        "effects": [
+          { "target": "sector.energy", "mode": "add", "value": -600 },
+          { "target": "sector.industry", "mode": "add", "value": 300 }
+        ]
+      },
+      {
+        "id": "tax_windfall_cut",
+        "text": "Cut energy taxes to help producers",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -500 },
+          { "target": "sector.energy", "mode": "add", "value": -200 },
+          { "target": "approval", "mode": "add", "value": 0.02 }
+        ]
+      }
+    ]
+  },
+  "political_scandal": {
+    "id": "political_scandal",
+    "title": "Political Scandal",
+    "description": "Journalists expose procurement kickbacks reaching the cabinet. The opposition smells blood.",
+    "category": "political",
+    "weight": 10,
+    "conditions": [{ "metric": "corruption", "op": "gte", "value": 0.2 }],
+    "cooldownMonths": 15,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "investigate",
+        "text": "Order an independent investigation",
+        "effects": [
+          { "target": "corruption", "mode": "add", "value": -0.05 },
+          { "target": "publicTrust", "mode": "add", "value": 0.05 },
+          { "target": "politicalSupport", "mode": "add", "value": -0.04 }
+        ]
+      },
+      {
+        "id": "cover_up",
+        "text": "Bury the story",
+        "effects": [
+          { "target": "corruption", "mode": "add", "value": 0.03 },
+          { "target": "publicTrust", "mode": "add", "value": -0.06 }
+        ]
+      }
+    ]
+  },
+  "industrial_boom": {
+    "id": "industrial_boom",
+    "title": "Industrial Boom",
+    "description": "Export orders are flooding in. Factories beg for workers and overtime is everywhere.",
+    "category": "economic",
+    "weight": 8,
+    "conditions": [{ "metric": "gdpGrowth", "op": "gt", "value": 0.02 }],
+    "cooldownMonths": 24,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "ride_wave",
+        "text": "Let the market run",
+        "effects": [
+          { "target": "sector.industry", "mode": "add", "value": 500 },
+          { "target": "gdpGrowth", "mode": "add", "value": 0.004 },
+          { "target": "inflation", "mode": "add", "value": 0.008 }
+        ]
+      },
+      {
+        "id": "cool_economy",
+        "text": "Cool the economy with reserves",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": 600 },
+          { "target": "inflation", "mode": "add", "value": -0.004 }
+        ]
+      }
+    ]
+  },
+  "bank_crisis": {
+    "id": "bank_crisis",
+    "title": "Banking Panic",
+    "description": "The third-largest bank is insolvent. Depositors queue around the block.",
+    "category": "economic",
+    "weight": 7,
+    "conditions": [{ "metric": "inflation", "op": "gt", "value": 0.05 }],
+    "cooldownMonths": 30,
+    "once": true,
+    "expireMonths": 1,
+    "choices": [
+      {
+        "id": "bailout",
+        "text": "Bail out the bank",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -5000 },
+          { "target": "stability", "mode": "add", "value": 0.04 },
+          { "target": "approval", "mode": "add", "value": -0.02 }
+        ]
+      },
+      {
+        "id": "let_fail",
+        "text": "Let it fail",
+        "effects": [
+          { "target": "gdpGrowth", "mode": "add", "value": -0.012 },
+          { "target": "unemployment", "mode": "add", "value": 0.015 },
+          { "target": "publicTrust", "mode": "add", "value": -0.04 }
+        ]
+      }
+    ]
+  },
+  "food_shortage": {
+    "id": "food_shortage",
+    "title": "Food Shortage",
+    "description": "A poor harvest meets broken supply chains. Bread prices double in a week.",
+    "category": "social",
+    "weight": 9,
+    "conditions": [{ "metric": "inflation", "op": "gt", "value": 0.03 }],
+    "cooldownMonths": 18,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "import",
+        "text": "Emergency imports",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -1200 },
+          { "target": "approval", "mode": "add", "value": 0.03 }
+        ]
+      },
+      {
+        "id": "ration",
+        "text": "Rationing and price controls",
+        "effects": [
+          { "target": "approval", "mode": "add", "value": -0.04 },
+          { "target": "protestPressure", "mode": "add", "value": 0.1 },
+          { "target": "inflation", "mode": "add", "value": -0.01 }
+        ]
+      }
+    ]
+  },
+  "inflation_crisis": {
+    "id": "inflation_crisis",
+    "title": "Inflation Spiral",
+    "description": "Prices are rising out of control. The central bank begs for political cover to hike rates.",
+    "category": "economic",
+    "weight": 8,
+    "conditions": [{ "metric": "inflation", "op": "gte", "value": 0.08 }],
+    "cooldownMonths": 20,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "tighten",
+        "text": "Back the central bank",
+        "effects": [
+          { "target": "inflation", "mode": "add", "value": -0.03 },
+          { "target": "gdpGrowth", "mode": "add", "value": -0.006 },
+          { "target": "unemployment", "mode": "add", "value": 0.008 }
+        ]
+      },
+      {
+        "id": "print",
+        "text": "Print through it",
+        "effects": [
+          { "target": "inflation", "mode": "add", "value": 0.02 },
+          { "target": "approval", "mode": "add", "value": -0.03 },
+          { "target": "treasury", "mode": "add", "value": 800 }
+        ]
+      }
+    ]
+  },
+  "election_crisis": {
+    "id": "election_crisis",
+    "title": "Election Interference Allegations",
+    "description": "Opposition parties allege systematic interference. Crowds gather outside parliament.",
+    "category": "political",
+    "weight": 6,
+    "conditions": [{ "metric": "publicTrust", "op": "lt", "value": 0.45 }],
+    "cooldownMonths": 36,
+    "once": false,
+    "expireMonths": 2,
+    "choices": [
+      {
+        "id": "independent_review",
+        "text": "Allow an independent review",
+        "effects": [
+          { "target": "publicTrust", "mode": "add", "value": 0.07 },
+          { "target": "executiveAuthority", "mode": "add", "value": -0.05 }
+        ]
+      },
+      {
+        "id": "dismiss",
+        "text": "Dismiss the allegations",
+        "effects": [
+          { "target": "protestPressure", "mode": "add", "value": 0.18 },
+          { "target": "publicTrust", "mode": "add", "value": -0.05 }
+        ]
+      }
+    ]
+  },
+  "brain_drain": {
+    "id": "brain_drain",
+    "title": "Brain Drain",
+    "description": "Top researchers and engineers are emigrating for better pay and stability.",
+    "category": "social",
+    "weight": 7,
+    "conditions": [{ "metric": "unemployment", "op": "gte", "value": 0.1 }],
+    "cooldownMonths": 24,
+    "once": false,
+    "expireMonths": 3,
+    "choices": [
+      {
+        "id": "retain",
+        "text": "Retention grants for specialists",
+        "effects": [
+          { "target": "treasury", "mode": "add", "value": -900 },
+          { "target": "sector.technology", "mode": "add", "value": 200 },
+          { "target": "gdpGrowth", "mode": "add", "value": 0.002 }
+        ]
+      },
+      {
+        "id": "accept",
+        "text": "Accept the trend",
+        "effects": [
+          { "target": "sector.technology", "mode": "add", "value": -300 },
+          { "target": "publicTrust", "mode": "add", "value": -0.02 }
+        ]
+      }
+    ]
+  }
+}

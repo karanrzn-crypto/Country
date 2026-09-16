@@ -2,7 +2,7 @@ import { DataValidationError } from '../utils/errors';
 import type { Logger } from '../utils/Logger';
 import { validateOrThrow } from '../utils/validation';
 import type { FieldSchema } from '../utils/validation';
-import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA, COUNTRY_PROFILE_SCHEMA } from './schemas';
+import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA, COUNTRY_PROFILE_SCHEMA, PARTY_TEMPLATE_SCHEMA, MINISTRY_TEMPLATE_SCHEMA, DECISION_DEF_SCHEMA, EVENT_DEF_SCHEMA } from './schemas';
 import type { WorldDataJson, CountryProfileJson } from './types';
 import type { UnitTypeDef, EquipmentDef } from '../military/types';
 import type { FactoryTypeDef, ResourceDef } from '../economy/types';
@@ -10,6 +10,9 @@ import type { AIStrategyDef } from '../ai/types';
 import type { PlayerModeDef } from '../player/types';
 import type { InputBindings } from '../input/InputTypes';
 import type { MapThemeData } from './types';
+import type { DecisionDef, EventDef } from '../government/types';
+import { KNOWN_GOV_METRICS, MUL_METRICS } from '../government/Metrics';
+import type { PartyTemplate, MinistryTemplate } from '../state/slices/governmentSlice';
 import unitsJson from './units.json';
 import equipmentJson from './equipment.json';
 import economyJson from './economy.json';
@@ -18,6 +21,10 @@ import playerModesJson from './playerModes.json';
 import inputBindingsJson from './inputBindings.json';
 import mapThemeJson from './mapTheme.json';
 import countriesJson from './countries.json';
+import partiesJson from './government/parties.json';
+import ministriesJson from './government/ministries.json';
+import decisionsJson from './government/decisions.json';
+import eventsJson from './government/events.json';
 import demoWorldJson from './worlds/demo-country.json';
 
 export interface EconomyDataBundle {
@@ -47,6 +54,10 @@ export class DataRegistry {
   private readonly theme: MapThemeData;
   private readonly countryProfiles: readonly CountryProfileJson[];
   private readonly worlds: Readonly<Record<string, WorldDataJson>>;
+  private readonly partyTemplates: readonly PartyTemplate[];
+  private readonly ministryTemplates: readonly MinistryTemplate[];
+  private readonly decisions: readonly DecisionDef[];
+  private readonly events: readonly EventDef[];
 
   constructor(private readonly logger?: Logger) {
     this.unitTypes = unitsJson as unknown as Record<string, UnitTypeDef>;
@@ -57,6 +68,10 @@ export class DataRegistry {
     this.bindings = inputBindingsJson as unknown as InputBindings;
     this.theme = mapThemeJson as unknown as MapThemeData;
     this.countryProfiles = countriesJson as unknown as readonly CountryProfileJson[];
+    this.partyTemplates = Object.values(partiesJson) as unknown as PartyTemplate[];
+    this.ministryTemplates = Object.values(ministriesJson) as unknown as MinistryTemplate[];
+    this.decisions = Object.values(decisionsJson) as unknown as DecisionDef[];
+    this.events = Object.values(eventsJson) as unknown as EventDef[];
     this.worlds = { 'demo-country': demoWorldJson as unknown as WorldDataJson };
 
     this.validateAll();
@@ -94,6 +109,22 @@ export class DataRegistry {
       () => validateOrThrow(this.countryProfiles, { type: 'array', minLength: 1, items: COUNTRY_PROFILE_SCHEMA }, 'countries'),
       'countries'
     );
+    check(
+      () => validateOrThrow(this.partyTemplates, { type: 'array', minLength: 1, items: PARTY_TEMPLATE_SCHEMA }, 'parties'),
+      'parties'
+    );
+    check(
+      () => validateOrThrow(this.ministryTemplates, { type: 'array', minLength: 1, items: MINISTRY_TEMPLATE_SCHEMA }, 'ministries'),
+      'ministries'
+    );
+    check(
+      () => validateOrThrow(this.decisions, { type: 'array', minLength: 1, items: DECISION_DEF_SCHEMA }, 'decisions'),
+      'decisions'
+    );
+    check(
+      () => validateOrThrow(this.events, { type: 'array', minLength: 1, items: EVENT_DEF_SCHEMA }, 'events'),
+      'events'
+    );
     for (const [worldId, world] of Object.entries(this.worlds)) {
       check(() => validateOrThrow(world, WORLD_SCHEMA, `worlds.${worldId}`), `worlds.${worldId}`);
     }
@@ -128,6 +159,34 @@ export class DataRegistry {
         }
       }
     }
+
+    // Government content: unique ids + every effect targets a known metric
+    // with a mode that metric supports (boot-time content honesty).
+    const checkEffects = (source: string, effects: readonly { target: string; mode: string }[]): void => {
+      for (const effect of effects) {
+        if (!KNOWN_GOV_METRICS.has(effect.target)) {
+          issues.push(`${source}: unknown metric target "${effect.target}"`);
+        } else if (effect.mode === 'mul' && !MUL_METRICS.has(effect.target)) {
+          issues.push(`${source}: metric "${effect.target}" does not support 'mul' effects`);
+        }
+      }
+    };
+    const decisionIds = new Set(this.decisions.map((decision) => decision.id));
+    if (decisionIds.size !== this.decisions.length) issues.push('decisions: duplicate decision ids');
+    for (const decision of this.decisions) {
+      checkEffects(`decisions.${decision.id}`, decision.effects);
+    }
+    const eventIds = new Set(this.events.map((event) => event.id));
+    if (eventIds.size !== this.events.length) issues.push('events: duplicate event ids');
+    for (const event of this.events) {
+      for (const choice of event.choices) {
+        checkEffects(`events.${event.id}.${choice.id}`, choice.effects);
+      }
+    }
+    const ministryIds = new Set(this.ministryTemplates.map((ministry) => ministry.id));
+    if (ministryIds.size !== this.ministryTemplates.length) issues.push('ministries: duplicate ministry ids');
+    const partyIds = new Set(this.partyTemplates.map((party) => party.id));
+    if (partyIds.size !== this.partyTemplates.length) issues.push('parties: duplicate party ids');
 
     // Country profiles: unique ids + relations must reference existing ids.
     const profileIds = new Set(this.countryProfiles.map((profile) => profile.id));
@@ -212,6 +271,40 @@ export class DataRegistry {
 
   get worldIds(): readonly string[] {
     return Object.keys(this.worlds);
+  }
+
+  // ——— Phase 2 — government content ———
+
+  /** Static party templates (per-country runtime records derive from these). */
+  get partyTemplateList(): readonly PartyTemplate[] {
+    return this.partyTemplates;
+  }
+
+  /** Static ministry definitions. */
+  get ministryTemplateList(): readonly MinistryTemplate[] {
+    return this.ministryTemplates;
+  }
+
+  /** All decision definitions (data-driven presidential actions). */
+  get decisionList(): readonly DecisionDef[] {
+    return this.decisions;
+  }
+
+  decision(id: string): DecisionDef {
+    const decision = this.decisions.find((candidate) => candidate.id === id);
+    if (decision === undefined) throw new DataValidationError(`Unknown decision "${id}"`);
+    return decision;
+  }
+
+  /** All event definitions (data-driven political/economic events). */
+  get eventList(): readonly EventDef[] {
+    return this.events;
+  }
+
+  event(id: string): EventDef {
+    const event = this.events.find((candidate) => candidate.id === id);
+    if (event === undefined) throw new DataValidationError(`Unknown event "${id}"`);
+    return event;
   }
 }
 

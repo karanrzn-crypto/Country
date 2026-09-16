@@ -57,6 +57,11 @@ export class MenuSystem {
       this.screens.close('pauseMenu');
       this.send({ type: 'game.togglePause' });
     });
+    // Phase 2 — presidential command center.
+    this.button(container, 'President Dashboard', () => {
+      this.screens.close('pauseMenu');
+      this.send({ type: 'ui.openScreen', screenId: 'president' });
+    });
     this.button(container, 'Save Now', () => {
       this.send({ type: 'save.save', slot: 'quick', label: 'Quick save' });
     });

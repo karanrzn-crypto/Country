@@ -8,10 +8,15 @@
 import type { GameConfig } from '../config/configTypes';
 import type { IdGenerator } from '../core/IdGenerator';
 import type { DataRegistry } from '../data/DataRegistry';
+import { Random } from '../utils/Random';
 import { createUnitFromType } from '../military/spawnUnit';
 import { buildWorldSlice } from './slices/worldSlice';
 import { createDefaultMapSlice } from './slices/mapSlice';
 import { buildCountrySlice } from './slices/countrySlice';
+import { buildGovernmentSlice } from './slices/governmentSlice';
+import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
+import { createMacroEconomy } from '../economy/EconomySimulation';
+import type { MacroEconomyState } from '../economy/macro';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { GameState } from './GameState';
 import { validateGameStateOrThrow } from './validate';
@@ -55,7 +60,8 @@ export function createInitialState(
         }
       ])
     ),
-    supply: Object.fromEntries(Object.keys(world.regions).map((regionId) => [regionId, 1]))
+    supply: Object.fromEntries(Object.keys(world.regions).map((regionId) => [regionId, 1])),
+    macro: {} as Record<string, MacroEconomyState>
   };
 
   // —— military ——
@@ -96,9 +102,14 @@ export function createInitialState(
   };
 
   // —— political ——
+  // Phase 2 unification: the strategic-map countries (country_0…) now ALSO
+  // live in the political slice (stability/legitimacy/war exhaustion), while
+  // the legacy demo-world ids keep their records for the old simulation.
+  const strategicCountryIds = mapModel !== undefined ? [...mapModel.countryOrder] : [];
+  const politicalCountryIds = [...countryIds, ...strategicCountryIds];
   const political = {
     countries: Object.fromEntries(
-      countryIds.map((id) => [id, { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 }])
+      politicalCountryIds.map((id) => [id, { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 }])
     )
   };
 
@@ -132,9 +143,80 @@ export function createInitialState(
       selection: []
     },
     map: createDefaultMapSlice(config.map.columns, config.map.rows, config.map.cellSize),
-    countries: buildCountrySlice(data.countryProfileList, mapModel ?? null)
+    countries: buildCountrySlice(data.countryProfileList, mapModel ?? null),
+    government: { countries: {} },
+    cityAreas: { network: { areas: {}, links: {} } }
   };
+
+  // —— Phase 2: strategic-country economy & government ——
+  // The strategic countries share the legacy treasury record (ONE money
+  // source) and get full macro + government records built from the map.
+  if (mapModel !== undefined) {
+    const rng = new Random((config.map.seed ^ 0x9e3779b9) >>> 0);
+    const countryNames: Record<string, string> = {};
+    for (const countryId of mapModel.countryOrder) {
+      countryNames[countryId] = mapModel.countries[countryId].name;
+      // Treasury: prefer the declared profile value (data-driven start).
+      const profile = state.countries.countries[countryId];
+      economy.treasury[countryId] = profile?.economy.treasury ?? config.economy.startingTreasury;
+      economy.macro[countryId] = createMacroEconomy(profile?.population ?? 1_500_000);
+    }
+    state.government = buildGovernmentSlice(
+      mapModel.countryOrder,
+      countryNames,
+      data.partyTemplateList,
+      data.ministryTemplateList,
+      rng
+    );
+    state.cityAreas = createCityAreasSlice(mapModel, config.map.columns);
+  }
 
   validateGameStateOrThrow(state);
   return state;
+}
+
+/**
+ * Phase 2 load heal: ensures every strategic-map country has government,
+ * macro, treasury and political records, and re-syncs the City Areas
+ * network against the LIVE map model (regenerate + overlay saved runtime
+ * fields by id). Called after every save load — covers migrated saves built
+ * on a different map config and hand-made saves alike.
+ */
+export function healPhase2State(
+  state: GameState,
+  mapModel: StrategicMapModel,
+  columns: number,
+  data: DataRegistry
+): void {
+  const rng = new Random((mapModel.seed ^ 0x9e3779b9) >>> 0);
+  const partyTemplates = data.partyTemplateList;
+  const ministryTemplates = data.ministryTemplateList;
+
+  for (const countryId of mapModel.countryOrder) {
+    const mapCountry = mapModel.countries[countryId];
+    if (state.government.countries[countryId] === undefined) {
+      state.government.countries[countryId] = buildGovernmentSlice([countryId], { [countryId]: mapCountry.name }, partyTemplates, ministryTemplates, rng).countries[countryId];
+    }
+    if (state.economy.macro[countryId] === undefined) {
+      state.economy.macro[countryId] = createMacroEconomy(state.countries.countries[countryId]?.population ?? 1_500_000);
+    }
+    if (state.economy.treasury[countryId] === undefined) {
+      state.economy.treasury[countryId] = state.countries.countries[countryId]?.economy.treasury ?? 500;
+    }
+    if (state.political.countries[countryId] === undefined) {
+      state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
+    }
+  }
+
+  // Drop government/macro records for countries the live model no longer has
+  // (map config changed across versions) — they would be dead weight.
+  const liveIds = new Set<string>(mapModel.countryOrder);
+  for (const countryId of Object.keys(state.government.countries)) {
+    if (!liveIds.has(countryId)) delete state.government.countries[countryId];
+  }
+  for (const countryId of Object.keys(state.economy.macro)) {
+    if (!liveIds.has(countryId)) delete state.economy.macro[countryId];
+  }
+
+  syncCityAreasSlice(state.cityAreas, mapModel, columns);
 }

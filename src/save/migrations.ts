@@ -1,10 +1,17 @@
 import { SaveError } from '../utils/errors';
 import { createDefaultMapSlice } from '../state/slices/mapSlice';
 import { buildCountrySlice } from '../state/slices/countrySlice';
+import { buildGovernmentSlice } from '../state/slices/governmentSlice';
+import { createCityAreasSlice } from '../state/slices/cityAreasSlice';
+import { createMacroEconomy } from '../economy/EconomySimulation';
 import { generateStrategicMap } from '../world/map/MapGenerator';
 import { DEFAULT_CONFIG } from '../config/configTypes';
+import { Random } from '../utils/Random';
 import countriesJson from '../data/countries.json';
+import partiesJson from '../data/government/parties.json';
+import ministriesJson from '../data/government/ministries.json';
 import type { CountryProfileJson } from '../data/types';
+import type { PartyTemplate, MinistryTemplate } from '../state/slices/governmentSlice';
 
 /**
  * Save migration framework. When SAVE_VERSION bumps, register a migration
@@ -153,6 +160,95 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
           'selectedBuildingId'
         ]) {
           if (typeof map[key] !== 'string') map[key] = null;
+        }
+      }
+      return clone;
+    }
+  },
+  {
+    // v6 → v7: Phase 2 added three state areas — (1) `government` slice
+    // (presidency/parties/budget/decisions/events) per strategic country,
+    // (2) `cityAreas` (urban/transport network generated from the map),
+    // (3) `economy.macro` (national accounts) + strategic-country records in
+    // `political.countries` + strategic-country treasuries. Everything is
+    // rebuilt from the SAME deterministic map generation the campaign used
+    // (DEFAULT_CONFIG + declared populations); the session re-syncs city
+    // areas against the live model on load (Game.applyLoadedSnapshot).
+    from: 6,
+    to: 7,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v6→v7: save payload is not an object');
+      }
+      const source = data as { state?: Record<string, unknown> };
+      if (source.state === undefined || typeof source.state !== 'object') {
+        throw new SaveError('Migration v6→v7: save has no state object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state: {
+          economy?: Record<string, unknown>;
+          political?: { countries?: Record<string, unknown> };
+          countries?: { countries?: Record<string, { population?: number; economy?: { treasury?: number } }> };
+          government?: unknown;
+          cityAreas?: unknown;
+        };
+      };
+
+      const declaredPopulations = Object.fromEntries(
+        (countriesJson as unknown as readonly CountryProfileJson[]).map((profile) => [
+          profile.id,
+          profile.population
+        ])
+      );
+      const mapGeneration = generateStrategicMap(DEFAULT_CONFIG.map, {
+        countryPopulations: declaredPopulations
+      });
+      const model = mapGeneration.model;
+
+      // (1) government slice
+      if (clone.state.government === undefined) {
+        const countryNames: Record<string, string> = {};
+        for (const countryId of model.countryOrder) {
+          countryNames[countryId] = model.countries[countryId].name;
+        }
+        clone.state.government = buildGovernmentSlice(
+          model.countryOrder,
+          countryNames,
+          Object.values(partiesJson) as unknown as PartyTemplate[],
+          Object.values(ministriesJson) as unknown as MinistryTemplate[],
+          new Random((DEFAULT_CONFIG.map.seed ^ 0x9e3779b9) >>> 0)
+        );
+      }
+
+      // (2) city areas
+      if (clone.state.cityAreas === undefined) {
+        clone.state.cityAreas = createCityAreasSlice(model, DEFAULT_CONFIG.map.columns);
+      }
+
+      // (3) macro economy + treasuries + political records. Conservative:
+      // only touched when the parent objects already exist (real saves do);
+      // the session's load heal fills any remaining gaps per live country.
+      if (clone.state.economy !== undefined) {
+        const economy = clone.state.economy as { macro?: Record<string, unknown>; treasury?: Record<string, number> };
+        if (economy.macro === undefined) economy.macro = {};
+        if (economy.treasury === undefined) economy.treasury = {};
+        const profiles = countriesJson as unknown as readonly CountryProfileJson[];
+        for (const countryId of model.countryOrder) {
+          const profile = profiles.find((candidate) => candidate.id === countryId);
+          if (economy.macro[countryId] === undefined) {
+            economy.macro[countryId] = createMacroEconomy(profile?.population ?? 1_500_000);
+          }
+          if (economy.treasury[countryId] === undefined) {
+            economy.treasury[countryId] = profile?.economy.treasury ?? DEFAULT_CONFIG.economy.startingTreasury;
+          }
+        }
+      }
+      if (clone.state.political?.countries !== undefined) {
+        const political = clone.state.political as { countries: Record<string, unknown> };
+        for (const countryId of model.countryOrder) {
+          if (political.countries[countryId] === undefined) {
+            political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
+          }
         }
       }
       return clone;

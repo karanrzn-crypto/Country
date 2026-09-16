@@ -75,3 +75,30 @@ export function generateContinentName(rng: Random): string {
   const used = new Set<string>();
   return generateName(rng, CONTINENT_SUFFIX, used);
 }
+
+// ——— person names (Phase 2 — presidents, future characters) ———
+
+const PERSON_SUFFIX = ['in', 'as', 'or', 'an', 'iel', 'ar', 'us', 'ek'];
+const SURNAME_SUFFIX = ['son', 'berg', 'vic', 'ov', 'escu', 'ian', 'ez', 'is', 'os', 'uk'];
+
+/** First + surname pool for political figures (unique within the given set). */
+export function generatePersonName(rng: Random, used: Set<string>): string {
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const first = capitalize(syllable(rng) + PERSON_SUFFIX[rng.int(PERSON_SUFFIX.length)]);
+    const last = capitalize(syllable(rng) + SURNAME_SUFFIX[rng.int(SURNAME_SUFFIX.length)]);
+    const name = `${first} ${last}`;
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+  }
+  // Deterministic fallback: numbering keeps uniqueness without randomness.
+  let counter = 2;
+  let name = 'Leader 2';
+  while (used.has(name)) {
+    counter += 1;
+    name = `Leader ${counter}`;
+  }
+  used.add(name);
+  return name;
+}

@@ -451,3 +451,100 @@ export const WORLD_SCHEMA: FieldSchema = {
     }
   }
 };
+
+// ———————————————————————————————————————————— Phase 2 — government content ——
+
+const EFFECT_CONDITION_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    metric: { type: 'string', minLength: 1 },
+    op: { type: 'enum', values: ['gte', 'lte', 'gt', 'lt'] },
+    value: { type: 'number' }
+  }
+};
+
+const EFFECT_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    target: { type: 'string', minLength: 1 },
+    mode: { type: 'enum', values: ['add', 'mul'] },
+    value: { type: 'number' },
+    durationMonths: { type: 'optional', inner: { type: 'number', min: 1, max: 600, integer: true } }
+  }
+};
+
+export const PARTY_TEMPLATE_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    id: idField,
+    name: nameField,
+    ideology: { type: 'enum', values: ['centrist', 'progressive', 'conservative', 'socialist', 'liberal'] },
+    baseSupport: { type: 'number', min: 0.01, max: 10 }
+  }
+};
+
+export const MINISTRY_TEMPLATE_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    id: idField,
+    name: nameField,
+    portfolio: {
+      type: 'enum',
+      values: ['military', 'healthcare', 'education', 'infrastructure', 'welfare', 'government', 'other']
+    },
+    focus: { type: 'string', minLength: 1 }
+  }
+};
+
+export const DECISION_DEF_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    id: idField,
+    name: nameField,
+    description: nameField,
+    category: { type: 'enum', values: ['economic', 'political', 'social', 'military'] },
+    cost: {
+      type: 'object',
+      allowUnknown: false,
+      fields: { treasury: { type: 'optional', inner: { type: 'number', min: 0 } } }
+    },
+    preconditions: { type: 'array', items: EFFECT_CONDITION_SCHEMA },
+    effects: { type: 'array', minLength: 1, items: EFFECT_SCHEMA },
+    durationMonths: { type: 'number', min: 0, max: 120, integer: true },
+    cooldownMonths: { type: 'number', min: 0, max: 600, integer: true }
+  }
+};
+
+export const EVENT_DEF_SCHEMA: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    id: idField,
+    title: nameField,
+    description: nameField,
+    category: { type: 'enum', values: ['economic', 'political', 'social'] },
+    weight: { type: 'number', min: 0, max: 1000 },
+    conditions: { type: 'array', items: EFFECT_CONDITION_SCHEMA },
+    cooldownMonths: { type: 'number', min: 0, max: 600, integer: true },
+    once: { type: 'boolean' },
+    expireMonths: { type: 'number', min: 1, max: 24, integer: true },
+    choices: {
+      type: 'array',
+      minLength: 1,
+      items: {
+        type: 'object',
+        allowUnknown: false,
+        fields: {
+          id: idField,
+          text: nameField,
+          effects: { type: 'array', minLength: 1, items: EFFECT_SCHEMA }
+        }
+      }
+    }
+  }
+};

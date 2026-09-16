@@ -162,6 +162,26 @@ export interface GameEventMap {
   // —— save ——
   'save.saved': { readonly slot: string; readonly tick: number };
   'save.loaded': { readonly slot: string; readonly tick: number; readonly version: number };
+
+  // —— government (Phase 2 — presidency & governance) ——
+  'government.monthProcessed': { readonly countryId: string; readonly month: number };
+  'government.eventFired': {
+    readonly countryId: string;
+    readonly eventId: string;
+    readonly title: string;
+    readonly category: 'economic' | 'political' | 'social';
+  };
+  'government.eventResolved': { readonly countryId: string; readonly instanceId: string; readonly choiceId: string };
+  'government.decisionEnacted': { readonly countryId: string; readonly decisionId: string };
+  'government.budgetChanged': {
+    readonly countryId: string;
+    readonly kind: 'tax' | 'spending';
+    readonly category: string;
+    readonly value: number;
+  };
+  'government.ministryFundingChanged': { readonly countryId: string; readonly ministryId: string; readonly value: number };
+  'government.campaignStarted': { readonly countryId: string; readonly electionMonth: number };
+  'government.electionHeld': { readonly countryId: string; readonly winnerId: string; readonly incumbentReelected: boolean };
 }
 
 export type GameEventName = keyof GameEventMap;
