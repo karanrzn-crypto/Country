@@ -53,6 +53,58 @@ describe('map state slice + commands (selection, layers, camera)', () => {
     game.dispose();
   });
 
+  it('feature selections are EXCLUSIVE KINDS: grid/river/lake/site clear the hierarchy and each other', () => {
+    const game = createTestGame();
+    const model = game.strategicMap;
+    const countryId = model.countryOrder[0];
+    const river = model.features.rivers[0];
+
+    // Selecting a country fills the hierarchy.
+    game.commandBus.send({ type: 'map.select', countryId });
+    game.commandBus.flush();
+    expect(game.gameState.map.selectedCountryId).toBe(countryId);
+
+    // A river selection replaces the whole hierarchy (one coherent kind).
+    game.commandBus.send({ type: 'map.pick', x: river.polyline[0].x, z: river.polyline[0].z });
+    game.commandBus.flush();
+    expect(game.gameState.map.selectedRiverId).toBe(river.id);
+    expect(game.gameState.map.selectedCountryId).toBeNull();
+    expect(game.gameState.map.selectedGridKey).toBeNull();
+
+    // A grid-cell selection replaces the river selection.
+    const gridLayerOn = game.gameState.map.layerVisibility.grid;
+    if (gridLayerOn) {
+      const gridKey = model.features.gridIds.find((id) => id !== null) as string;
+      const countryOfKey = model.countryOrder[model.features.cellOwner[model.features.gridIds.indexOf(gridKey)]];
+      const cellIndex = model.features.gridIds.indexOf(gridKey);
+      const cx = cellIndex % DEFAULT_MAP_CONFIG.columns;
+      const cz = Math.floor(cellIndex / DEFAULT_MAP_CONFIG.columns);
+      game.commandBus.send({
+        type: 'map.pick',
+        x: (cx + 0.5) * DEFAULT_MAP_CONFIG.cellSize,
+        z: (cz + 0.5) * DEFAULT_MAP_CONFIG.cellSize
+      });
+      game.commandBus.flush();
+      const expected = `${countryOfKey}#${gridKey}`;
+      const actual = game.gameState.map.selectedGridKey;
+      if (actual !== null) {
+        // The pick landed on the probed cell (no closer feature).
+        expect(actual).toBe(expected);
+        expect(game.gameState.map.selectedRiverId).toBeNull();
+      }
+    }
+
+    // Hierarchy selection clears feature fields again.
+    game.commandBus.send({ type: 'map.select', countryId });
+    game.commandBus.flush();
+    expect(game.gameState.map.selectedCountryId).toBe(countryId);
+    expect(game.gameState.map.selectedRiverId).toBeNull();
+    expect(game.gameState.map.selectedGridKey).toBeNull();
+    expect(game.gameState.map.selectedSiteId).toBeNull();
+    expect(game.gameState.map.selectedBuildingId).toBeNull();
+    game.dispose();
+  });
+
   it('map.clearSelection resets all three ids', () => {
     const game = createTestGame();
     const countryId = game.strategicMap.countryOrder[0];

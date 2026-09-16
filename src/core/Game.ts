@@ -18,7 +18,8 @@ import type { GameState } from '../state/GameState';
 import { DataRegistry } from '../data/DataRegistry';
 import { WorldManager } from '../world/WorldManager';
 import { generateStrategicMap } from '../world/map/MapGenerator';
-import { pickAt, clampCamera } from '../world/map/MapQueries';
+import { pickAt, hoverAt, clampCamera, type PickEligibility } from '../world/map/MapQueries';
+import { findGridCell } from '../world/map/MapGeography';
 import {
   isKnownMapLayer,
   DEFAULT_LAYER_VISIBILITY,
@@ -28,7 +29,7 @@ import {
 } from '../world/map/MapLayers';
 import { MapCameraController } from '../world/map/MapCameraController';
 import type { StrategicMapModel } from '../world/map/MapTypes';
-import { clearMapSelection, setMapSelection } from '../state/slices/mapSlice';
+import { clearMapSelection, setMapSelection, setFeatureSelection, type MapFeatureSelection } from '../state/slices/mapSlice';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
@@ -601,16 +602,138 @@ export class Game {
     this.emitSelectionChanged();
   }
 
-  /** Pointer pick: resolves the top-most entity at a world position. */
+  /** Pointer pick: resolves the top-most VISIBLE entity at a world position.
+   *  The shared interaction semantics live in pickAt (MapQueries) — click and
+   *  hover resolve identically headless and on screen. Eligibility follows
+   *  layer visibility: a hidden layer is never selectable.
+   *  Selection kinds are mutually exclusive: point features (city/site/
+   *  building), linear features (river), area features (lake, grid cell) and
+   *  the country hierarchy — the panel always shows ONE coherent selection. */
   mapPick(x: number, z: number): void {
     this.assertInitialized();
-    const radius = this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight;
-    const result = pickAt(this.mapModel, { x, z }, radius);
-    if (result.cityId === null && result.provinceId === null && result.countryId === null) {
-      this.mapClearSelection();
+    const result = pickAt(this.mapModel, { x, z }, this.pickOptions());
+    if (result.cityId !== null) {
+      this.mapSelect({ cityId: result.cityId });
       return;
     }
-    this.mapSelect({ cityId: result.cityId, provinceId: result.provinceId, countryId: result.countryId });
+    if (result.siteId !== null) {
+      this.applyFeatureSelection({ kind: 'site', siteId: result.siteId });
+      return;
+    }
+    if (result.buildingId !== null) {
+      this.applyFeatureSelection({ kind: 'building', buildingId: result.buildingId });
+      return;
+    }
+    if (result.riverId !== null) {
+      this.applyFeatureSelection({ kind: 'river', riverId: result.riverId });
+      return;
+    }
+    if (result.lakeId !== null) {
+      this.applyFeatureSelection({ kind: 'lake', lakeId: result.lakeId });
+      return;
+    }
+    if (result.gridCellKey !== null) {
+      this.applyFeatureSelection({ kind: 'grid', gridKey: result.gridCellKey });
+      return;
+    }
+    if (result.provinceId !== null || result.countryId !== null) {
+      this.mapSelect({ provinceId: result.provinceId, countryId: result.countryId });
+      return;
+    }
+    this.mapClearSelection();
+  }
+
+  /** Hover: resolves like a pick (no state mutation) and broadcasts the brief
+   *  info (grid id + province, river/lake/city name ids) as an EVENT so the
+   *  renderer can highlight a cell and the UI can show a tooltip. Ephemeral
+   *  by design — hover is never saved, never hashed. */
+  mapHover(x: number | null, z: number | null): void {
+    this.assertInitialized();
+    if (x === null || z === null) {
+      this.events.emit('map.hoverChanged', { hover: null });
+      return;
+    }
+    const result = hoverAt(this.mapModel, { x, z }, this.pickOptions());
+    if (
+      result.gridCellKey === null &&
+      result.riverId === null &&
+      result.lakeId === null &&
+      result.cityId === null &&
+      result.siteId === null
+    ) {
+      this.events.emit('map.hoverChanged', { hover: null });
+      return;
+    }
+    this.events.emit('map.hoverChanged', {
+      hover: {
+        cellIndex: result.cellIndex,
+        gridCellKey: result.gridCellKey,
+        provinceId: result.provinceId,
+        countryId: result.countryId,
+        riverId: result.riverId,
+        lakeId: result.lakeId,
+        cityId: result.cityId,
+        siteId: result.siteId
+      }
+    });
+  }
+
+  /** Pick/hover resolution options derived ONCE per interaction from the
+   *  live state: geometry constants + layer-visibility eligibility. */
+  private pickOptions(): {
+    pickRadius: number;
+    riverPickDistance: number;
+    columns: number;
+    rows: number;
+    cellSize: number;
+    eligibility: PickEligibility;
+  } {
+    const visibility = this.state.map.layerVisibility;
+    const anySiteLayer =
+      visibility.resources === true ||
+      visibility.ports === true ||
+      visibility.industry === true ||
+      visibility.military === true;
+    const anyBuildingLayer = visibility.buildings === true || visibility.airports === true;
+    return {
+      pickRadius: this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight,
+      riverPickDistance: Math.max(
+        this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight,
+        this.config.map.cellSize * 0.35
+      ),
+      columns: this.config.map.columns,
+      rows: this.config.map.rows,
+      cellSize: this.config.map.cellSize,
+      eligibility: {
+        grid: visibility.grid === true,
+        rivers: visibility.rivers !== false,
+        lakes: visibility.lakes !== false,
+        sites: anySiteLayer,
+        buildings: anyBuildingLayer
+      }
+    };
+  }
+
+  /** Applies a validated feature selection (unknown ids are ignored with a
+   *  warning — stale ids can only come from hand-made state). */
+  private applyFeatureSelection(selection: MapFeatureSelection): void {
+    const map = this.state.map;
+    const valid =
+      (selection.kind === 'grid' && findGridCell(this.mapModel, selection.gridKey) >= 0) ||
+      (selection.kind === 'river' &&
+        this.mapModel.features.rivers.some((river) => river.id === selection.riverId)) ||
+      (selection.kind === 'lake' &&
+        this.mapModel.features.lakes.some((lake) => lake.id === selection.lakeId)) ||
+      (selection.kind === 'site' &&
+        this.mapModel.features.sites.some((site) => site.id === selection.siteId)) ||
+      (selection.kind === 'building' &&
+        this.mapModel.features.buildings.some((building) => building.id === selection.buildingId));
+    if (!valid) {
+      this.logger.warn(`mapPick: unknown feature ${JSON.stringify(selection)}`);
+      return;
+    }
+    setFeatureSelection(map, selection);
+    this.emitSelectionChanged();
   }
 
   mapClearSelection(): void {
@@ -751,7 +874,12 @@ export class Game {
     this.events.emit('map.selectionChanged', {
       countryId: map.selectedCountryId,
       provinceId: map.selectedProvinceId,
-      cityId: map.selectedCityId
+      cityId: map.selectedCityId,
+      gridKey: map.selectedGridKey,
+      riverId: map.selectedRiverId,
+      lakeId: map.selectedLakeId,
+      siteId: map.selectedSiteId,
+      buildingId: map.selectedBuildingId
     });
   }
 

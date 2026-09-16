@@ -6,6 +6,7 @@ import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/Ma
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
+import { describeGridCell } from '../world/map/MapGeography';
 import {
   buildBiomeLegend,
   buildElevationLegend,
@@ -32,6 +33,11 @@ export class MapUI {
   private infoTitle: UIElement | null = null;
   private detailContainer: UIElement | null = null;
   private basicContainer: UIElement | null = null;
+  private featureContainer: UIElement | null = null;
+  private featureTitle: UIElement | null = null;
+  private featureRows: UIElement[] = [];
+  private featureSignature = '';
+  private hoverTip: UIElement | null = null;
   private detailNodes: {
     flagImg: UIElement;
     name: UIElement;
@@ -66,6 +72,39 @@ export class MapUI {
     this.buildLegend(root);
     this.screens.registerScreen('map', (container) => this.buildMapScreen(container));
     this.screens.registerScreen('countrySelect', (container) => this.buildCountrySelectScreen(container));
+    // Ephemeral hover tip (event-driven — the core resolves, the UI shows):
+    // `A3 — Province X`, a river/lake/city name, or hidden when over nothing.
+    context.events.on('map.hoverChanged', ({ hover }) => {
+      if (this.hoverTip === null) return;
+      if (hover === null) {
+        this.hoverTip.setVisible(false);
+        return;
+      }
+      const model = context.map;
+      const provinceName = (provinceId: string | null): string =>
+        provinceId !== null ? (model.provinces[provinceId]?.name ?? provinceId) : '—';
+      let text: string | null = null;
+      if (hover.cityId !== null) {
+        const city = model.cities[hover.cityId];
+        text = `${city.name} — ${provinceName(city.provinceId)}`;
+      } else if (hover.riverId !== null) {
+        text = model.features.rivers.find((river) => river.id === hover.riverId)?.name ?? null;
+      } else if (hover.lakeId !== null) {
+        text = model.features.lakes.find((lake) => lake.id === hover.lakeId)?.name ?? null;
+      } else if (hover.siteId !== null) {
+        const site = model.features.sites.find((candidate) => candidate.id === hover.siteId);
+        text = site !== undefined ? `${site.kind} site — ${provinceName(site.cityId !== null ? model.cities[site.cityId].provinceId : null)}` : null;
+      } else if (hover.gridCellKey !== null) {
+        const gridId = hover.gridCellKey.slice(hover.gridCellKey.indexOf('#') + 1);
+        text = `${gridId} — ${provinceName(hover.provinceId)}`;
+      }
+      if (text === null) {
+        this.hoverTip.setVisible(false);
+        return;
+      }
+      this.hoverTip.setText(text);
+      this.hoverTip.setVisible(true);
+    });
     this.refreshInfo();
   }
 
@@ -130,6 +169,14 @@ export class MapUI {
     this.detailNodes = { flagImg, name: detailName, rows, resources, relations };
     this.detailContainer = detail;
 
+    // —— feature detail (Part 3.5): grid cell / river / lake / site / city ——
+    const featureDetail = this.create('div', 'map-feature-detail');
+    panel.appendChild(featureDetail);
+    const featureTitle = this.create('div', 'map-section-title feature-kind');
+    featureDetail.appendChild(featureTitle);
+    this.featureContainer = featureDetail;
+    this.featureTitle = featureTitle;
+
     // —— basic rows (no country selected) ——
     const basic = this.create('div', 'map-country-basic');
     panel.appendChild(basic);
@@ -144,6 +191,12 @@ export class MapUI {
       this.infoRows.push({ label, value });
     }
     this.basicContainer = basic;
+
+    // —— hover tip (fixed chip at the top edge of the map area) ——
+    const hoverTip = this.create('div', 'map-hover-tip');
+    hoverTip.setVisible(false);
+    root.appendChild(hoverTip);
+    this.hoverTip = hoverTip;
 
     // —— layer toggles (generated from the data-driven registry) ——
     const layerTitle = this.create('div', 'map-layers-title');
@@ -168,6 +221,178 @@ export class MapUI {
       }
       panel.appendChild(groupRow);
     }
+  }
+
+  // —— feature detail blocks (Part 3.5 shared interaction) ——
+
+  /**
+   * Renders the block for the CURRENT selection kind: grid cell / river /
+   * lake / site / building / city. Every value is read from the central
+   * StrategicMapModel (via describeGridCell for cells) — the UI owns no
+   * geography. Rebuilds only when the selection signature changes.
+   */
+  private refreshFeatureBlock(map: SystemContext['state']['map']): void {
+    const context = this.context;
+    if (context === null || this.featureContainer === null) return;
+    const model = context.map;
+    const columns = context.config.map.columns;
+    const rows = context.config.map.rows;
+
+    const signature =
+      `${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
+      `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}`;
+    if (signature === this.featureSignature) return;
+    this.featureSignature = signature;
+    for (const row of this.featureRows) row.remove();
+    this.featureRows.length = 0;
+
+    const addRow = (key: string, value: string): void => {
+      if (this.featureContainer === null) return;
+      const row = this.create('div', 'map-info-row');
+      const keyEl = this.create('span', 'map-info-key');
+      keyEl.setText(key);
+      const valueEl = this.create('span', 'map-info-value');
+      valueEl.setText(value);
+      row.appendChild(keyEl);
+      row.appendChild(valueEl);
+      this.featureContainer.appendChild(row);
+      this.featureRows.push(row);
+    };
+    const addChips = (key: string, values: readonly string[]): void => {
+      if (this.featureContainer === null) return;
+      const row = this.create('div', 'map-info-row');
+      const keyEl = this.create('span', 'map-info-key');
+      keyEl.setText(key);
+      row.appendChild(keyEl);
+      const chips = this.create('span', 'map-resource-chips');
+      if (values.length === 0) {
+        const empty = this.create('span', 'map-resource-chip empty');
+        empty.setText('None');
+        chips.appendChild(empty);
+      } else {
+        for (const value of values) {
+          const chip = this.create('span', 'map-resource-chip');
+          chip.setText(value);
+          chips.appendChild(chip);
+        }
+      }
+      row.appendChild(chips);
+      this.featureContainer.appendChild(row);
+      this.featureRows.push(row);
+    };
+    const yesNo = (value: boolean): string => (value ? '✓' : '✗');
+
+    let featureVisible = false;
+
+    // —— GRID CELL (the spec's exact block; empty cells say None / 0) ——
+    if (map.selectedGridKey !== null) {
+      const info = describeGridCell(model, map.selectedGridKey, columns, rows);
+      if (info !== null) {
+        featureVisible = true;
+        this.featureTitle?.setText(`GRID CELL — ${info.gridId}`);
+        addRow('Grid ID', info.gridId);
+        addRow('Country', model.countries[info.countryId]?.name ?? info.countryId);
+        addRow('Province', info.provinceId !== null ? (model.provinces[info.provinceId]?.name ?? info.provinceId) : 'None');
+        addRow('Terrain', info.terrainId);
+        addRow('Population', info.population > 0 ? formatCompact(info.population) : '0');
+        addChips(
+          'Cities',
+          info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
+        );
+        addChips('Resources', [...info.resourceIds]);
+        addRow('Buildings', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'None');
+        addRow('Infrastructure', `${info.roadIds.length} roads · ${info.railwayIds.length} railways`);
+        addRow('Strategic Value', String(info.strategicValue));
+      }
+    }
+
+    // —— CITY ——
+    if (featureVisible === false && map.selectedCityId !== null) {
+      const city = model.cities[map.selectedCityId];
+      if (city !== undefined) {
+        featureVisible = true;
+        this.featureTitle?.setText(`CITY — ${city.name}`);
+        addRow('Name', city.name);
+        addRow('Province', model.provinces[city.provinceId]?.name ?? city.provinceId);
+        addRow('Country', model.countries[city.countryId]?.name ?? city.countryId);
+        addRow('Grid', city.gridId !== '' ? city.gridId : '—');
+        addRow('Population', formatCompact(city.population));
+        addRow('Type', city.type);
+        addRow('Importance', `${Math.round(city.importance * 100)}%`);
+        addChips('Resources', [...city.resourceIds]);
+        addRow(
+          'Infrastructure',
+          `Road ${yesNo(city.infrastructure.roadIds.length > 0)} · Railway ${yesNo(city.infrastructure.railwayIds.length > 0)} · ` +
+            `Airport ${yesNo(city.infrastructure.airportId !== null)} · Port ${yesNo(city.infrastructure.portId !== null)}`
+        );
+        addRow('Strategic Value', String(city.strategicValue));
+      }
+    }
+
+    // —— RIVER ——
+    if (featureVisible === false && map.selectedRiverId !== null) {
+      const river = model.features.rivers.find((candidate) => candidate.id === map.selectedRiverId);
+      if (river !== undefined) {
+        featureVisible = true;
+        this.featureTitle?.setText(`RIVER — ${river.name}`);
+        addRow('Name', river.name);
+        addRow('Length', `${Math.round(river.length)} u`);
+        addRow('Mouth', river.mouthType + (river.parentRiverId !== null ? ' (tributary)' : ''));
+        addRow('Provinces', String(river.provinceIds.length));
+        addChips('Cities', river.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
+        addChips('Tributaries', [...river.tributaryIds]);
+        addRow('Navigable', yesNo(river.navigable));
+        addRow('Importance', `${Math.round(river.importance * 100)}%`);
+      }
+    }
+
+    // —— LAKE ——
+    if (featureVisible === false && map.selectedLakeId !== null) {
+      const lake = model.features.lakes.find((candidate) => candidate.id === map.selectedLakeId);
+      if (lake !== undefined) {
+        featureVisible = true;
+        this.featureTitle?.setText(`LAKE — ${lake.name}`);
+        addRow('Name', lake.name);
+        addRow('Area', `${lake.areaCells} cells`);
+        addRow('Depth', `${Math.round(lake.depth * 100)}%`);
+        addChips('Inflow', [...lake.inflowRiverIds]);
+        addChips('Outflow', [...lake.outflowRiverIds]);
+        addRow('Provinces', String(lake.provinceIds.length));
+        addChips('Cities', lake.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
+      }
+    }
+
+    // —— SITE (resource/port/military/production) ——
+    if (featureVisible === false && map.selectedSiteId !== null) {
+      const site = model.features.sites.find((candidate) => candidate.id === map.selectedSiteId);
+      if (site !== undefined) {
+        featureVisible = true;
+        this.featureTitle?.setText(`SITE — ${site.kind}`);
+        addRow('Kind', site.kind);
+        if (site.resourceId !== null) addRow('Resource', site.resourceId);
+        const deposit = model.features.deposits.find((candidate) => candidate.siteId === site.id);
+        if (deposit !== undefined) addRow('Quantity', String(deposit.quantity));
+        addRow('Country', model.countries[site.countryId]?.name ?? site.countryId);
+        addRow('City', site.cityId !== null ? (model.cities[site.cityId]?.name ?? site.cityId) : 'None');
+      }
+    }
+
+    // —— BUILDING (urban facility) ——
+    if (featureVisible === false && map.selectedBuildingId !== null) {
+      const building = model.features.buildings.find(
+        (candidate) => candidate.id === map.selectedBuildingId
+      );
+      if (building !== undefined) {
+        featureVisible = true;
+        this.featureTitle?.setText(`BUILDING — ${building.kind}`);
+        addRow('Kind', building.kind);
+        addRow('Level', String(building.level));
+        addRow('Province', model.provinces[building.provinceId]?.name ?? building.provinceId);
+        addRow('City', building.cityId !== null ? (model.cities[building.cityId]?.name ?? building.cityId) : 'None');
+      }
+    }
+
+    this.featureContainer.setVisible(featureVisible);
   }
 
   // —— map legends (biomes / elevation) ——
@@ -327,6 +552,8 @@ export class MapUI {
 
     const title = this.context !== null ? model.continentName.toUpperCase() : 'STRATEGIC MAP';
     this.infoTitle?.setText(`STRATEGIC MAP — ${title}`);
+
+    this.refreshFeatureBlock(state);
 
     for (const [layerId, button] of this.layerButtons) {
       const visible = state.layerVisibility[layerId] !== false;

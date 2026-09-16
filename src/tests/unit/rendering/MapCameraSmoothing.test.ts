@@ -237,7 +237,7 @@ describe('MapCamera smoothing rig', () => {
         const roundTripped = camera.screenToWorld(sx, sy);
         expect(roundTripped.x).toBeCloseTo(world.x, 4);
         expect(roundTripped.z).toBeCloseTo(world.z, 4);
-        const pick = pickAt(model, roundTripped, pickRadius);
+        const pick = pickAt(model, roundTripped, { pickRadius, riverPickDistance: pickRadius, columns: DEFAULT_MAP_CONFIG.columns, rows: DEFAULT_MAP_CONFIG.rows, cellSize: DEFAULT_MAP_CONFIG.cellSize, eligibility: { grid: false, rivers: false, lakes: false, sites: false, buildings: false } });
         expect(pick.countryId).toBe(countryId);
       }
     });
@@ -253,7 +253,7 @@ describe('MapCamera smoothing rig', () => {
         const world = camera.screenToWorld(sx, sy);
         const expected = model.countryOrder.find((id) => pointInRing(world, model.countries[id].ring.points));
         if (expected === undefined) continue; // ocean sample
-        const pick = pickAt(model, world, pickRadius);
+        const pick = pickAt(model, world, { pickRadius, riverPickDistance: pickRadius, columns: DEFAULT_MAP_CONFIG.columns, rows: DEFAULT_MAP_CONFIG.rows, cellSize: DEFAULT_MAP_CONFIG.cellSize, eligibility: { grid: false, rivers: false, lakes: false, sites: false, buildings: false } });
         expect(pick.countryId).toBe(expected);
         samples++;
       }

@@ -28,6 +28,7 @@
  */
 
 import type {
+  BiomeId,
   CityInfrastructure,
   CityType,
   MapBuilding,
@@ -36,9 +37,11 @@ import type {
   MapResourceDeposit,
   MapRiver,
   ProvinceInfrastructure,
+  StrategicMapModel,
   TerrainId
 } from './MapTypes';
 import { gridCellKey, gridColumnLetter } from './MapTypes';
+import { cellIndexOf } from './MapFeatures';
 
 // ———————————————————— deterministic hashing ————————————————————
 
@@ -950,4 +953,215 @@ export function buildGeography(input: GeographyBuildInput): GeographyBuildResult
 
   void gridCellKey; // re-exported above — keeps the canonical id format beside the grid builder
   return { gridIds, provinceOf, provinces: provinceEnrichment, cities: cityEnrichment, rivers, lakes };
+}
+
+// ———————————————————— grid cell interaction (Part 3.5) ————————————————————
+
+/**
+ * THE grid-cell interaction contract (renderer-agnostic):
+ *
+ *   Country → Province → GRID CELL → cities / deposits / buildings / lines
+ *
+ * A cell is addressed by its CANONICAL key `countryId#gridId` (see
+ * gridCellKey) — "A3" exists in every country, `CountryA#A3` and
+ * `CountryB#A3` are different cells. Every lookup below reads ONLY the
+ * central StrategicMapModel — no renderer, no parallel state.
+ */
+
+/** Per-cell strategic weights (documented, sum ≤ 100 — like the province/city models). */
+export const GRID_CELL_STRATEGIC_WEIGHTS = {
+  population: 35,
+  city: 15,
+  resources: 20,
+  buildings: 15,
+  infrastructure: 10,
+  river: 5
+} as const;
+
+export interface GridCellStrategicInput {
+  readonly population: number;
+  readonly hasCity: boolean;
+  readonly resourceKinds: number;
+  readonly buildingCount: number;
+  readonly roadCount: number;
+  readonly railwayCount: number;
+  readonly hasRiver: boolean;
+}
+
+/** Deterministic 0..100 strategic value of ONE grid cell (tests + UI). */
+export function computeGridCellStrategicValue(input: GridCellStrategicInput): number {
+  const w = GRID_CELL_STRATEGIC_WEIGHTS;
+  return Math.min(
+    100,
+    Math.round(
+      clamp01(input.population / 1_000_000) * w.population +
+        (input.hasCity ? w.city : 0) +
+        clamp01(input.resourceKinds / 3) * w.resources +
+        clamp01(input.buildingCount / 6) * w.buildings +
+        clamp01((input.roadCount + 2 * input.railwayCount) / 4) * w.infrastructure +
+        (input.hasRiver ? w.river : 0)
+    )
+  );
+}
+
+/** Resolves the cell index behind a canonical `countryId#gridId` key (−1 when unknown). */
+export function findGridCell(model: StrategicMapModel, cellKey: string): number {
+  let countryId = '';
+  let gridId = '';
+  const separator = cellKey.indexOf('#');
+  if (separator <= 0) return -1;
+  countryId = cellKey.slice(0, separator);
+  gridId = cellKey.slice(separator + 1);
+  const owner = model.features.cellOwner;
+  const gridIds = model.features.gridIds;
+  for (let cellIndex = 0; cellIndex < gridIds.length; cellIndex++) {
+    if (owner[cellIndex] < 0) continue;
+    if (gridIds[cellIndex] !== gridId) continue;
+    if (model.countryOrder[owner[cellIndex]] !== countryId) continue;
+    return cellIndex;
+  }
+  return -1;
+}
+
+/** Complete per-cell information shown on selection (spec block). */
+export interface GridCellInfo {
+  readonly cellKey: string;
+  readonly cellIndex: number;
+  readonly gridId: string;
+  readonly countryId: string;
+  readonly provinceId: string | null;
+  readonly terrainId: TerrainId;
+  readonly biomeId: BiomeId;
+  readonly elevation: number;
+  readonly population: number;
+  /** Hosted cities — the cell can host at most one, but the model stays open. */
+  readonly cityIds: readonly string[];
+  /** Located deposits inside the cell (never location-less). */
+  readonly depositIds: readonly string[];
+  readonly resourceIds: readonly string[];
+  /** Buildings whose position falls inside the cell. */
+  readonly buildingIds: readonly string[];
+  /** Transport lines touching the cell. */
+  readonly roadIds: readonly string[];
+  readonly railwayIds: readonly string[];
+  /** Rivers whose path passes through the cell. */
+  readonly riverIds: readonly string[];
+  readonly strategicValue: number;
+}
+
+function buildingCell(
+  building: MapBuilding,
+  columns: number,
+  cellSize: number
+): number {
+  return cellIndexOf(building.position, columns, cellSize);
+}
+
+function lineTouchesCell(
+  polyline: readonly MapPoint[],
+  cellIndex: number,
+  columns: number,
+  cellSize: number
+): boolean {
+  for (const point of polyline) {
+    if (cellIndexOf(point, columns, cellSize) === cellIndex) return true;
+  }
+  return false;
+}
+
+/**
+ * Builds the full GridCellInfo for a cell index. Pure + allocation-light:
+ * called on selection change and by tests — never per frame.
+ */
+export function describeGridCellAt(
+  model: StrategicMapModel,
+  cellIndex: number,
+  columns: number,
+  rows: number
+): GridCellInfo | null {
+  const owner = model.features.cellOwner[cellIndex];
+  if (cellIndex < 0 || owner < 0 || owner >= model.countryOrder.length) return null;
+  const gridId = model.features.gridIds[cellIndex];
+  if (gridId === null) return null;
+  const countryId = model.countryOrder[owner];
+  const cellKey = gridCellKey(countryId, gridId);
+  void rows;
+
+  const cellSize = (model.bounds.maxX - model.bounds.minX) / columns;
+
+  const cityIds = Object.entries(model.cities)
+    .filter(([, city]) => city.countryId === countryId && city.gridId === gridId)
+    .sort((a, b) => b[1].population - a[1].population || (a[0] < b[0] ? -1 : 1))
+    .map(([id]) => id);
+
+  const depositIds: string[] = [];
+  const resourceIds = new Set<string>();
+  for (const deposit of model.features.deposits) {
+    if (deposit.cellIndex !== cellIndex) continue;
+    depositIds.push(deposit.id);
+    resourceIds.add(deposit.resourceId);
+  }
+
+  const buildingIds: string[] = [];
+  for (const building of model.features.buildings) {
+    if (buildingCell(building, columns, cellSize) === cellIndex) buildingIds.push(building.id);
+  }
+
+  const roadIds: string[] = [];
+  const railwayIds: string[] = [];
+  for (const line of model.features.lines) {
+    if (!lineTouchesCell(line.polyline, cellIndex, columns, cellSize)) continue;
+    if (line.kind === 'railway') railwayIds.push(line.id);
+    else if (line.kind !== 'seaRoute') roadIds.push(line.id);
+  }
+
+  const riverIds = model.features.rivers
+    .filter((river) => river.cells.includes(cellIndex))
+    .map((river) => river.id);
+
+  let population = 0;
+  for (const cityId of cityIds) population += model.cities[cityId].population;
+
+  const hasCity = cityIds.length > 0;
+  const strategicValue = computeGridCellStrategicValue({
+    population,
+    hasCity,
+    resourceKinds: resourceIds.size,
+    buildingCount: buildingIds.length,
+    roadCount: roadIds.length,
+    railwayCount: railwayIds.length,
+    hasRiver: riverIds.length > 0
+  });
+
+  return {
+    cellKey,
+    cellIndex,
+    gridId,
+    countryId,
+    provinceId: model.features.provinceOf[cellIndex] ?? null,
+    terrainId: model.features.terrain[cellIndex],
+    biomeId: model.features.biomes[cellIndex],
+    elevation: model.features.elevation[cellIndex],
+    population,
+    cityIds,
+    depositIds,
+    resourceIds: [...resourceIds].sort(),
+    buildingIds,
+    roadIds,
+    railwayIds,
+    riverIds,
+    strategicValue
+  };
+}
+
+/** describeGridCellAt by canonical key (selection state stores keys). */
+export function describeGridCell(
+  model: StrategicMapModel,
+  cellKey: string,
+  columns: number,
+  rows: number
+): GridCellInfo | null {
+  const cellIndex = findGridCell(model, cellKey);
+  if (cellIndex < 0) return null;
+  return describeGridCellAt(model, cellIndex, columns, rows);
 }

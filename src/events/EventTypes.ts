@@ -105,6 +105,25 @@ export interface GameEventMap {
     readonly countryId: string | null;
     readonly provinceId: string | null;
     readonly cityId: string | null;
+    /** Part 3.5 — shared feature selection (exactly one kind set at a time). */
+    readonly gridKey: string | null;
+    readonly riverId: string | null;
+    readonly lakeId: string | null;
+    readonly siteId: string | null;
+    readonly buildingId: string | null;
+  };
+  /** Ephemeral hover info (never saved) — renderer highlights, UI shows a tip. */
+  'map.hoverChanged': {
+    readonly hover: {
+      readonly cellIndex: number;
+      readonly gridCellKey: string | null;
+      readonly provinceId: string | null;
+      readonly countryId: string | null;
+      readonly riverId: string | null;
+      readonly lakeId: string | null;
+      readonly cityId: string | null;
+      readonly siteId: string | null;
+    } | null;
   };
   'map.layerVisibilityChanged': { readonly layer: string; readonly visible: boolean };
   'map.cameraChanged': { readonly x: number; readonly z: number; readonly viewHeight: number };

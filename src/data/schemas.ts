@@ -185,7 +185,8 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             capital: LABEL_TIER_SCHEMA,
             majorCity: LABEL_TIER_SCHEMA,
             city: LABEL_TIER_SCHEMA,
-            settlement: LABEL_TIER_SCHEMA
+            settlement: LABEL_TIER_SCHEMA,
+            grid: LABEL_TIER_SCHEMA
           }
         }
       }
@@ -302,6 +303,11 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
         siteOpacity: { type: 'number', min: 0, max: 1 },
         gridColor: colorField,
         gridOpacity: { type: 'number', min: 0, max: 1 },
+        gridSelectColor: colorField,
+        gridSelectOpacity: { type: 'number', min: 0, max: 1 },
+        gridSelectOutlineColor: colorField,
+        gridHoverColor: colorField,
+        gridHoverOpacity: { type: 'number', min: 0, max: 1 },
         buildingColors: {
           type: 'object',
           allowUnknown: false,

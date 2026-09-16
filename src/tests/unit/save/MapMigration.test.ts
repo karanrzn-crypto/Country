@@ -4,6 +4,8 @@ import { MemorySaveStorage } from '../../../save/SaveStorage';
 import { applyMigrations } from '../../../save/migrations';
 import { SAVE_VERSION } from '../../../save/SaveTypes';
 import { fnv1a32, stableStringify } from '../../../utils/hash';
+import { pickAt } from '../../../world/map/MapQueries';
+import { DEFAULT_CONFIG } from '../../../config/configTypes';
 
 /**
  * Save migrations:
@@ -13,7 +15,7 @@ import { fnv1a32, stableStringify } from '../../../utils/hash';
  * - v4 → v5: minute-resolution clock (time v2) — ticks ×15 (15-min → 1-min)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
+describe('save migrations (v1 → … → v6)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -25,7 +27,7 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -60,7 +62,7 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
@@ -78,7 +80,7 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
       runtime: { tick: 77 }
     };
     const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     const migrated = data as { state: { player: Record<string, unknown> } };
     expect(migrated.state.player.countryConfirmed).toBe(true);
     expect(migrated.state.player.countryId).toBe('country_2');
@@ -92,7 +94,7 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
       runtime: { tick: 100, rngState: 7, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v4, 4, SAVE_VERSION);
-    expect(version).toBe(5);
+    expect(version).toBe(6);
     expect((data as typeof v4).runtime.tick).toBe(1500);
   });
 
@@ -101,13 +103,55 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
     expect(() => applyMigrations(broken, 4, SAVE_VERSION)).toThrow();
   });
 
+  it('v5 → v6 injects the Part 3.5 feature-selection fields (nulls)', () => {
+    const v5 = {
+      state: {
+        map: {
+          selectedCountryId: 'country_1',
+          selectedProvinceId: null,
+          selectedCityId: null,
+          layerVisibility: {},
+          camera: { x: 0, z: 0, viewHeight: 200 },
+          viewport: { width: 1280, height: 720 }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v5, 5, SAVE_VERSION);
+    expect(version).toBe(6);
+    const map = (data as typeof v5).state.map as Record<string, unknown>;
+    for (const key of [
+      'selectedGridKey',
+      'selectedRiverId',
+      'selectedLakeId',
+      'selectedSiteId',
+      'selectedBuildingId'
+    ]) {
+      expect(map[key]).toBeNull();
+    }
+    // Existing selection state is untouched.
+    expect(map.selectedCountryId).toBe('country_1');
+  });
+
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {
     const { data } = applyMigrations(v1, 1, 2);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.map).toBeDefined();
     const map = migrated.state.map as Record<string, unknown>;
     expect(Object.keys(map).sort()).toEqual(
-      ['camera', 'layerVisibility', 'selectedCityId', 'selectedCountryId', 'selectedProvinceId', 'viewport'].sort()
+      [
+        'camera',
+        'layerVisibility',
+        'selectedBuildingId',
+        'selectedCityId',
+        'selectedCountryId',
+        'selectedGridKey',
+        'selectedLakeId',
+        'selectedProvinceId',
+        'selectedRiverId',
+        'selectedSiteId',
+        'viewport'
+      ].sort()
     );
     expect(() => fnv1a32(stableStringify(migrated))).not.toThrow();
   });
@@ -195,6 +239,60 @@ describe('save migrations (v1 → v2 → v3 → v4 → v5)', () => {
     expect(model.features.rivers.length).toBeGreaterThan(0);
     expect(model.features.deposits.length).toBeGreaterThan(0);
     expect(model.features.buildings.length).toBeGreaterThan(0);
+    game.dispose();
+    game2.dispose();
+  });
+
+  it('Part 3.5: a grid-cell selection survives the save/load roundtrip', () => {
+    const seed = 2025;
+    const storage = new MemorySaveStorage();
+    const game = new Game({ seed, saveStorage: storage });
+    game.init();
+    // Enable the grid layer, then pick a land cell by world position. The
+    // cell must be FREE of higher-priority features (city/river/lake) so the
+    // pick really lands on the grid cell — found with the same pure pickAt
+    // the game uses, mirroring Game.pickOptions eligibility.
+    game.mapSetLayerVisible('grid', true);
+    const model = game.strategicMap;
+    const cellSize = DEFAULT_CONFIG.map.cellSize;
+    const columns = DEFAULT_CONFIG.map.columns;
+    const rows = DEFAULT_CONFIG.map.rows;
+    const pickRadius = DEFAULT_CONFIG.map.pickRadiusFraction * 200;
+    const pickOptions = {
+      pickRadius,
+      riverPickDistance: Math.max(pickRadius, cellSize * 0.35),
+      columns,
+      rows,
+      cellSize,
+      eligibility: { grid: true, rivers: true, lakes: true, sites: false, buildings: false }
+    };
+    let target: { x: number; z: number; cellIndex: number } | null = null;
+    for (let index = 0; index < model.features.gridIds.length; index++) {
+      if (model.features.cellOwner[index] < 0 || model.features.gridIds[index] === null) continue;
+      const cx = index % columns;
+      const cz = Math.floor(index / columns);
+      const point = { x: (cx + 0.5) * cellSize, z: (cz + 0.5) * cellSize };
+      const probe = pickAt(model, point, pickOptions);
+      if (probe.gridCellKey !== null && probe.cityId === null && probe.riverId === null && probe.lakeId === null) {
+        target = { x: point.x, z: point.z, cellIndex: index };
+        break;
+      }
+    }
+    expect(target).not.toBeNull();
+    const { x, z, cellIndex } = target as { x: number; z: number; cellIndex: number };
+    game.commandBus.send({ type: 'map.pick', x, z });
+    game.commandBus.flush();
+    expect(game.gameState.map.selectedGridKey).toBe(
+      `${model.countryOrder[model.features.cellOwner[cellIndex]]}#${model.features.gridIds[cellIndex]}`
+    );
+    game.saveToSlot('grid-slot');
+
+    const game2 = new Game({ seed, saveStorage: storage });
+    game2.init();
+    game2.loadFromSlot('grid-slot');
+    expect(game2.gameState.map.selectedGridKey).toBe(game.gameState.map.selectedGridKey);
+    // The hierarchy stays clear — one coherent selection kind.
+    expect(game2.gameState.map.selectedCountryId).toBeNull();
     game.dispose();
     game2.dispose();
   });

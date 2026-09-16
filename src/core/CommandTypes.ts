@@ -36,6 +36,7 @@ export type GameCommand =
       readonly cityId?: string | null;
     }
   | { readonly type: 'map.pick'; readonly x: number; readonly z: number }
+  | { readonly type: 'map.hover'; readonly x: number | null; readonly z: number | null }
   | { readonly type: 'map.clearSelection' }
   | { readonly type: 'map.setLayerVisible'; readonly layer: string; readonly visible: boolean }
   | { readonly type: 'map.setCamera'; readonly x?: number; readonly z?: number; readonly viewHeight?: number }

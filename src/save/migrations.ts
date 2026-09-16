@@ -128,6 +128,35 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       (clone.runtime as { tick: number }).tick = Math.floor(tick * 15);
       return clone;
     }
+  },
+  {
+    from: 5,
+    to: 6,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v5→v6: save payload is not an object');
+      }
+      // Part 3.5: the shared feature selection (grid cell / river / lake /
+      // site / building) added five nullable fields to the map slice. Old
+      // saves predate them — inject the documented nulls so schema
+      // validation passes; actual selections are session-state only.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: Record<string, unknown>;
+      };
+      const map = clone.state?.map as Record<string, unknown> | undefined;
+      if (map !== undefined) {
+        for (const key of [
+          'selectedGridKey',
+          'selectedRiverId',
+          'selectedLakeId',
+          'selectedSiteId',
+          'selectedBuildingId'
+        ]) {
+          if (typeof map[key] !== 'string') map[key] = null;
+        }
+      }
+      return clone;
+    }
   }
 ];
 

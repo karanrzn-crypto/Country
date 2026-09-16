@@ -26,6 +26,7 @@ export interface CoreGameApi {
   loadFromSlot(slot: string): void;
   mapSelect(ids: { countryId?: string | null; provinceId?: string | null; cityId?: string | null }): void;
   mapPick(x: number, z: number): void;
+  mapHover(x: number | null, z: number | null): void;
   mapClearSelection(): void;
   mapSetLayerVisible(layer: string, visible: boolean): void;
   mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void;
@@ -61,6 +62,7 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
     game.mapSelect({ countryId: cmd.countryId, provinceId: cmd.provinceId, cityId: cmd.cityId })
   );
   bus.register('map.pick', (cmd) => game.mapPick(cmd.x, cmd.z));
+  bus.register('map.hover', (cmd) => game.mapHover(cmd.x, cmd.z));
   bus.register('map.clearSelection', () => game.mapClearSelection());
   bus.register('map.setLayerVisible', (cmd) => game.mapSetLayerVisible(cmd.layer, cmd.visible));
   bus.register('map.setCamera', (cmd) => game.mapSetCamera({ x: cmd.x, z: cmd.z, viewHeight: cmd.viewHeight }));

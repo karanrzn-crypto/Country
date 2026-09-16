@@ -20,7 +20,7 @@
 
 import type { MapLabelsThemeData, MapLabelTierData } from '../../data/types';
 
-export type LabelTier = 'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement';
+export type LabelTier = 'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement' | 'grid';
 
 /** Static description of one label (built once — no per-frame allocation). */
 export interface LabelRecord {
@@ -104,12 +104,18 @@ export function labelPriority(tier: MapLabelTierData, importance: number): numbe
  * Runs one label LOD pass. `alphas` is mutated with the eased values so the
  * caller can persist them between frames (temporal cross-fading).
  */
+export interface LabelLodOptions {
+  /** Grid-cell labels render ONLY while the grid layer is visible. */
+  readonly gridVisible: boolean;
+}
+
 export function updateLabels(
   records: readonly LabelRecord[],
   view: LabelView,
   theme: MapLabelsThemeData,
   alphas: LabelAlphaStore,
-  dtSeconds: number
+  dtSeconds: number,
+  options: LabelLodOptions = { gridVisible: true }
 ): LabelFrame[] {
   const fadeSpan = theme.fadeSpanViewHeight;
   const halfHeight = view.viewHeight / 2;
@@ -145,6 +151,7 @@ export function updateLabels(
 
   for (const record of records) {
     let target = tierAlpha(tierOf(theme, record.tier), view.viewHeight, fadeSpan);
+    if (record.tier === 'grid' && !options.gridVisible) target = 0;
     if (record.tier === 'majorCity' || record.tier === 'city' || record.tier === 'settlement') {
       const minPopulation = tierOf(theme, record.tier).minPopulation;
       if (record.population < minPopulation) target = 0;

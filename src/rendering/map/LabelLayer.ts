@@ -31,7 +31,7 @@ export class LabelLayer {
   private readonly theme: MapTheme;
   private readonly measureCanvas: HTMLCanvasElement | null;
 
-  constructor(model: StrategicMapModel, theme: MapTheme) {
+  constructor(model: StrategicMapModel, theme: MapTheme, columns = 0) {
     this.theme = theme;
     this.measureCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 
@@ -100,11 +100,54 @@ export class LabelLayer {
         city.name
       );
     }
+
+    // —— Part 3.5: geographic grid labels ("A3" style, country-local) ——
+    // ONE record per land cell at its lattice-centroid; the LOWEST label
+    // priority + a tight zoom tier mean they appear only when zoomed in,
+    // never fight city labels, and the whole tier vanishes (alpha 0) while
+    // the grid layer is hidden — decisions stay in the pure LOD module.
+    if (columns > 0) {
+      const rows = Math.floor(model.features.gridIds.length / columns);
+      const stride = columns + 1;
+      for (let cellIndex = 0; cellIndex < model.features.gridIds.length; cellIndex++) {
+        const gridId = model.features.gridIds[cellIndex];
+        if (gridId === null || model.features.cellOwner[cellIndex] < 0) continue;
+        const cz = Math.floor(cellIndex / columns);
+        const cx = cellIndex - cz * columns;
+        const nw = cz * stride + cx;
+        const corners = [nw, nw + 1, nw + stride + 1, nw + stride];
+        let x = 0;
+        let z = 0;
+        for (const corner of corners) {
+          const point = model.lattice[corner];
+          if (point === undefined) continue;
+          x += point.x;
+          z += point.z;
+        }
+        x /= 4;
+        z /= 4;
+        push(
+          {
+            tier: 'grid',
+            x,
+            z,
+            population: 0,
+            importance: 0,
+            aspect: this.measureAspect(gridId, false),
+            offsetBelow: false
+          },
+          gridId
+        );
+      }
+      void rows;
+    }
   }
 
   /** Runs the LOD pass and syncs sprites. Returns the frames (debug/testing). */
-  update(view: LabelView, dtSeconds: number): LabelFrame[] {
-    const frames = updateLabels(this.records, view, this.theme.labels, this.alphas, dtSeconds);
+  update(view: LabelView, dtSeconds: number, gridVisible = true): LabelFrame[] {
+    const frames = updateLabels(this.records, view, this.theme.labels, this.alphas, dtSeconds, {
+      gridVisible
+    });
     const worldPerPx = view.viewHeight / view.viewportHeightPx;
 
     for (const frame of frames) {
@@ -166,7 +209,9 @@ export class LabelLayer {
     context.textBaseline = 'middle';
     context.lineJoin = 'round';
     context.strokeStyle = this.theme.labelHaloColor;
-    context.lineWidth = 8;
+    // Grid ids render at small screen sizes — a full-width halo would eat
+    // the glyph; a thin outline keeps the dark core readable.
+    context.lineWidth = record.tier === 'grid' ? 3 : 8;
     context.strokeText(text, canvas.width / 2, canvas.height / 2);
     context.fillStyle = this.theme.labelColor;
     context.fillText(text, canvas.width / 2, canvas.height / 2);

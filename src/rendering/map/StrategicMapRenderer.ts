@@ -3,6 +3,7 @@ import type { SystemContext } from '../../core/GameContext';
 import type { GameState } from '../../state/GameState';
 import { MAP_LAYER_ORDER, type MapLayerId } from '../../world/map/MapLayers';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
+import { findGridCell } from '../../world/map/MapGeography';
 import { MapCamera } from './MapCamera';
 import { CountryLayer } from './CountryLayer';
 import { BorderLayer } from './BorderLayer';
@@ -51,6 +52,7 @@ export class StrategicMapRenderer {
   private readonly borderLayer: BorderLayer;
   private readonly cityLayer: CityLayer;
   private readonly labelLayer: LabelLayer;
+  private readonly gridLayer: GridLayer;
   private readonly surfaceLayer: SurfaceLayer;
   private readonly fillLayers = new Map<MapLayerId, CellFillLayer>();
   private readonly lazyLayers = new Map<
@@ -93,7 +95,7 @@ export class StrategicMapRenderer {
     this.countryLayer = new CountryLayer(model, theme);
     this.borderLayer = new BorderLayer(model, theme);
     this.cityLayer = new CityLayer(model, theme);
-    this.labelLayer = new LabelLayer(model, theme);
+    this.labelLayer = new LabelLayer(model, theme, this.columns);
     this.disposables.push(this.countryLayer, this.borderLayer, this.cityLayer, this.labelLayer);
 
     // —— Part-3 information layers (lazy, data-driven colors from the theme) ——
@@ -111,6 +113,7 @@ export class StrategicMapRenderer {
     const riverLayer = new RiverLayer(this.columns, theme);
     const lakeLayer = new LakeLayer(this.columns, theme);
     const gridLayer = new GridLayer(this.columns, context.config.map.rows, theme);
+    this.gridLayer = gridLayer;
     const roadsLayer = createRoadsLayer(theme);
     const railwaysLayer = createRailwaysLayer(theme);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
@@ -191,6 +194,11 @@ export class StrategicMapRenderer {
             screenY: anchor.screenY
           });
         }
+      }),
+      // Hover highlight (presentation-only): the core resolves the hovered
+      // cell, the renderer just paints its preallocated overlay quad.
+      context.events.on('map.hoverChanged', ({ hover }) => {
+        this.gridLayer.setHoveredCell(hover !== null ? hover.cellIndex : null);
       })
     );
 
@@ -291,14 +299,21 @@ export class StrategicMapRenderer {
       }
     }
 
-    // 3. Selection (country highlight, city ring, border emphasis) + the
-    //    persistent player-country outline (rebuilt only on change).
-    const selectionKey = `${map.selectedCountryId}|${map.selectedProvinceId}|${map.selectedCityId}`;
+    // 3. Selection (country highlight, city ring, border emphasis, grid-cell
+    //    fill/outline) + the persistent player-country outline — all rebuilt
+    //    ONLY when the selection key actually changes.
+    const selectionKey =
+      `${map.selectedCountryId}|${map.selectedProvinceId}|${map.selectedCityId}` +
+      `|${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
+      `|${map.selectedSiteId}|${map.selectedBuildingId}`;
     if (selectionKey !== this.lastSelectionKey) {
       this.lastSelectionKey = selectionKey;
       this.countryLayer.setSelection(map.selectedCountryId, this.theme);
       this.cityLayer.setSelectedCity(map.selectedCityId, this.model);
       this.borderLayer.setSelectedCountry(map.selectedCountryId, this.model, this.theme);
+      const gridCell =
+        map.selectedGridKey !== null ? findGridCell(this.model, map.selectedGridKey) : -1;
+      this.gridLayer.setSelectedCell(gridCell >= 0 ? gridCell : null);
     }
     const playerCountryId = state.player.countryConfirmed ? state.player.countryId : null;
     if (playerCountryId !== this.lastPlayerCountryId) {
@@ -307,6 +322,7 @@ export class StrategicMapRenderer {
     }
 
     // 4. Label LOD — decision pass + sprite sync from the DAMPED camera view.
+    //    Grid labels render only while the grid layer is visible.
     const view = this.camera.view;
     this.labelLayer.update(
       {
@@ -317,7 +333,8 @@ export class StrategicMapRenderer {
         viewportWidthPx: map.viewport.width,
         viewportHeightPx: map.viewport.height
       },
-      dtSeconds
+      dtSeconds,
+      map.layerVisibility.grid === true
     );
   }
 

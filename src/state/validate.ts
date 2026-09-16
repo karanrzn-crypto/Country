@@ -214,6 +214,11 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         selectedCountryId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedProvinceId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedCityId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedGridKey: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedRiverId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedLakeId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedSiteId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedBuildingId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         layerVisibility: { type: 'record', values: { type: 'boolean' } },
         camera: {
           type: 'object',

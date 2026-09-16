@@ -164,7 +164,7 @@ export interface MapLabelsThemeData {
    */
   readonly minReadablePx: number;
   readonly tiers: Readonly<
-    Record<'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement', MapLabelTierData>
+    Record<'country' | 'province' | 'capital' | 'majorCity' | 'city' | 'settlement' | 'grid', MapLabelTierData>
   >;
 }
 
@@ -238,6 +238,14 @@ export interface MapLayerColorsData {
   /** Geographic-grid line color + opacity (country-local cell mesh). */
   readonly gridColor: string;
   readonly gridOpacity: number;
+  /** Selected grid cell fill (semi-transparent, applied over the land). */
+  readonly gridSelectColor: string;
+  readonly gridSelectOpacity: number;
+  /** Selected cell outline (bright, always fully opaque). */
+  readonly gridSelectOutlineColor: string;
+  /** Hovered (not selected) cell fill — lighter than the selection. */
+  readonly gridHoverColor: string;
+  readonly gridHoverOpacity: number;
   /** Building/facility marker colors (Part 3 buildings layer). */
   readonly buildingColors: Readonly<
     Record<

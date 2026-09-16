@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { StrategicMapModel, MapSite, MapRiver, MapBuilding } from '../../world/map/MapTypes';
+import type { StrategicMapModel, MapSite, MapRiver, MapBuilding, MapPoint } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
 import { type MapTheme } from './MapTheme';
 import {
@@ -495,6 +495,20 @@ export class GridLayer {
   private geometry: THREE.BufferGeometry | null = null;
   private material: THREE.LineBasicMaterial | null = null;
   private built = false;
+  // —— interaction overlay state (preallocated, updated in place) ——
+  private selectFillMesh: THREE.Mesh | null = null;
+  private selectOutlineMesh: THREE.LineLoop | null = null;
+  private hoverFillMesh: THREE.Mesh | null = null;
+  private selectFillGeometry: THREE.BufferGeometry | null = null;
+  private selectOutlineGeometry: THREE.BufferGeometry | null = null;
+  private hoverFillGeometry: THREE.BufferGeometry | null = null;
+  private selectFillMaterial: THREE.MeshBasicMaterial | null = null;
+  private selectOutlineMaterial: THREE.LineBasicMaterial | null = null;
+  private hoverFillMaterial: THREE.MeshBasicMaterial | null = null;
+  private selectedCell = -1;
+  private hoveredCell = -1;
+  /** Lattice points cache — set during ensureBuilt (the model arrives there). */
+  private modelLattice: readonly MapPoint[] = [];
 
   constructor(
     private readonly columns: number,
@@ -505,6 +519,7 @@ export class GridLayer {
   ensureBuilt(model: StrategicMapModel): void {
     if (this.built) return;
     this.built = true;
+    this.modelLattice = model.lattice;
     const cellCount = model.features.biomes.length;
     const owner = model.features.cellOwner;
     const emitted = new Set<string>();
@@ -554,10 +569,156 @@ export class GridLayer {
     const segments = new THREE.LineSegments(this.geometry, this.material);
     segments.renderOrder = 5;
     this.group.add(segments);
+
+    // —— interaction overlays: ONE preallocated fill + outline quad each for
+    // the selected and the hovered cell (rewritten IN PLACE on change — no
+    // per-frame allocation, no rebuild of the merged grid) ——
+    const selectColor = rgb(this.theme.layerColors.gridSelectColor);
+    this.selectFillMaterial = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(selectColor.r, selectColor.g, selectColor.b),
+      transparent: true,
+      opacity: this.theme.layerColors.gridSelectOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.selectFillGeometry = new THREE.BufferGeometry();
+    this.selectFillGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(12), 3)
+    );
+    const selectFill = new THREE.Mesh(this.selectFillGeometry, this.selectFillMaterial);
+    selectFill.renderOrder = 4;
+    selectFill.visible = false;
+    selectFill.frustumCulled = false;
+    this.group.add(selectFill);
+    this.selectFillMesh = selectFill;
+
+    const outlineColor = rgb(this.theme.layerColors.gridSelectOutlineColor);
+    this.selectOutlineMaterial = new THREE.LineBasicMaterial({
+      color: new THREE.Color(outlineColor.r, outlineColor.g, outlineColor.b),
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false
+    });
+    this.selectOutlineGeometry = new THREE.BufferGeometry();
+    this.selectOutlineGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(12), 3)
+    );
+    const selectOutline = new THREE.LineLoop(this.selectOutlineGeometry, this.selectOutlineMaterial);
+    selectOutline.renderOrder = 6;
+    selectOutline.visible = false;
+    selectOutline.frustumCulled = false;
+    this.group.add(selectOutline);
+    this.selectOutlineMesh = selectOutline;
+
+    const hoverColor = rgb(this.theme.layerColors.gridHoverColor);
+    this.hoverFillMaterial = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(hoverColor.r, hoverColor.g, hoverColor.b),
+      transparent: true,
+      opacity: this.theme.layerColors.gridHoverOpacity,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    this.hoverFillGeometry = new THREE.BufferGeometry();
+    this.hoverFillGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(new Float32Array(12), 3)
+    );
+    const hoverFill = new THREE.Mesh(this.hoverFillGeometry, this.hoverFillMaterial);
+    hoverFill.renderOrder = 4;
+    hoverFill.visible = false;
+    hoverFill.frustumCulled = false;
+    this.group.add(hoverFill);
+    this.hoverFillMesh = hoverFill;
+
+    this.built = true;
+    // Re-apply any selection/hover that arrived before the lazy build.
+    this.writeCell(this.selectFillGeometry, this.selectOutlineGeometry, this.selectedCell);
+    this.writeCell(this.hoverFillGeometry, null, this.hoveredCell);
+    selectFill.visible = this.selectedCell >= 0;
+    selectOutline.visible = this.selectedCell >= 0;
+    hoverFill.visible = this.hoveredCell >= 0 && this.hoveredCell !== this.selectedCell;
   }
 
   /** Sits just above the land surface, below rivers/borders. */
   static readonly LINE_Y = 0.62;
+
+  /**
+   * Marks a cell as SELECTED (clear fill + bright outline). Pass −1/null to
+   * clear. Safe to call before ensureBuilt (applied on the lazy build).
+   */
+  setSelectedCell(cellIndex: number | null): void {
+    const next = cellIndex ?? -1;
+    if (next === this.selectedCell) return;
+    this.selectedCell = next;
+    if (!this.built) return;
+    this.writeCell(this.selectFillGeometry, this.selectOutlineGeometry, next);
+  }
+
+  /**
+   * Marks the HOVERED cell (light fill, no outline). Only rewrites the 12
+   * floats when the hovered cell actually CHANGES — pointer moves across a
+   * static map never allocate.
+   */
+  setHoveredCell(cellIndex: number | null): void {
+    const next = cellIndex ?? -1;
+    if (next === this.hoveredCell) return;
+    this.hoveredCell = next;
+    if (!this.built) return;
+    this.writeCell(this.hoverFillGeometry, null, next);
+  }
+
+  /** Writes the 4 lattice corners of a cell into a fill + outline buffer. */
+  private writeCell(
+    fill: THREE.BufferGeometry | null,
+    outline: THREE.BufferGeometry | null,
+    cellIndex: number
+  ): void {
+    if (fill === null) return;
+    const fillPosition = fill.getAttribute('position') as THREE.BufferAttribute;
+    const outlinePosition =
+      outline !== null ? (outline.getAttribute('position') as THREE.BufferAttribute) : null;
+    const visible = cellIndex >= 0;
+    if (this.selectFillMesh !== null && fill === this.selectFillGeometry) {
+      this.selectFillMesh.visible = visible;
+    }
+    if (this.hoverFillMesh !== null && fill === this.hoverFillGeometry) {
+      this.hoverFillMesh.visible = visible && cellIndex !== this.selectedCell;
+    }
+    if (this.selectOutlineMesh !== null && outline === this.selectOutlineGeometry) {
+      this.selectOutlineMesh.visible = visible;
+    }
+    if (!visible) return;
+    const corners = this.cornerLatticeOf(cellIndex);
+    // Quad triangles: nw, ne, se / nw, se, sw (y = slightly below the lines).
+    const y = GridLayer.LINE_Y - 0.04;
+    const quad = [0, 1, 2, 0, 2, 3];
+    let i = 0;
+    for (const corner of quad) {
+      const point = corners[corner];
+      fillPosition.setXYZ(i++, point.x, y, point.z);
+    }
+    fillPosition.needsUpdate = true;
+    if (outlinePosition !== null) {
+      const oy = GridLayer.LINE_Y + 0.04;
+      for (let c = 0; c < 4; c++) {
+        outlinePosition.setXYZ(c, corners[c].x, oy, corners[c].z);
+      }
+      outlinePosition.needsUpdate = true;
+    }
+  }
+
+  /** World-space lattice corners of a cell (nw, ne, se, sw). */
+  private cornerLatticeOf(cellIndex: number): readonly MapPoint[] {
+    const stride = this.columns + 1;
+    const cz = Math.floor(cellIndex / this.columns);
+    const cx = cellIndex - cz * this.columns;
+    const nw = cz * stride + cx;
+    const lattice = this.modelLattice;
+    const at = (index: number): MapPoint => lattice[index] ?? { x: 0, z: 0 };
+    return [at(nw), at(nw + 1), at(nw + stride + 1), at(nw + stride)];
+  }
 
   dispose(): void {
     this.group.clear();
@@ -565,6 +726,21 @@ export class GridLayer {
     this.geometry = null;
     this.material?.dispose();
     this.material = null;
+    this.selectFillMesh = null;
+    this.selectOutlineMesh = null;
+    this.hoverFillMesh = null;
+    this.selectFillGeometry?.dispose();
+    this.selectFillGeometry = null;
+    this.selectOutlineGeometry?.dispose();
+    this.selectOutlineGeometry = null;
+    this.hoverFillGeometry?.dispose();
+    this.hoverFillGeometry = null;
+    this.selectFillMaterial?.dispose();
+    this.selectFillMaterial = null;
+    this.selectOutlineMaterial?.dispose();
+    this.selectOutlineMaterial = null;
+    this.hoverFillMaterial?.dispose();
+    this.hoverFillMaterial = null;
     this.built = false;
   }
 }

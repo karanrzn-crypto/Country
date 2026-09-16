@@ -4,11 +4,35 @@ import { DEFAULT_MAP_CONFIG } from '../../../helpers/mapTestConfig';
 import {
   pointInRing,
   pickAt,
+  hoverAt,
+  cellIndexAtWorld,
   clampCamera,
   countryAt,
   provinceAt,
-  distanceToRing
+  distanceToRing,
+  type PickEligibility
 } from '../../../../world/map/MapQueries';
+import { gridCellKey } from '../../../../world/map/MapTypes';
+
+/** Standard pick options for the generated map (helpers keep tests terse). */
+function pickOpts(eligibility: Partial<PickEligibility> = {}) {
+  const full: PickEligibility = {
+    grid: true,
+    rivers: true,
+    lakes: true,
+    sites: true,
+    buildings: true,
+    ...eligibility
+  };
+  return {
+    pickRadius: 1.5,
+    riverPickDistance: 1.5,
+    columns: DEFAULT_MAP_CONFIG.columns,
+    rows: DEFAULT_MAP_CONFIG.rows,
+    cellSize: DEFAULT_MAP_CONFIG.cellSize,
+    eligibility: full
+  };
+}
 
 describe('MapQueries (pure geometry, renderer-free)', () => {
   const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
@@ -55,15 +79,25 @@ describe('MapQueries (pure geometry, renderer-free)', () => {
     const city = isolated as (typeof cities)[number];
 
     // Exact position hits the city and cascades up the hierarchy.
-    const cityPick = pickAt(model, city.position, 1.5);
+    const cityPick = pickAt(model, city.position, pickOpts());
     expect(cityPick.cityId).toBe(city.id);
     expect(cityPick.provinceId).toBe(city.provinceId);
     expect(cityPick.countryId).toBe(city.countryId);
 
     // Ocean: outside every country.
     const oceanPoint = { x: model.bounds.minX - 50, z: model.bounds.minZ - 50 };
-    const oceanPick = pickAt(model, oceanPoint, 2);
-    expect(oceanPick).toEqual({ cityId: null, provinceId: null, countryId: null });
+    const oceanPick = pickAt(model, oceanPoint, pickOpts());
+    expect(oceanPick).toEqual({
+      cityId: null,
+      provinceId: null,
+      countryId: null,
+      gridCellKey: null,
+      cellIndex: -1,
+      riverId: null,
+      lakeId: null,
+      siteId: null,
+      buildingId: null
+    });
   });
 
   it('pick radius pulls nearby cities to the cursor', () => {
@@ -78,10 +112,78 @@ describe('MapQueries (pure geometry, renderer-free)', () => {
     expect(isolated).toBeDefined();
     const city = isolated as (typeof cities)[number];
     const offset = { x: city.position.x + 1.5, z: city.position.z };
-    const pick = pickAt(model, offset, 3);
+    const pick = pickAt(model, offset, pickOpts());
     expect(pick.cityId).toBe(city.id);
-    const miss = pickAt(model, offset, 0.5);
+    const miss = pickAt(model, offset, { ...pickOpts(), pickRadius: 0.5 });
     expect(miss.cityId).toBeNull();
+  });
+
+  it('pickAt resolves the GRID CELL under the cursor when the grid layer is on', () => {
+    // Any land cell centroid — the cell under the point must be ITS cell.
+    const owner = model.features.cellOwner;
+    const gridIds = model.features.gridIds;
+    let checked = 0;
+    for (let cellIndex = 0; cellIndex < gridIds.length; cellIndex += 97) {
+      if (owner[cellIndex] < 0 || gridIds[cellIndex] === null) continue;
+      const cx = cellIndex % DEFAULT_MAP_CONFIG.columns;
+      const cz = Math.floor(cellIndex / DEFAULT_MAP_CONFIG.columns);
+      const point = {
+        x: (cx + 0.5) * DEFAULT_MAP_CONFIG.cellSize,
+        z: (cz + 0.5) * DEFAULT_MAP_CONFIG.cellSize
+      };
+      const pick = pickAt(model, point, pickOpts());
+      expect(pick.cellIndex).toBe(cellIndex);
+      expect(pick.gridCellKey).toBe(gridCellKey(model.countryOrder[owner[cellIndex]], gridIds[cellIndex] as string));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('a HIDDEN grid layer is never selectable (eligibility gate)', () => {
+    const gridIds = model.features.gridIds;
+    const cellIndex = gridIds.findIndex((id) => id !== null);
+    expect(cellIndex).toBeGreaterThanOrEqual(0);
+    const cx = cellIndex % DEFAULT_MAP_CONFIG.columns;
+    const cz = Math.floor(cellIndex / DEFAULT_MAP_CONFIG.columns);
+    const point = {
+      x: (cx + 0.5) * DEFAULT_MAP_CONFIG.cellSize,
+      z: (cz + 0.5) * DEFAULT_MAP_CONFIG.cellSize
+    };
+    const pick = pickAt(model, point, pickOpts({ grid: false }));
+    expect(pick.gridCellKey).toBeNull();
+    // …but the cell index itself is still geometry (hover/highlight reuse).
+    expect(pick.cellIndex).toBe(cellIndex);
+  });
+
+  it('hoverAt resolves cells fast and matches pickAt on cell identity', () => {
+    const owner = model.features.cellOwner;
+    const gridIds = model.features.gridIds;
+    let checked = 0;
+    for (let cellIndex = 0; cellIndex < gridIds.length; cellIndex += 53) {
+      if (owner[cellIndex] < 0 || gridIds[cellIndex] === null) continue;
+      const cx = cellIndex % DEFAULT_MAP_CONFIG.columns;
+      const cz = Math.floor(cellIndex / DEFAULT_MAP_CONFIG.columns);
+      const point = {
+        x: (cx + 0.5) * DEFAULT_MAP_CONFIG.cellSize,
+        z: (cz + 0.5) * DEFAULT_MAP_CONFIG.cellSize
+      };
+      const hover = hoverAt(model, point, pickOpts());
+      expect(hover.cellIndex).toBe(cellIndex);
+      expect(hover.provinceId).toBe(model.features.provinceOf[cellIndex] ?? null);
+      expect(hover.countryId).toBe(model.countryOrder[owner[cellIndex]]);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('cellIndexAtWorld maps world positions onto the cell lattice', () => {
+    const { columns, rows, cellSize } = DEFAULT_MAP_CONFIG;
+    expect(cellIndexAtWorld({ x: -1, z: 5 }, columns, rows, cellSize)).toBe(-1);
+    expect(cellIndexAtWorld({ x: 0, z: 0 }, columns, rows, cellSize)).toBe(0);
+    expect(
+      cellIndexAtWorld({ x: 2.5 * cellSize, z: 1.5 * cellSize }, columns, rows, cellSize)
+    ).toBe(1 * columns + 2);
+    expect(cellIndexAtWorld({ x: columns * cellSize, z: 0 }, columns, rows, cellSize)).toBe(-1);
   });
 
   it('clampCamera keeps zoom within bounds and the view on the map', () => {

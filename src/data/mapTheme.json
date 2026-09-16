@@ -3,9 +3,18 @@
   "oceanTone": "#1d456c",
   "landColor": "#c8bd9c",
   "countryPalette": [
-    "#c96f5f", "#6fa8dc", "#8fbf6f", "#d9b25f", "#a678c4",
-    "#5fb3a1", "#d98a7e", "#7e9fd9", "#c4c46f", "#c47fb0",
-    "#7fc4c9", "#b08d6a"
+    "#c96f5f",
+    "#6fa8dc",
+    "#8fbf6f",
+    "#d9b25f",
+    "#a678c4",
+    "#5fb3a1",
+    "#d98a7e",
+    "#7e9fd9",
+    "#c4c46f",
+    "#c47fb0",
+    "#7fc4c9",
+    "#b08d6a"
   ],
   "selectedTint": "#ffffff",
   "selectedOpacity": 0.4,
@@ -34,12 +43,48 @@
     "labelOffsetPx": 18,
     "minReadablePx": 11,
     "tiers": {
-      "country":    { "maxViewHeight": null,  "minPopulation": 0,      "priority": 200, "screenPx": 19 },
-      "province":   { "maxViewHeight": 170,   "minPopulation": 0,      "priority": 60,  "screenPx": 13 },
-      "capital":    { "maxViewHeight": 300,   "minPopulation": 0,      "priority": 100, "screenPx": 16 },
-      "majorCity":  { "maxViewHeight": 150,   "minPopulation": 400000, "priority": 50,  "screenPx": 14 },
-      "city":       { "maxViewHeight": 115,   "minPopulation": 0,      "priority": 20,  "screenPx": 13 },
-      "settlement": { "maxViewHeight": 75,    "minPopulation": 0,      "priority": 10,  "screenPx": 12 }
+      "country": {
+        "maxViewHeight": null,
+        "minPopulation": 0,
+        "priority": 200,
+        "screenPx": 19
+      },
+      "province": {
+        "maxViewHeight": 170,
+        "minPopulation": 0,
+        "priority": 60,
+        "screenPx": 13
+      },
+      "capital": {
+        "maxViewHeight": 300,
+        "minPopulation": 0,
+        "priority": 100,
+        "screenPx": 16
+      },
+      "majorCity": {
+        "maxViewHeight": 150,
+        "minPopulation": 400000,
+        "priority": 50,
+        "screenPx": 14
+      },
+      "city": {
+        "maxViewHeight": 115,
+        "minPopulation": 0,
+        "priority": 20,
+        "screenPx": 13
+      },
+      "settlement": {
+        "maxViewHeight": 75,
+        "minPopulation": 0,
+        "priority": 10,
+        "screenPx": 12
+      },
+      "grid": {
+        "maxViewHeight": 95,
+        "minPopulation": 0,
+        "priority": 5,
+        "screenPx": 14
+      }
     }
   },
   "selectionRingColor": "#ffffff",
@@ -67,13 +112,35 @@
       "drylands": "Drylands",
       "jungle": "Jungle"
     },
-    "biomeLegendOrder": ["forest", "grassland", "drylands", "desert", "tundra", "jungle"],
+    "biomeLegendOrder": [
+      "forest",
+      "grassland",
+      "drylands",
+      "desert",
+      "tundra",
+      "jungle"
+    ],
     "terrainRamp": [
-      { "at": 0.0,  "color": "#4d9de0" },
-      { "at": 0.25, "color": "#57a95c" },
-      { "at": 0.5,  "color": "#e3cf5c" },
-      { "at": 0.75, "color": "#e08a3e" },
-      { "at": 1.0,  "color": "#c43c33" }
+      {
+        "at": 0.0,
+        "color": "#4d9de0"
+      },
+      {
+        "at": 0.25,
+        "color": "#57a95c"
+      },
+      {
+        "at": 0.5,
+        "color": "#e3cf5c"
+      },
+      {
+        "at": 0.75,
+        "color": "#e08a3e"
+      },
+      {
+        "at": 1.0,
+        "color": "#c43c33"
+      }
     ],
     "elevationLegend": {
       "lowLabel": "Low Elevation",
@@ -130,6 +197,11 @@
       "railwayStation": "#46355a",
       "power": "#5a5a3a"
     },
-    "buildingOpacity": 0.9
+    "buildingOpacity": 0.9,
+    "gridSelectColor": "#ffb347",
+    "gridSelectOpacity": 0.32,
+    "gridSelectOutlineColor": "#ffdf6b",
+    "gridHoverColor": "#f6e7b2",
+    "gridHoverOpacity": 0.18
   }
 }

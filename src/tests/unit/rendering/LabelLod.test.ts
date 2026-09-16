@@ -33,10 +33,15 @@ function record(overrides: Partial<LabelRecord> & { id: string }): LabelRecord {
 }
 
 /** Runs the pass until alphas settle; returns (frames, alphas). */
-function settled(records: LabelRecord[], v: LabelView, seconds = 4) {
+function settled(
+  records: LabelRecord[],
+  v: LabelView,
+  seconds = 4,
+  options?: { gridVisible: boolean }
+) {
   const alphas: LabelAlphaStore = new Map();
-  let frames = updateLabels(records, v, labels, alphas, 1 / 60);
-  for (let i = 0; i < seconds * 60; i++) frames = updateLabels(records, v, labels, alphas, 1 / 60);
+  let frames = updateLabels(records, v, labels, alphas, 1 / 60, options);
+  for (let i = 0; i < seconds * 60; i++) frames = updateLabels(records, v, labels, alphas, 1 / 60, options);
   return { frames, alphas };
 }
 
@@ -44,6 +49,31 @@ function alphaOf(frames: ReturnType<typeof updateLabels>, id: string): number {
   const frame = frames.find((candidate) => candidate.record.id === id);
   return frame !== undefined ? frame.alpha : 0;
 }
+
+describe('grid label tier (Part 3.5)', () => {
+  it('grid ids show only at NEAR zoom and only while the grid layer is on', () => {
+    const gridRecord = record({ id: 'grid.A3', tier: 'grid', x: 152, z: 106, offsetBelow: false });
+    // Far zoom (viewHeight 200 > grid max 95): hidden even with the layer on.
+    const far = settled([gridRecord], view(200), 2);
+    expect(alphaOf(far.frames, 'grid.A3')).toBe(0);
+    // Near zoom + layer ON: fully visible.
+    const nearOn = settled([gridRecord], view(40), 2);
+    expect(alphaOf(nearOn.frames, 'grid.A3')).toBeGreaterThan(0.9);
+    // Near zoom + layer OFF: force-hidden (target alpha 0).
+    const nearOff = settled([gridRecord], view(40), 2, { gridVisible: false });
+    expect(alphaOf(nearOff.frames, 'grid.A3')).toBe(0);
+  });
+
+  it('grid labels lose collisions against every city tier (lowest priority)', () => {
+    const grid = record({ id: 'grid.B2', tier: 'grid', x: 150, z: 100, offsetBelow: false });
+    const capital = record({ id: 'cap', tier: 'capital', population: 1_500_000, x: 150, z: 100 });
+    const frames = settled([grid, capital], view(40), 2).frames;
+    const gridFrame = frames.find((candidate) => candidate.record.id === 'grid.B2');
+    const capFrame = frames.find((candidate) => candidate.record.id === 'cap');
+    expect(capFrame?.visible).toBe(true);
+    expect(gridFrame?.visible).not.toBe(true);
+  });
+});
 
 describe('label LOD tiers (zoom-dependent visibility)', () => {
   // Positions are spread so collision never suppresses a tier member that the

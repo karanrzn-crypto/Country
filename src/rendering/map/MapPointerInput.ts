@@ -25,6 +25,9 @@ export class MapPointerInput {
   private downX = 0;
   private downY = 0;
   private moved = false;
+  /** Last hover world position (dedupe — hover commands only on real moves). */
+  private hoverSentX = Number.NaN;
+  private hoverSentZ = Number.NaN;
 
   private static readonly DRAG_THRESHOLD_PX = 5;
 
@@ -37,12 +40,14 @@ export class MapPointerInput {
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove, options);
     window.addEventListener('pointerup', this.onPointerUp);
+    this.canvas.addEventListener('pointerleave', this.onPointerLeave);
     this.canvas.addEventListener('wheel', this.onWheel, options);
     this.canvas.addEventListener('contextmenu', this.onContextMenu);
     this.unsubscribeHandlers.push(() => {
       this.canvas.removeEventListener('pointerdown', this.onPointerDown);
       window.removeEventListener('pointermove', this.onPointerMove);
       window.removeEventListener('pointerup', this.onPointerUp);
+      this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
       this.canvas.removeEventListener('wheel', this.onWheel);
       this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     });
@@ -61,24 +66,47 @@ export class MapPointerInput {
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
-    if (!this.dragging || event.pointerId !== this.pointerId) return;
-    const dxPx = event.clientX - this.lastX;
-    const dyPx = event.clientY - this.lastY;
-    if (Math.hypot(event.clientX - this.downX, event.clientY - this.downY) > MapPointerInput.DRAG_THRESHOLD_PX) {
-      this.moved = true;
+    if (this.dragging && event.pointerId === this.pointerId) {
+      const dxPx = event.clientX - this.lastX;
+      const dyPx = event.clientY - this.lastY;
+      if (Math.hypot(event.clientX - this.downX, event.clientY - this.downY) > MapPointerInput.DRAG_THRESHOLD_PX) {
+        this.moved = true;
+      }
+      if (!this.moved) return;
+      this.lastX = event.clientX;
+      this.lastY = event.clientY;
+      const visible = this.camera.visibleSize;
+      const worldPerPxX = visible.width / this.canvas.clientWidth;
+      const worldPerPxZ = visible.height / this.canvas.clientHeight;
+      // Drag right → map moves right → logical camera moves left.
+      this.commands.send({
+        type: 'map.panBy',
+        dx: -dxPx * worldPerPxX,
+        dz: -dyPx * worldPerPxZ
+      });
+      return;
     }
-    if (!this.moved) return;
-    this.lastX = event.clientX;
-    this.lastY = event.clientY;
-    const visible = this.camera.visibleSize;
-    const worldPerPxX = visible.width / this.canvas.clientWidth;
-    const worldPerPxZ = visible.height / this.canvas.clientHeight;
-    // Drag right → map moves right → logical camera moves left.
-    this.commands.send({
-      type: 'map.panBy',
-      dx: -dxPx * worldPerPxX,
-      dz: -dyPx * worldPerPxZ
-    });
+    // Not dragging: resolve a hover target (event-based, deduped per world
+    // position — never per-frame work when the pointer rests).
+    const rect = this.canvas.getBoundingClientRect();
+    const insideCanvas =
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom;
+    if (!insideCanvas) {
+      if (!Number.isNaN(this.hoverSentX)) {
+        this.hoverSentX = Number.NaN;
+        this.hoverSentZ = Number.NaN;
+        this.commands.send({ type: 'map.hover', x: null, z: null });
+      }
+      return;
+    }
+    const world = this.camera.screenToWorld(event.clientX - rect.left, event.clientY - rect.top);
+    if (world.x === this.hoverSentX && world.z === this.hoverSentZ) return;
+    this.hoverSentX = world.x;
+    this.hoverSentZ = world.z;
+    this.commands.send({ type: 'map.hover', x: world.x, z: world.z });
   };
 
   private readonly onPointerUp = (event: PointerEvent): void => {
@@ -90,6 +118,14 @@ export class MapPointerInput {
     const rect = this.canvas.getBoundingClientRect();
     const world = this.camera.screenToWorld(event.clientX - rect.left, event.clientY - rect.top);
     this.commands.send({ type: 'map.pick', x: world.x, z: world.z });
+  };
+
+  private readonly onPointerLeave = (): void => {
+    if (!Number.isNaN(this.hoverSentX)) {
+      this.hoverSentX = Number.NaN;
+      this.hoverSentZ = Number.NaN;
+      this.commands.send({ type: 'map.hover', x: null, z: null });
+    }
   };
 
   private readonly onWheel = (event: WheelEvent): void => {
