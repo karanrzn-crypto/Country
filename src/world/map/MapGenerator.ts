@@ -37,6 +37,7 @@ import {
   type LatticeData
 } from './MapGeometry';
 import { pointInRing, distanceToRing } from './MapQueries';
+import { buildMapFeatures } from './MapFeatures';
 import {
   generateCountryName,
   generateProvinceName,
@@ -873,6 +874,9 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     }
   }
 
+  // City host cells across the WHOLE generation (needed by the feature pass).
+  const hostCellOfCity = new Map<string, number>();
+
   for (let countryIndex = 0; countryIndex < countryCount; countryIndex++) {
     const countryId = `country_${countryIndex}`;
     countryOrder.push(countryId);
@@ -903,7 +907,6 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     // separation floor. Deterministic: candidates are ordered deepest-interior
     // first (ties by cell index) and strict `>` keeps the earliest winner.
     const minSeparation = config.citySeparationFraction * config.cellSize;
-    const hostCellOfCity = new Map<string, number>();
 
     const candidatePoints = (provinceId: string): { cell: number; point: MapPoint }[] => {
       const province = provinces[provinceId];
@@ -1121,6 +1124,41 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     finalCities[cityId] = { ...city, areaRing };
   }
 
+  // —— geographic features (biomes/terrain/rivers/roads/sites) ——
+  // Runs once per seed on the SAME partition/land data — one source of truth.
+  const coastalCityIds: string[] = [];
+  for (const [cityId, hostCell] of hostCellOfCity) {
+    const cx = hostCell % columns;
+    const cz = Math.floor(hostCell / columns);
+    const touchesOcean = [
+      cx > 0 ? hostCell - 1 : -1,
+      cx < columns - 1 ? hostCell + 1 : -1,
+      cz > 0 ? hostCell - columns : -1,
+      cz < rows - 1 ? hostCell + columns : -1
+    ].some((neighbor) => neighbor < 0 || !landSet.has(neighbor));
+    if (touchesOcean) coastalCityIds.push(cityId);
+  }
+  const features = buildMapFeatures({
+    seed,
+    columns,
+    rows,
+    cellSize: config.cellSize,
+    lattice,
+    cells,
+    land,
+    countryPartition,
+    countries: Object.values(countries).map((country) => ({
+      id: country.id,
+      ring: country.ring,
+      cellIds: country.cellIds,
+      capitalCityId: country.capitalCityId,
+      cityIds: country.cityIds,
+      coastal: country.coastal
+    })),
+    cities: finalCities,
+    coastalCityIds
+  });
+
   const model: StrategicMapModel = {
     seed,
     continentName,
@@ -1131,6 +1169,7 @@ function attemptGeneration(config: MapConfig, landFraction: number): GenerationR
     countryOrder,
     edges,
     lattice: lattice.points,
+    features,
     stats
   };
   return { model, warnings };

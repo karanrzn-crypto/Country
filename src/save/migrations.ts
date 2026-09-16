@@ -67,6 +67,32 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v3 → v4: the country-selection flow (Part 3) added player.countryConfirmed.
+    // Every pre-existing save represents an already-started campaign, so the
+    // field is injected as true — the selection screen never blocks old saves.
+    // New map layers need NO migration: layer visibility is a record and the
+    // session merges registry defaults over whatever the save carries.
+    from: 3,
+    to: 4,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v3→v4: save payload is not an object');
+      }
+      const source = data as { state?: Record<string, unknown> };
+      if (source.state === undefined || typeof source.state !== 'object') {
+        throw new SaveError('Migration v3→v4: save has no state object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state: { player?: Record<string, unknown> };
+      };
+      if (clone.state.player === undefined || typeof clone.state.player !== 'object') {
+        clone.state.player = {};
+      }
+      clone.state.player.countryConfirmed = true;
+      return clone;
+    }
   }
 ];
 

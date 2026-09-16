@@ -68,8 +68,24 @@ export class UIManager implements PhaseSystem {
     // Map UI observes the strategic map slice + static model.
     this.mapUI.register(context, this.root);
     this.unsubscribes.push(
-      this.events.on('map.selectionChanged', () => this.mapUI.refreshInfo()),
+      this.events.on('map.selectionChanged', () => {
+        this.mapUI.refreshInfo();
+        if (this.screens.isOpen('countrySelect')) this.mapUI.refreshCountrySelect();
+      }),
       this.events.on('map.layerVisibilityChanged', () => this.mapUI.refreshInfo())
+    );
+    // Country-selection flow (Part 3): the core drives the phase via events;
+    // the UI only opens/closes its screens and informs the player.
+    this.unsubscribes.push(
+      this.events.on('player.countrySelectionStarted', () => {
+        this.screens.close('mainMenu');
+        this.screens.open('countrySelect');
+      }),
+      this.events.on('player.countryConfirmed', ({ countryId }) => {
+        this.screens.close('countrySelect');
+        const name = context.state.countries.countries[countryId]?.name ?? countryId;
+        this.notify('info', 'Country Selected', `You now lead ${name}.`);
+      })
     );
     this.unsubscribes.push(
       this.events.on('input.actionPressed', ({ action }) => {

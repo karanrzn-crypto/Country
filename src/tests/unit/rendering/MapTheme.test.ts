@@ -4,7 +4,8 @@ import type { MapThemeData } from '../../../data/types';
 import {
   MAP_LAYER_ORDER,
   DEFAULT_LAYER_VISIBILITY,
-  isKnownMapLayer
+  isKnownMapLayer,
+  layerDef
 } from '../../../world/map/MapLayers';
 
 const theme = mapThemeJson as unknown as MapThemeData;
@@ -51,10 +52,27 @@ describe('map layer registry', () => {
     expect(cityAreaIndex).toBeLessThan(countryIndex);
   });
 
-  it('has default visibility for every registered layer', () => {
+  it('has a declared default visibility for every registered layer', () => {
     for (const layerId of MAP_LAYER_ORDER) {
-      expect(DEFAULT_LAYER_VISIBILITY[layerId]).toBe(true);
+      // Every layer must carry a defined boolean default (registry consistency);
+      // information layers intentionally default OFF, base layers ON.
+      expect(typeof DEFAULT_LAYER_VISIBILITY[layerId]).toBe('boolean');
+      expect(DEFAULT_LAYER_VISIBILITY[layerId]).toBe(layerDef(layerId).defaultVisible);
       expect(isKnownMapLayer(layerId)).toBe(true);
+    }
+  });
+
+  it('exposes the fifteen user-facing information layers', () => {
+    const userLayers: readonly string[] = [
+      'biomes', 'terrain', 'roads', 'rivers', 'cities', 'industry', 'resources',
+      'ports', 'railways', 'military', 'provinceBorders', 'population',
+      'economy', 'weather', 'intelligence'
+    ];
+    for (const layerId of userLayers) {
+      if (!isKnownMapLayer(layerId)) throw new Error(`layer "${layerId}" missing from the registry`);
+      const def = layerDef(layerId);
+      expect(def.label.length).toBeGreaterThan(0);
+      expect(['geography', 'infrastructure', 'society']).toContain(def.group);
     }
   });
 });

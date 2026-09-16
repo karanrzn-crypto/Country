@@ -2,13 +2,13 @@ import type { CommandBus } from '../core/CommandBus';
 import type { SystemContext } from '../core/GameContext';
 import type { UIElement } from './adapter/UIDomAdapter';
 import type { ScreenManager } from './ScreenManager';
-import { MAP_LAYER_ORDER, type MapLayerId } from '../world/map/MapLayers';
+import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/MapLayers';
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
 
 /**
- * Strategic map UI (Part 1 + Part 2):
+ * Strategic map UI (Part 1 + 2 + 3):
  * - country info panel: flag, capital, population, economy, resources,
  *   military and foreign relations — all read from Game State (countrySlice
  *   + static map model); the UI owns no country data;
@@ -38,6 +38,7 @@ export class MapUI {
     relations: null as unknown as UIElement
   };
   private layerButtons = new Map<MapLayerId, UIElement>();
+  private confirmButton: UIElement | null = null;
   private readonly detailChips: UIElement[] = [];
   private readonly detailRelationRows: UIElement[] = [];
 
@@ -52,6 +53,7 @@ export class MapUI {
     this.context = context;
     this.buildInfoPanel(root);
     this.screens.registerScreen('map', (container) => this.buildMapScreen(container));
+    this.screens.registerScreen('countrySelect', (container) => this.buildCountrySelectScreen(container));
     this.refreshInfo();
   }
 
@@ -131,23 +133,29 @@ export class MapUI {
     }
     this.basicContainer = basic;
 
-    // —— layer toggles ——
+    // —— layer toggles (generated from the data-driven registry) ——
     const layerTitle = this.create('div', 'map-layers-title');
     layerTitle.setText('Layers');
     panel.appendChild(layerTitle);
 
-    const layerRow = this.create('div', 'map-layers');
-    for (const layerId of MAP_LAYER_ORDER) {
-      const button = this.create('button', 'map-layer-toggle');
-      button.setText(layerId);
-      button.onClick(() => {
-        const current = this.context?.state.map.layerVisibility[layerId] ?? true;
-        this.commands.send({ type: 'map.setLayerVisible', layer: layerId, visible: !current });
-      });
-      layerRow.appendChild(button);
-      this.layerButtons.set(layerId, button);
+    const groupOrder: readonly MapLayerGroup[] = ['geography', 'infrastructure', 'society', 'base'];
+    for (const group of groupOrder) {
+      const defs = MAP_LAYERS.filter((def) => def.group === group);
+      if (defs.length === 0) continue;
+      const groupRow = this.create('div', 'map-layers');
+      for (const def of defs) {
+        const button = this.create('button', 'map-layer-toggle');
+        button.setText(def.label);
+        button.setAttribute('title', `${def.label} (${group})`);
+        button.onClick(() => {
+          const current = this.context?.state.map.layerVisibility[def.id] ?? true;
+          this.commands.send({ type: 'map.setLayerVisible', layer: def.id, visible: !current });
+        });
+        groupRow.appendChild(button);
+        this.layerButtons.set(def.id, button);
+      }
+      panel.appendChild(groupRow);
     }
-    panel.appendChild(layerRow);
   }
 
   /** Re-reads map slice + country slice + model into the panel (observer). */
@@ -235,6 +243,20 @@ export class MapUI {
       const visible = state.layerVisibility[layerId] !== false;
       button.setClass(visible ? 'map-layer-toggle on' : 'map-layer-toggle off');
     }
+    if (this.confirmButton !== null) {
+      const selectable = state.selectedCountryId !== null;
+      this.confirmButton.setClass(selectable ? 'screen-confirm' : 'screen-confirm disabled');
+    }
+  }
+
+  /**
+   * Re-reads the confirm button state (selection may change while the
+   * country-select screen is open — clicking the map is a valid way to pick).
+   */
+  refreshCountrySelect(): void {
+    if (this.context === null || this.confirmButton === null) return;
+    const selectable = this.context.state.map.selectedCountryId !== null;
+    this.confirmButton.setClass(selectable ? 'screen-confirm' : 'screen-confirm disabled');
   }
 
   /** The 'map' screen: flag + core stats per country; click selects + focuses. */
@@ -244,11 +266,67 @@ export class MapUI {
     title.setText('Countries');
     container.appendChild(title);
     if (context === null) return;
+    this.buildCountryRows(container, (countryId) => {
+      this.commands.send({ type: 'map.select', countryId });
+      this.commands.send({ type: 'map.focusCountry', countryId });
+      this.screens.close('map');
+    });
+  }
 
+  /**
+   * Country-selection screen (Part 3): the player picks their country — by
+   * clicking a row here OR by clicking the map — then confirms. All country
+   * data comes from the map model + country slice (UI owns no country data).
+   */
+  private buildCountrySelectScreen(container: UIElement): void {
+    const context = this.context;
+    const title = this.create('h2');
+    title.setText('Choose Your Country');
+    container.appendChild(title);
+    const subtitle = this.create('div', 'screen-subtitle');
+    subtitle.setText('Click a country on the map or pick it from the list, then confirm.');
+    container.appendChild(subtitle);
+    if (context === null) return;
+
+    this.buildCountryRows(container, (countryId) => {
+      this.commands.send({ type: 'map.select', countryId });
+      this.commands.send({ type: 'map.focusCountry', countryId });
+    });
+
+    const actions = this.create('div', 'screen-actions');
+    const confirm = this.create('button', 'screen-confirm');
+    confirm.setText('Confirm & Start');
+    confirm.onClick(() => {
+      const selected = this.context?.state.map.selectedCountryId ?? null;
+      if (selected === null) return;
+      this.commands.send({ type: 'player.confirmCountry', countryId: selected });
+    });
+    this.confirmButton = confirm;
+    actions.appendChild(confirm);
+
+    const cancel = this.create('button', 'screen-cancel');
+    cancel.setText('Back');
+    cancel.onClick(() => {
+      this.screens.close('countrySelect');
+      this.screens.open('mainMenu');
+    });
+    actions.appendChild(cancel);
+    container.appendChild(actions);
+    this.refreshCountrySelect();
+  }
+
+  /** Shared country-row list (data-driven from the map model + country slice). */
+  private buildCountryRows(
+    container: UIElement,
+    onPick: (countryId: string) => void
+  ): void {
+    const context = this.context;
+    if (context === null) return;
     const list = this.create('div', 'map-country-list');
     for (const countryId of context.map.countryOrder) {
       const country = context.map.countries[countryId];
       const countryState = context.state.countries.countries[countryId];
+      if (countryState === undefined) continue;
       const capital = context.map.cities[country.capitalCityId];
       const button = this.create('button', 'map-country-row');
       const flag = this.create('img', 'map-row-flag');
@@ -261,11 +339,7 @@ export class MapUI {
           `${country.coastal ? '' : ' (landlocked)'}`
       );
       button.appendChild(label);
-      button.onClick(() => {
-        this.commands.send({ type: 'map.select', countryId: country.id });
-        this.commands.send({ type: 'map.focusCountry', countryId: country.id });
-        this.screens.close('map');
-      });
+      button.onClick(() => onPick(country.id));
       list.appendChild(button);
     }
     container.appendChild(list);

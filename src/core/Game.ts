@@ -19,7 +19,7 @@ import { DataRegistry } from '../data/DataRegistry';
 import { WorldManager } from '../world/WorldManager';
 import { generateStrategicMap } from '../world/map/MapGenerator';
 import { pickAt, clampCamera } from '../world/map/MapQueries';
-import { isKnownMapLayer } from '../world/map/MapLayers';
+import { isKnownMapLayer, DEFAULT_LAYER_VISIBILITY } from '../world/map/MapLayers';
 import { MapCameraController } from '../world/map/MapCameraController';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import { clearMapSelection, setMapSelection } from '../state/slices/mapSlice';
@@ -232,6 +232,12 @@ export class Game {
     this.focusChunk(this.world.capitalChunkId(this.state.player.countryId));
     this.playerModeSystem.setMode(this.state, 'president');
 
+    // Fresh campaign: hand the choice of country to the player (Part 3).
+    // The UI opens its country-select screen when it receives this event.
+    if (!this.state.player.countryConfirmed) {
+      this.events.emit('player.countrySelectionStarted', {});
+    }
+
     this.events.emit('game.ready', { tick: this.time.tick });
     this.events.emit('map.generated', {
       seed: this.mapModel.seed,
@@ -370,6 +376,17 @@ export class Game {
     // Country capitals are joined from the live map model — heals migrated
     // saves whose stored join may come from a different map config.
     syncCountryCapitals(this.state.countries.countries, this.mapModel);
+    // New map layers (Part 3): fill in registry defaults ONLY for keys the
+    // save does not carry — saved toggles always win over defaults.
+    const visibility = this.state.map.layerVisibility as Record<string, boolean | undefined>;
+    for (const [layer, visible] of Object.entries(DEFAULT_LAYER_VISIBILITY)) {
+      if (typeof visibility[layer] !== 'boolean') visibility[layer] = visible;
+    }
+    // Defensive heal: migration v3→v4 normally injects this, but hand-made
+    // saves / external tooling may miss the field.
+    if (typeof this.state.player.countryConfirmed !== 'boolean') {
+      this.state.player.countryConfirmed = true;
+    }
     // Map selection references generated ids — heal selections that no longer
     // exist in the live model (seed/config drift across versions), keeping the
     // hierarchy consistent: city ⇒ province ⇒ country.
@@ -403,6 +420,40 @@ export class Game {
   togglePause(): void {
     this.assertInitialized();
     this.time.togglePause();
+  }
+
+  /**
+   * Country-selection flow (Part 3): re-opens the "choose your country"
+   * phase — the game pauses and the UI opens its countrySelect screen on the
+   * emitted event. The player country stays whatever it was until confirm.
+   */
+  beginCountrySelection(): void {
+    this.assertInitialized();
+    this.state.player.countryConfirmed = false;
+    if (!this.time.isPaused) this.time.togglePause();
+    this.events.emit('player.countrySelectionStarted', {});
+  }
+
+  /**
+   * Registers the player's country in the MAIN game state (state.player —
+   * the single source of truth every future system reads), marks the choice
+   * confirmed, centers the camera and resumes the campaign. Data-driven and
+   * id-agnostic: works for any country present in the map model.
+   */
+  confirmCountrySelection(countryId: string): void {
+    this.assertInitialized();
+    if (this.mapModel.countries[countryId] === undefined) {
+      this.logger.warn(`confirmCountrySelection: unknown country "${countryId}"`);
+      return;
+    }
+    // Keep the map selection hierarchy consistent with the confirmed country.
+    this.mapSelect({ countryId });
+    this.state.player.countryId = countryId;
+    this.state.player.countryConfirmed = true;
+    this.mapFocusCountry(countryId);
+    this.focusChunk(this.world.capitalChunkId(countryId));
+    if (this.time.isPaused) this.time.togglePause();
+    this.events.emit('player.countryConfirmed', { countryId });
   }
 
   setSpeed(speed: number): void {

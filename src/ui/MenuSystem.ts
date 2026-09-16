@@ -34,13 +34,14 @@ export class MenuSystem {
     const title = this.create('h1');
     title.setText('COUNTRY');
     const subtitle = this.create('div', 'screen-subtitle');
-    subtitle.setText('Hybrid 2.5D/3D strategy — Phase 0 foundation build');
+    subtitle.setText('Hybrid 2.5D/3D strategy — strategic map build');
     container.appendChild(title);
     container.appendChild(subtitle);
 
+    // New Campaign → the country-selection flow (Part 3): the core pauses
+    // and the UI opens its countrySelect screen on the emitted event.
     this.button(container, 'New Campaign', () => {
-      this.screens.close('mainMenu');
-      this.send({ type: 'game.togglePause' });
+      this.send({ type: 'player.beginCountrySelection' });
     });
     this.button(container, 'Load Latest Autosave', () => {
       this.send({ type: 'save.load', slot: 'autosave' });

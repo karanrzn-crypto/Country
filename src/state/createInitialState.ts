@@ -126,6 +126,7 @@ export function createInitialState(
     },
     player: {
       countryId: countryIds[0],
+      countryConfirmed: false,
       mode: null,
       focusChunkId: null,
       selection: []

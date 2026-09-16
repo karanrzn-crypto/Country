@@ -122,6 +122,98 @@ export interface MapCity {
   readonly areaRing: MapRing;
 }
 
+// ———————————————————— geographic features (Part 3 layers) ————————————————————
+
+/** Land biome classification per cell (data-driven display via theme). */
+export type BiomeId =
+  | 'ocean'
+  | 'forest'
+  | 'grassland'
+  | 'desert'
+  | 'tundra'
+  | 'drylands'
+  | 'jungle';
+
+/** Terrain class per cell derived from elevation quantiles. */
+export type TerrainId = 'mountain' | 'hills' | 'plains' | 'valley';
+
+/** A river: seeded at a high cell, descending to a coast or an inland basin. */
+export interface MapRiver {
+  readonly id: string;
+  readonly name: string;
+  /** Cell indices from source to mouth (source first). */
+  readonly cells: readonly number[];
+  /** World-space polyline (jittered cell centroids), ≥ 2 points. */
+  readonly polyline: readonly MapPoint[];
+  /** Mouth cell when the river reached the ocean; null when it ended inland. */
+  readonly mouthCell: number | null;
+}
+
+/**
+ * A transport / maritime line feature. Polyline is generated data (seeded),
+ * NOT hand-tuned geometry — a future real-network dataset can replace the
+ * generator without touching renderer or state (same contract as city rings).
+ */
+export type MapLineKind = 'highway' | 'secondary' | 'dirt' | 'railway' | 'seaRoute';
+
+export interface MapLineFeature {
+  readonly id: string;
+  readonly kind: MapLineKind;
+  /** City ids when the line links two settlements (null for future data). */
+  readonly cityA: CityId | null;
+  readonly cityB: CityId | null;
+  readonly polyline: readonly MapPoint[];
+}
+
+/**
+ * A point site on the map (production / resource / military / port).
+ * Positions are validated interior points of their country ring.
+ */
+export type MapSiteKind =
+  | 'port'
+  | 'farm'
+  | 'factory'
+  | 'mine'
+  | 'oil'
+  | 'airbase'
+  | 'base';
+
+export interface MapSite {
+  readonly id: string;
+  readonly kind: MapSiteKind;
+  /** Resource id for extractive sites (iron/coal/gold/oil), else null. */
+  readonly resourceId: string | null;
+  readonly countryId: CountryId;
+  readonly cityId: CityId | null;
+  readonly cellIndex: number;
+  readonly position: MapPoint;
+}
+
+/**
+ * Static geographic features of the map — generated ONCE per seed together
+ * with the political layer, deterministic and JSON-safe. This is the single
+ * source of truth for every information layer (biomes, terrain, rivers,
+ * roads, sites, …): renderer, future simulations and tests all read here.
+ */
+export interface MapFeatures {
+  /** Per-cell biome (index = cz * columns + cx, 'ocean' for water cells). */
+  readonly biomes: readonly BiomeId[];
+  /** Per-cell normalized elevation 0..1 (ocean cells included). */
+  readonly elevation: readonly number[];
+  /** Per-cell normalized temperature 0..1 (weather-layer hook). */
+  readonly temperature: readonly number[];
+  /** Per-cell terrain class ('valley' is used for ocean cells too). */
+  readonly terrain: readonly TerrainId[];
+  /** Per-cell country owner index (−1 for ocean) — the ground truth for
+   *  country-tinted overlays (economy/population) and future systems. */
+  readonly cellOwner: readonly number[];
+  readonly rivers: readonly MapRiver[];
+  /** Inland basin cells where rivers ended (drawn as small lakes). */
+  readonly lakeCells: readonly number[];
+  readonly lines: readonly MapLineFeature[];
+  readonly sites: readonly MapSite[];
+}
+
 export interface MapStats {
   readonly countries: number;
   readonly provinces: number;
@@ -156,5 +248,7 @@ export interface StrategicMapModel {
   readonly edges: Readonly<Record<EdgeKey, MapEdge>>;
   /** Jittered lattice points by index (geometry provenance / tests). */
   readonly lattice: readonly MapPoint[];
+  /** Static geographic features (biomes/terrain/rivers/roads/sites) — see MapFeatures. */
+  readonly features: MapFeatures;
   readonly stats: MapStats;
 }

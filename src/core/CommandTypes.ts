@@ -11,6 +11,9 @@ export type GameCommand =
   | { readonly type: 'player.setMode'; readonly mode: PlayerModeId }
   | { readonly type: 'player.focusChunk'; readonly chunkId: string }
   | { readonly type: 'player.select'; readonly entityIds: readonly EntityId[] }
+  // —— country selection flow (Part 3) ——
+  | { readonly type: 'player.beginCountrySelection' }
+  | { readonly type: 'player.confirmCountry'; readonly countryId: string }
   | { readonly type: 'ui.openScreen'; readonly screenId: string }
   | { readonly type: 'ui.closeScreen'; readonly screenId: string }
   | {

@@ -161,6 +161,33 @@ export interface MapLabelsThemeData {
   readonly tiers: Readonly<Record<'country' | 'province' | 'capital' | 'majorCity' | 'city', MapLabelTierData>>;
 }
 
+/** Data-driven colors for the Part-3 information layers (see mapTheme.json). */
+export interface MapLayerColorsData {
+  readonly biomeFillOpacity: number;
+  readonly biomes: Readonly<Record<'forest' | 'grassland' | 'desert' | 'tundra' | 'drylands' | 'jungle', string>>;
+  readonly terrainFillOpacity: number;
+  readonly terrain: Readonly<Record<'mountain' | 'hills' | 'plains' | 'valley', string>>;
+  readonly tintFillOpacity: number;
+  readonly populationLow: string;
+  readonly populationHigh: string;
+  readonly economyLow: string;
+  readonly economyHigh: string;
+  readonly riverStroke: string;
+  readonly riverOpacity: number;
+  readonly lakeFill: string;
+  readonly lakeOpacity: number;
+  readonly roadColors: Readonly<Record<'highway' | 'secondary' | 'dirt', string>>;
+  readonly roadOpacity: number;
+  readonly railwayStroke: string;
+  readonly railwayOpacity: number;
+  readonly seaRouteStroke: string;
+  readonly seaRouteOpacity: number;
+  readonly siteColors: Readonly<
+    Record<'port' | 'farm' | 'factory' | 'mine' | 'oil' | 'airbase' | 'base', string>
+  >;
+  readonly siteOpacity: number;
+}
+
 /**
  * Visual theme of the strategic political map (colors + marker sizes).
  * Data-driven: lives in src/data/mapTheme.json, validated by MAP_THEME_SCHEMA.
@@ -193,4 +220,8 @@ export interface MapThemeData {
   readonly labels: MapLabelsThemeData;
   readonly selectionRingColor: string;
   readonly selectionRingColorAlt: string;
+  /** Player-country outline color (Part 3 selection flow). */
+  readonly playerOutlineColor: string;
+  /** Information-layer colors (Part 3 map layers). */
+  readonly layerColors: MapLayerColorsData;
 }

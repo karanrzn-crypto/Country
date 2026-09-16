@@ -19,12 +19,17 @@ export class BorderLayer {
   readonly provinceGroup = new THREE.Group();
   /** Selection emphasis overlay — always rendered above the border layers. */
   readonly selectionGroup = new THREE.Group();
+  /** Player-country emphasis overlay (Part 3) — golden, above selection. */
+  readonly playerGroup = new THREE.Group();
 
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
   private selectionLines: THREE.LineSegments | null = null;
   private selectionGeometry: THREE.BufferGeometry | null = null;
   private selectionMaterial: THREE.LineBasicMaterial | null = null;
+  private playerLines: THREE.LineSegments | null = null;
+  private playerGeometry: THREE.BufferGeometry | null = null;
+  private playerMaterial: THREE.LineBasicMaterial | null = null;
 
   constructor(model: StrategicMapModel, theme: MapTheme) {
     const coastMaterial = new THREE.LineBasicMaterial({ color: theme.coastStroke });
@@ -110,16 +115,62 @@ export class BorderLayer {
     this.selectionGroup.add(this.selectionLines);
   }
 
+  /**
+   * Rebuilds the persistent player-country outline (call only when the
+   * player country CHANGES, never per frame). Same shared-edge geometry
+   * source as everything else — a distinct golden color keeps it clearly
+   * separated from the white selection highlight.
+   */
+  setPlayerCountry(countryId: string | null, model: StrategicMapModel, theme: MapTheme): void {
+    if (this.playerLines !== null) {
+      this.playerGroup.remove(this.playerLines);
+      this.playerGeometry?.dispose();
+      this.playerMaterial?.dispose();
+      this.playerLines = null;
+      this.playerGeometry = null;
+      this.playerMaterial = null;
+    }
+    if (countryId === null) return;
+    const country = model.countries[countryId];
+    if (country === undefined) return;
+    const points: number[] = [];
+    for (const segment of country.ring.segments) {
+      const edge = model.edges[segment.key];
+      if (edge === undefined) continue;
+      const polyline = segment.forward ? edge.polyline : [...edge.polyline].reverse();
+      for (let i = 1; i < polyline.length; i++) {
+        const a = polyline[i - 1];
+        const b = polyline[i];
+        points.push(a.x, 2.4, a.z, b.x, 2.4, b.z);
+      }
+    }
+    if (points.length === 0) return;
+    this.playerGeometry = new THREE.BufferGeometry();
+    this.playerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    this.playerGeometry.computeBoundingSphere();
+    this.playerMaterial = new THREE.LineBasicMaterial({
+      color: theme.playerOutlineColor,
+      transparent: true,
+      opacity: 0.95
+    });
+    this.playerLines = new THREE.LineSegments(this.playerGeometry, this.playerMaterial);
+    this.playerLines.renderOrder = 16;
+    this.playerGroup.add(this.playerLines);
+  }
+
   dispose(): void {
     for (const geometry of this.geometries) geometry.dispose();
     for (const material of this.materials) material.dispose();
     this.selectionGeometry?.dispose();
     this.selectionMaterial?.dispose();
+    this.playerGeometry?.dispose();
+    this.playerMaterial?.dispose();
     this.geometries.length = 0;
     this.materials.length = 0;
     this.coastGroup.clear();
     this.countryGroup.clear();
     this.provinceGroup.clear();
     this.selectionGroup.clear();
+    this.playerGroup.clear();
   }
 }

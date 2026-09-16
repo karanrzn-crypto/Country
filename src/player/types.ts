@@ -21,6 +21,13 @@ export interface PlayerModeDef {
 export interface PlayerSlice {
   /** Country the player currently controls. */
   countryId: string;
+  /**
+   * Country-selection flow (Part 3): false until the player confirms their
+   * country on the strategic map (countrySelect screen). Fresh campaigns
+   * start pending; confirming registers the country in THIS slice so every
+   * future system reads the same source of truth.
+   */
+  countryConfirmed: boolean;
   mode: PlayerModeId | null;
   focusChunkId: string | null;
   selection: EntityId[];

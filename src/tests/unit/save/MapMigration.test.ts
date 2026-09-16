@@ -23,7 +23,7 @@ describe('save migrations (v1 → v2 → v3)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(3);
+    expect(version).toBe(4);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -43,6 +43,8 @@ describe('save migrations (v1 → v2 → v3)', () => {
     }
     // Original fields untouched (no destructive migration).
     expect(migrated.state.player.countryId).toBe('republic');
+    // Part 3: migrated saves are already-started campaigns.
+    expect((migrated.state.player as Record<string, unknown>).countryConfirmed).toBe(true);
     expect(migrated.runtime.tick).toBe(12);
   });
 
@@ -55,12 +57,29 @@ describe('save migrations (v1 → v2 → v3)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(3);
+    expect(version).toBe(4);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
     expect(migrated.state.countries).toBeDefined();
-    expect(Object.keys(migrated.state).sort()).toEqual(['a', 'countries', 'map'].sort());
+    // v3→v4 added player.countryConfirmed without touching anything else.
+    expect(Object.keys(migrated.state).sort()).toEqual(['a', 'countries', 'map', 'player'].sort());
+    expect((migrated.state.player as Record<string, unknown>).countryConfirmed).toBe(true);
+  });
+
+  it('v3 → v4 marks the campaign as confirmed (selection never blocks old saves)', () => {
+    const v3 = {
+      state: {
+        player: { countryId: 'country_2', mode: 'president', focusChunkId: null, selection: [] }
+      },
+      runtime: { tick: 77 }
+    };
+    const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
+    expect(version).toBe(4);
+    const migrated = data as { state: { player: Record<string, unknown> } };
+    expect(migrated.state.player.countryConfirmed).toBe(true);
+    expect(migrated.state.player.countryId).toBe('country_2');
+    expect((data as typeof v3).runtime.tick).toBe(77);
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

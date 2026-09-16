@@ -202,6 +202,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
       type: 'object',
       fields: {
         countryId: { type: 'string' },
+        countryConfirmed: { type: 'boolean' },
         mode: { type: 'union', options: [{ type: 'enum', values: ['president', 'commander', 'soldier', 'aircraft'] }, { type: 'null' }] },
         focusChunkId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selection: { type: 'array', items: { type: 'string' } }

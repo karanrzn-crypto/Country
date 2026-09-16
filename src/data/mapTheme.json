@@ -41,5 +41,53 @@
     }
   },
   "selectionRingColor": "#ffffff",
-  "selectionRingColorAlt": "#3a2f22"
+  "selectionRingColorAlt": "#3a2f22",
+  "playerOutlineColor": "#f2c94c",
+  "layerColors": {
+    "biomeFillOpacity": 0.6,
+    "biomes": {
+      "forest": "#3f6f3a",
+      "grassland": "#a3b968",
+      "desert": "#d9c27e",
+      "tundra": "#b5c4c9",
+      "drylands": "#c9b476",
+      "jungle": "#2e6b3c"
+    },
+    "terrainFillOpacity": 0.45,
+    "terrain": {
+      "mountain": "#8d8578",
+      "hills": "#a89a80",
+      "plains": "#b5ab8e",
+      "valley": "#c7bfa5"
+    },
+    "tintFillOpacity": 0.4,
+    "populationLow": "#fdf6d8",
+    "populationHigh": "#a02c2c",
+    "economyLow": "#ece7d4",
+    "economyHigh": "#2e6b4f",
+    "riverStroke": "#3f7fae",
+    "riverOpacity": 0.9,
+    "lakeFill": "#3f7fae",
+    "lakeOpacity": 0.9,
+    "roadColors": {
+      "highway": "#8a3f22",
+      "secondary": "#a06a3f",
+      "dirt": "#8f7a55"
+    },
+    "roadOpacity": 0.9,
+    "railwayStroke": "#46355a",
+    "railwayOpacity": 0.9,
+    "seaRouteStroke": "#9fc4e0",
+    "seaRouteOpacity": 0.55,
+    "siteColors": {
+      "port": "#24557f",
+      "farm": "#6f8f34",
+      "factory": "#6b3f2a",
+      "mine": "#4f4038",
+      "oil": "#262626",
+      "airbase": "#3a4a6b",
+      "base": "#4a3b2a"
+    },
+    "siteOpacity": 0.95
+  }
 }

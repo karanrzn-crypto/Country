@@ -85,6 +85,10 @@ export interface GameEventMap {
   'player.modeChanged': { readonly from: PlayerModeId | null; readonly to: PlayerModeId };
   'player.selectionChanged': { readonly entityIds: readonly EntityId[] };
   'player.focusChunkChanged': { readonly chunkId: string };
+  /** Part 3 — country-selection flow (UI opens the countrySelect screen). */
+  'player.countrySelectionStarted': Record<string, never>;
+  /** Part 3 — the player's country is now registered in state.player. */
+  'player.countryConfirmed': { readonly countryId: string };
 
   // —— strategic map (Part 1) ——
   'map.generated': {

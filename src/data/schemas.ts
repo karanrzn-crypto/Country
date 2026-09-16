@@ -189,7 +189,71 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
       }
     },
     selectionRingColor: colorField,
-    selectionRingColorAlt: colorField
+    selectionRingColorAlt: colorField,
+    playerOutlineColor: colorField,
+    layerColors: {
+      type: 'object',
+      allowUnknown: false,
+      fields: {
+        biomeFillOpacity: { type: 'number', min: 0, max: 1 },
+        biomes: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            forest: colorField,
+            grassland: colorField,
+            desert: colorField,
+            tundra: colorField,
+            drylands: colorField,
+            jungle: colorField
+          }
+        },
+        terrainFillOpacity: { type: 'number', min: 0, max: 1 },
+        terrain: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            mountain: colorField,
+            hills: colorField,
+            plains: colorField,
+            valley: colorField
+          }
+        },
+        tintFillOpacity: { type: 'number', min: 0, max: 1 },
+        populationLow: colorField,
+        populationHigh: colorField,
+        economyLow: colorField,
+        economyHigh: colorField,
+        riverStroke: colorField,
+        riverOpacity: { type: 'number', min: 0, max: 1 },
+        lakeFill: colorField,
+        lakeOpacity: { type: 'number', min: 0, max: 1 },
+        roadColors: {
+          type: 'object',
+          allowUnknown: false,
+          fields: { highway: colorField, secondary: colorField, dirt: colorField }
+        },
+        roadOpacity: { type: 'number', min: 0, max: 1 },
+        railwayStroke: colorField,
+        railwayOpacity: { type: 'number', min: 0, max: 1 },
+        seaRouteStroke: colorField,
+        seaRouteOpacity: { type: 'number', min: 0, max: 1 },
+        siteColors: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            port: colorField,
+            farm: colorField,
+            factory: colorField,
+            mine: colorField,
+            oil: colorField,
+            airbase: colorField,
+            base: colorField
+          }
+        },
+        siteOpacity: { type: 'number', min: 0, max: 1 }
+      }
+    }
   }
 };
 

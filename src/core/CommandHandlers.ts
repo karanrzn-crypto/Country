@@ -17,6 +17,8 @@ export interface CoreGameApi {
   setPlayerMode(mode: PlayerModeId): boolean;
   focusChunk(chunkId: string): void;
   selectEntities(entityIds: readonly EntityId[]): void;
+  beginCountrySelection(): void;
+  confirmCountrySelection(countryId: string): void;
   saveToSlot(slot: string, label?: string): void;
   loadFromSlot(slot: string): void;
   mapSelect(ids: { countryId?: string | null; provinceId?: string | null; cityId?: string | null }): void;
@@ -42,6 +44,8 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('player.setMode', (cmd) => game.setPlayerMode(cmd.mode));
   bus.register('player.focusChunk', (cmd) => game.focusChunk(cmd.chunkId));
   bus.register('player.select', (cmd) => game.selectEntities(cmd.entityIds));
+  bus.register('player.beginCountrySelection', () => game.beginCountrySelection());
+  bus.register('player.confirmCountry', (cmd) => game.confirmCountrySelection(cmd.countryId));
   bus.register('ui.openScreen', (cmd) => game.ui?.openScreen(cmd.screenId));
   bus.register('ui.closeScreen', (cmd) => game.ui?.closeScreen(cmd.screenId));
   bus.register('ui.notify', (cmd) => game.ui?.notify(cmd.level, cmd.title, cmd.message));

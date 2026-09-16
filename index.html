@@ -116,6 +116,20 @@
       .map-layer-toggle.on { border-color: #4a7f4a; color: #b8e6b8; background: #1d2b1d; }
       .map-layer-toggle.off { opacity: 0.45; text-decoration: line-through; }
       .map-country-list button { font: inherit; }
+      /* —— country-select screen (Part 3) —— */
+      .screen-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: center; }
+      .screen-confirm {
+        font: inherit; font-size: 14px; cursor: pointer;
+        border: 1px solid #4a7f4a; border-radius: 4px;
+        padding: 6px 18px; color: #b8e6b8; background: #1d2b1d; font-weight: 700;
+      }
+      .screen-confirm.disabled { opacity: 0.4; cursor: not-allowed; }
+      .screen-cancel {
+        font: inherit; font-size: 14px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 4px;
+        padding: 6px 14px; color: #cfd8e6; background: #1a2333;
+      }
+      .map-country-list { max-height: 46vh; overflow-y: auto; }
     </style>
   </head>
   <body>
