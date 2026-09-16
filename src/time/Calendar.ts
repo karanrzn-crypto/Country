@@ -72,30 +72,28 @@ export function formatCalendarDate(date: CalendarDate): string {
   return `${date.year}-${pad(date.month)}-${pad(date.day)} ${pad(date.hour)}:${pad(date.minute)}`;
 }
 
+/** Month names for the campaign-elapsed stamp (calendar months, not counts). */
+const MONTH_NAMES: readonly string[] = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+/** Zero-pads a number to 2 digits ("07:05"). */
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 /**
  * Campaign-elapsed stamp shown in the time bar — the player-facing form of
- * the single source of truth, e.g. "Year 1 — Month 1 — Day 1 — 08:00".
- * Year/Month/Day are 1-based offsets walked from the campaign start date
- * through real month lengths (correct for any start date, not just Jan 1).
+ * the single source of truth, e.g. "Year 1 — January — Day 1 — 08:00".
+ *
+ * Year counts campaigns years (1-based from the start year), the month is
+ * the CALENDAR month of that year (a month COUNT like "Month 24" is noise —
+ * the player reads January → February → March), and Day is 1-based within
+ * the month, walked through real month lengths (correct for any start date).
  */
 export function formatCalendarElapsed(date: CalendarDate, start: CalendarStart): string {
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  let remaining = Math.max(0, dayNumber(date) - dayNumber({ year: start.year, month: start.month, day: start.day }));
-  remaining += start.day - 1; // express as "days since (startYear, startMonth, 1)"
-  let year = start.year;
-  let month = start.month;
-  while (remaining >= DAYS_IN_MONTH[month - 1]) {
-    remaining -= DAYS_IN_MONTH[month - 1];
-    month += 1;
-    if (month > 12) {
-      month = 1;
-      year += 1;
-    }
-  }
-  const elapsedYear = year - start.year + 1;
-  const elapsedMonth = (year - start.year) * 12 + (month - start.month) + 1;
-  const elapsedDay = remaining + 1;
-  return `Year ${elapsedYear} — Month ${elapsedMonth} — Day ${elapsedDay} — ${pad(date.hour)}:${pad(date.minute)}`;
+  return `Year ${date.year - start.year + 1} — ${MONTH_NAMES[date.month - 1]} — Day ${date.day} — ${pad2(date.hour)}:${pad2(date.minute)}`;
 }
 
 /** 1-based absolute day index (days since year 0, ignoring leap years). */
@@ -103,4 +101,51 @@ function dayNumber(date: { year: number; month: number; day: number }): number {
   let days = date.year * 365;
   for (let month = 1; month < date.month; month++) days += DAYS_IN_MONTH[month - 1];
   return days + date.day;
+}
+
+/**
+ * Converts a calendar date into total elapsed MINUTES since `start` — the
+ * exact inverse of minutesToCalendar (integer math, no drift). The date is
+ * clamped into the supported range so round-trips are stable.
+ */
+export function calendarToMinutes(date: CalendarDate, start: CalendarStart): number {
+  const days = dayNumber({ year: date.year, month: date.month, day: date.day }) -
+    dayNumber({ year: start.year, month: start.month, day: start.day });
+  return days * MINUTES_PER_DAY + date.hour * MINUTES_PER_HOUR + date.minute;
+}
+
+/** The number of days in a month (no leap years — deterministic). */
+export function daysInMonth(year: number, month: number): number {
+  void year;
+  return DAYS_IN_MONTH[Math.min(11, Math.max(0, month - 1))];
+}
+
+/**
+ * Advances a date by EXACTLY ONE calendar MONTH, landing on the same
+ * time-of-day with the day-of-month clamped into the target month
+ * (Jan 31 + 1 month = Feb 28). Returns the new elapsed-minutes value.
+ * Pure integer math — deterministic for any input.
+ */
+export function minutesAfterOneMonth(elapsedMinutes: number, start: CalendarStart): number {
+  const date = minutesToCalendar(elapsedMinutes, start);
+  let month = date.month + 1;
+  let year = date.year;
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+  const day = Math.min(date.day, daysInMonth(year, month));
+  return calendarToMinutes({ year, month, day, hour: date.hour, minute: date.minute }, start);
+}
+
+/**
+ * Advances a date by EXACTLY ONE calendar YEAR (same month/day/time —
+ * always valid without leap years). Returns the new elapsed-minutes value.
+ */
+export function minutesAfterOneYear(elapsedMinutes: number, start: CalendarStart): number {
+  const date = minutesToCalendar(elapsedMinutes, start);
+  return calendarToMinutes(
+    { year: date.year + 1, month: date.month, day: date.day, hour: date.hour, minute: date.minute },
+    start
+  );
 }

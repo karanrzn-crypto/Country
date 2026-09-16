@@ -12,6 +12,7 @@ import { Random } from '../utils/Random';
 import { hashValue } from '../utils/hash';
 import { WorldError, StateError } from '../utils/errors';
 import { TimeSystem } from '../time/TimeSystem';
+import type { TimeMode } from '../time/TimeSystem';
 import { createInitialState } from '../state/createInitialState';
 import { STATE_SLICE_KEYS } from '../state/GameState';
 import type { GameState } from '../state/GameState';
@@ -168,7 +169,14 @@ export class Game {
       autoSaveIntervalTicks: this.config.save.autoSaveIntervalTicks,
       getSnapshot: () => ({
         state: this.state,
-        runtime: { tick: this.time.tick, rngState: this.rng.getState(), ids: this.ids.serialize() }
+        runtime: {
+          tick: this.time.tick,
+          stepCounter: this.time.step,
+          rngState: this.rng.getState(),
+          ids: this.ids.serialize(),
+          timeMode: this.time.timeMode,
+          speedStepIndex: this.time.speedStepIndex
+        }
       }),
       applySnapshot: (data) => this.applyLoadedSnapshot(data)
     });
@@ -423,7 +431,31 @@ export class Game {
       map.selectedProvinceId = null;
       map.selectedCityId = null;
     }
-    this.time.setTick(data.runtime.tick);
+    // Feature selections (Part 3.5) heal the same way — a stale key/id from
+    // seed drift is dropped rather than rendered as a ghost selection.
+    if (
+      (map.selectedGridKey !== null && findGridCell(this.mapModel, map.selectedGridKey) < 0) ||
+      (map.selectedRiverId !== null && !this.mapModel.features.rivers.some((r) => r.id === map.selectedRiverId)) ||
+      (map.selectedLakeId !== null && !this.mapModel.features.lakes.some((l) => l.id === map.selectedLakeId)) ||
+      (map.selectedSiteId !== null && !this.mapModel.features.sites.some((s) => s.id === map.selectedSiteId)) ||
+      (map.selectedBuildingId !== null && !this.mapModel.features.buildings.some((b) => b.id === map.selectedBuildingId))
+    ) {
+      map.selectedGridKey = null;
+      map.selectedRiverId = null;
+      map.selectedLakeId = null;
+      map.selectedSiteId = null;
+      map.selectedBuildingId = null;
+    }
+    this.time.setTick(data.runtime.tick, data.runtime.stepCounter ?? 0);
+    // Runtime extras (optional — older saves predate them): the time mode
+    // and speed step restore only when present and valid; otherwise the
+    // defaults (Hour, ×1) apply.
+    if (typeof data.runtime.timeMode === 'string') {
+      this.time.setTimeMode(data.runtime.timeMode as TimeMode);
+    }
+    if (typeof data.runtime.speedStepIndex === 'number') {
+      this.time.setSpeedStep(data.runtime.speedStepIndex);
+    }
     this.rng.setState(data.runtime.rngState);
     this.ids.restore(data.runtime.ids);
     const focus = this.state.player.focusChunkId ?? this.world.capitalChunkId(this.state.player.countryId);
@@ -494,6 +526,12 @@ export class Game {
   cycleSpeed(): void {
     this.assertInitialized();
     this.time.cycleSpeed();
+  }
+
+  /** Sets the time mode (Hour/Day/Month/Year) — the Time Bar's write path. */
+  setTimeMode(mode: 'hour' | 'day' | 'month' | 'year'): void {
+    this.assertInitialized();
+    this.time.setTimeMode(mode);
   }
 
   setPlayerMode(mode: Parameters<PlayerModeSystem['setMode']>[1]): boolean {

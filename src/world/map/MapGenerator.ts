@@ -945,7 +945,9 @@ function attemptGeneration(config: MapConfig, landFraction: number, options: Map
 
     const labelPoint = pickLabelPoint(lattice, cells, memberCells, ring.points);
 
-    // Capital: deepest interior cell of the largest province.
+    // Capital province FALLBACK: deepest interior cell of the largest
+    // province. (The centroid-based selection below normally overrides it;
+    // this stays for degenerate countries with no valid candidate at all.)
     const provinceIds = provinceIdsOfCountry[countryIndex];
     let capitalProvinceId = provinceIds[0];
     let bestSize = -1;
@@ -1059,9 +1061,12 @@ function attemptGeneration(config: MapConfig, landFraction: number, options: Map
       return { position: interior, hostCell: seedCell };
     };
 
-    const createCity = (provinceId: string, isCapital: boolean): string => {
+    const createCity = (provinceId: string, isCapital: boolean, fixed?: { cell: number; point: MapPoint }): string => {
       const province = provinces[provinceId];
-      const { position, hostCell } = placeCity(provinceId);
+      // The capital may arrive with a FIXED placement (the centroid-based
+      // winner) — regular cities always go through the max-min spread.
+      const { position, hostCell } =
+        fixed !== undefined ? { position: fixed.point, hostCell: fixed.cell } : placeCity(provinceId);
       usedCityPositions.push(position);
       const cityId = `city_${cityCounter++}`;
       // areaRing is attached at model assembly (districts need every city of
@@ -1084,9 +1089,70 @@ function attemptGeneration(config: MapConfig, landFraction: number, options: Map
       return cityId;
     };
 
-    // Capital FIRST (deepest interior of the largest province, spread-aware):
-    // regular cities then arrange around it instead of stealing its spot.
-    const capitalCityId = createCity(capitalProvinceId, true);
+    // —— Capital placement (geography rules) ——
+    // The capital is the country's anchor, so it must sit GEOGRAPHICALLY
+    // CENTRAL and on dry, well-connected ground:
+    // 1. centroid = mean of the country's member-cell centroids — the ground
+    //    truth of "middle of the country", robust for irregular shapes;
+    // 2. candidates = every province's validated interior points (border
+    //    margin enforced, lake cells excluded — see candidatePoints), the
+    //    water-safe tier FIRST (no river centerline / shore), the tolerated
+    //    riverside tier only as fallback;
+    // 3. winner = candidate CLOSEST to the country centroid (ties broken by
+    //    deeper interior, then lower cell index — fully deterministic);
+    // 4. the winner's province becomes the capital province AND the winner's
+    //    exact point becomes the capital position (no re-spread).
+    // Roads connect automatically afterwards: the transport pass builds an
+    // MST over ALL cities and a railway spine over the capitals, so the
+    // capital is always on the main road + rail network by construction.
+    let capitalPlacement: { cell: number; point: MapPoint } | undefined;
+    {
+      let centroidX = 0;
+      let centroidZ = 0;
+      for (const cellIndex of memberCells) {
+        const point = cellCentroid(lattice, cells[cellIndex]);
+        centroidX += point.x;
+        centroidZ += point.z;
+      }
+      centroidX /= Math.max(1, memberCells.length);
+      centroidZ /= Math.max(1, memberCells.length);
+      const centroid: MapPoint = { x: centroidX, z: centroidZ };
+
+      let bestCell = -1;
+      let bestProvinceId = '';
+      let bestPoint: MapPoint | null = null;
+      let bestDepth = -1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const waterSafeTier of [true, false]) {
+        for (const provinceId of provinceIds) {
+          for (const candidate of candidatePoints(provinceId)) {
+            if (waterSafeTier && !isWaterSafe(candidate.cell, candidate.point)) continue;
+            const distance = Math.hypot(candidate.point.x - centroid.x, candidate.point.z - centroid.z);
+            const depth = distanceToRing(candidate.point, ring.points);
+            const better =
+              distance < bestDistance - 1e-9 ||
+              (Math.abs(distance - bestDistance) <= 1e-9 &&
+                (depth > bestDepth + 1e-9 ||
+                  (Math.abs(depth - bestDepth) <= 1e-9 && (bestCell < 0 || candidate.cell < bestCell))));
+            if (better) {
+              bestCell = candidate.cell;
+              bestProvinceId = provinceId;
+              bestPoint = candidate.point;
+              bestDepth = depth;
+              bestDistance = distance;
+            }
+          }
+        }
+        if (bestCell >= 0) break;
+      }
+      if (bestCell >= 0) {
+        capitalProvinceId = bestProvinceId;
+        capitalPlacement = { cell: bestCell, point: bestPoint as MapPoint };
+      }
+    }
+
+    // Regular cities then arrange around it instead of stealing its spot.
+    const capitalCityId = createCity(capitalProvinceId, true, capitalPlacement);
 
     // Regular cities: the count scales with province AREA (cellsPerCity cells
     // per city), so small provinces stay readable and large ones fill out.

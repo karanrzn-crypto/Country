@@ -117,6 +117,10 @@ export function pointInsideWithMargin(point: MapPoint, ring: MapRing, margin: nu
 /**
  * Nearest cell index for a world position (−1 outside the map grid).
  * Bounds are exact (0..columns·cellSize) by generator contract.
+ *
+ * ⚠️ ARITHMETIC approximation only — the drawn grid uses the JITTERED
+ * lattice, so this must never decide a selection on its own. Use
+ * `cellIndexAtPoint` (below) for every pick/hover path.
  */
 export function cellIndexAtWorld(
   point: MapPoint,
@@ -128,6 +132,68 @@ export function cellIndexAtWorld(
   const fz = point.z / cellSize;
   if (fx < 0 || fz < 0 || fx >= columns || fz >= rows) return -1;
   return Math.floor(fz) * columns + Math.floor(fx);
+}
+
+/**
+ * The 4 JITTERED lattice corners of a cell (NW, NE, SE, SW) — the exact
+ * polygon the grid layer draws and the selection overlays highlight. Pick,
+ * hover and renderer MUST all derive cell geometry from here (or from the
+ * identical `cellCornerPoints` helper) so a click inside a DRAWN cell can
+ * never resolve to a neighbor and the highlight always covers the whole
+ * visual cell. Single geometry source — no transform/scale/offset drift.
+ */
+export function latticeQuad(
+  latticePoints: readonly MapPoint[],
+  cellIndex: number,
+  columns: number
+): readonly [MapPoint, MapPoint, MapPoint, MapPoint] {
+  const cx = cellIndex % columns;
+  const cz = Math.floor(cellIndex / columns);
+  const stride = columns + 1;
+  const nw = cz * stride + cx;
+  return [
+    latticePoints[nw],
+    latticePoints[nw + 1],
+    latticePoints[nw + stride + 1],
+    latticePoints[nw + stride]
+  ];
+}
+
+/**
+ * Polygon-ACCURATE cell lookup: returns the cell whose JITTERED quad
+ * actually contains the point — the same geometry the grid layer draws.
+ *
+ * The lattice displaces interior points by up to (strictly less than) half
+ * a cell, so the containing quad always lies within the 3×3 neighborhood of
+ * the arithmetic cell: we test those ≤9 quads (cheap 4-gon ray casts) and
+ * fall back to the arithmetic index only on a degenerate numerical edge.
+ * This is what makes "click a cell → the WHOLE cell highlights" true by
+ * construction — picking and drawing share one coordinate system.
+ */
+export function cellIndexAtPoint(
+  model: StrategicMapModel,
+  point: MapPoint,
+  columns: number,
+  rows: number,
+  cellSize: number
+): number {
+  const seed = cellIndexAtWorld(point, columns, rows, cellSize);
+  if (seed < 0) return -1;
+  const cz = Math.floor(seed / columns);
+  const cx = seed - cz * columns;
+  for (let dz = -1; dz <= 1; dz++) {
+    const nz = cz + dz;
+    if (nz < 0 || nz >= rows) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx;
+      if (nx < 0 || nx >= columns) continue;
+      const candidate = nz * columns + nx;
+      if (pointInRing(point, latticeQuad(model.lattice, candidate, columns))) {
+        return candidate;
+      }
+    }
+  }
+  return seed;
 }
 
 /**
@@ -157,6 +223,9 @@ export function gridCellKeyAt(model: StrategicMapModel, cellIndex: number): stri
  * Feature classes NOT enabled in `eligibility` are skipped entirely, so a
  * hidden layer is never selectable and toggling a layer can never invalidate
  * the hierarchy beneath it. Ocean / unclaimed positions return all-null.
+ *
+ * The grid cell is resolved against the JITTERED lattice (the drawn
+ * geometry) — a click anywhere inside a drawn cell selects that whole cell.
  */
 export function pickAt(
   model: StrategicMapModel,
@@ -171,7 +240,7 @@ export function pickAt(
     readonly eligibility: PickEligibility;
   }
 ): PickResult {
-  const cellIndex = cellIndexAtWorld(point, options.columns, options.rows, options.cellSize);
+  const cellIndex = cellIndexAtPoint(model, point, options.columns, options.rows, options.cellSize);
 
   // —— 1-3. point features: KIND priority first (city > site > building),
   // then nearest distance — markers sharing a position with a city resolve
@@ -283,6 +352,9 @@ export function pickAt(
  * province/country context comes from the O(1) cell partitions instead of
  * ring ray-casting — safe to run on every pointer move. Returns null-shaped
  * results (not undefined) so callers can branch on fields directly.
+ *
+ * Uses the SAME lattice-accurate cell lookup as pickAt, so hover and click
+ * can never disagree about the cell under the pointer.
  */
 export function hoverAt(
   model: StrategicMapModel,
@@ -296,7 +368,7 @@ export function hoverAt(
     readonly eligibility: PickEligibility;
   }
 ): PickResult {
-  const cellIndex = cellIndexAtWorld(point, options.columns, options.rows, options.cellSize);
+  const cellIndex = cellIndexAtPoint(model, point, options.columns, options.rows, options.cellSize);
 
   let cityId: string | null = null;
   let bestDistance = options.pickRadius;
@@ -349,16 +421,30 @@ export function hoverAt(
   const gridCellKey =
     options.eligibility.grid && cellIndex >= 0 ? gridCellKeyAt(model, cellIndex) : null;
 
-  // Province/country context from the dense partitions — O(1), no rings.
+  // Province/country context — THE SAME ring tests pickAt uses. The O(1)
+  // cell partitions would disagree near province borders (the drawn rings
+  // carry the border's fractal detail), and hover contradicting the click
+  // target is exactly the selection inconsistency this module must prevent.
   let provinceId: string | null = null;
   let countryId: string | null = null;
   if (cityId !== null) {
     provinceId = model.cities[cityId].provinceId;
     countryId = model.cities[cityId].countryId;
-  } else if (cellIndex >= 0) {
-    provinceId = model.features.provinceOf[cellIndex] ?? null;
-    const owner = model.features.cellOwner[cellIndex];
-    countryId = owner >= 0 ? model.countryOrder[owner] ?? null : null;
+  } else {
+    for (const candidateCountryId of model.countryOrder) {
+      if (pointInRing(point, model.countries[candidateCountryId].ring.points)) {
+        countryId = candidateCountryId;
+        break;
+      }
+    }
+    if (countryId !== null) {
+      for (const candidateProvinceId of model.countries[countryId].provinceIds) {
+        if (pointInRing(point, model.provinces[candidateProvinceId].ring.points)) {
+          provinceId = candidateProvinceId;
+          break;
+        }
+      }
+    }
   }
 
   return { cityId, provinceId, countryId, gridCellKey, cellIndex, riverId, lakeId, siteId, buildingId: null };

@@ -711,11 +711,19 @@ export function buildGeography(input: GeographyBuildInput): GeographyBuildResult
       }
     }
 
-    // Provincial capital: highest-population member city (falls back to the
-    // country capital when it belongs to this province, else first city).
+    // Provincial capital: the COUNTRY capital when it belongs to this
+    // province (the anchor city leads its province by definition); otherwise
+    // the highest-population member city, else the first city.
     let capitalCityId: string | null = null;
+    for (const cityId of province.cityIds) {
+      if (input.cities[cityId]?.isCapital === true) {
+        capitalCityId = cityId;
+        break;
+      }
+    }
     let capitalPopulation = -1;
     for (const cityId of province.cityIds) {
+      if (capitalCityId !== null) break;
       const population = tree.cities[cityId] ?? 0;
       if (population > capitalPopulation) {
         capitalPopulation = population;
@@ -1164,4 +1172,64 @@ export function describeGridCell(
   const cellIndex = findGridCell(model, cellKey);
   if (cellIndex < 0) return null;
   return describeGridCellAt(model, cellIndex, columns, rows);
+}
+
+/** Complete per-province information shown on province selection (§3). */
+export interface ProvinceInfo {
+  readonly provinceId: string;
+  readonly name: string;
+  readonly countryId: string;
+  readonly capitalCityId: string | null;
+  readonly cityIds: readonly string[];
+  /** EXACTLY the member-city population sum (Part-3 invariant). */
+  readonly population: number;
+  readonly terrainType: string;
+  readonly areaCells: number;
+  readonly resourceIds: readonly string[];
+  readonly buildingIds: readonly string[];
+  readonly infrastructure: {
+    readonly roads: number;
+    readonly railways: number;
+    readonly airports: number;
+    readonly ports: number;
+  };
+  readonly neighborProvinceIds: readonly string[];
+  readonly developmentLevel: number;
+  readonly strategicValue: number;
+}
+
+/**
+ * Reads a province's full info block from the CENTRAL model — the single
+ * source of truth the UI renders and the tests assert against. No data is
+ * copied or re-derived here: every field is the model's own enriched value
+ * (MapGeography enrichment pass), so UI, tests and future systems always
+ * see identical numbers. Returns null for unknown ids (stale state heal).
+ */
+export function describeProvince(
+  model: StrategicMapModel,
+  provinceId: string
+): ProvinceInfo | null {
+  const province = model.provinces[provinceId];
+  if (province === undefined) return null;
+  return {
+    provinceId: province.id,
+    name: province.name,
+    countryId: province.countryId,
+    capitalCityId: province.capitalCityId,
+    cityIds: province.cityIds,
+    population: province.population,
+    terrainType: province.terrainType,
+    areaCells: province.areaCells,
+    resourceIds: province.resourceIds,
+    buildingIds: province.buildingIds,
+    infrastructure: {
+      roads: province.infrastructure.roads,
+      railways: province.infrastructure.railways,
+      airports: province.infrastructure.airports,
+      ports: province.infrastructure.ports
+    },
+    neighborProvinceIds: province.neighborProvinceIds,
+    developmentLevel: province.developmentLevel,
+    strategicValue: province.strategicValue
+  };
 }

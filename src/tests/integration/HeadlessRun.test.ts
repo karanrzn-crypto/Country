@@ -8,7 +8,9 @@ describe('Headless integration (renderer-independent core)', () => {
   it('runs hundreds of ticks without a renderer, staying valid', () => {
     const game = createTestGame({ seed: 1000 });
     game.runTicks(240);
-    expect(game.gameTime.tick).toBe(240);
+    // Hour mode: one 60-minute clock step per 6 sim ticks → 240 ticks = 40 steps = 2400 min.
+    expect(game.gameTime.tick).toBe(2400);
+    expect(game.gameTime.step).toBe(240);
     expect(validateGameState(game.gameState).valid).toBe(true);
     const counts = game.gameWorld.counts();
     expect(counts.active).toBeGreaterThan(0);
@@ -23,7 +25,10 @@ describe('Headless integration (renderer-independent core)', () => {
     // dt = 1/60 with a 30 Hz sim step → one tick every other frame.
     game.runFrames(120, 1 / 60);
     expect(seenPhases).toContain('tick');
-    expect(game.gameTime.tick).toBe(60);
+    // 120 frames × 1/60 s at a 30 Hz sim step → 60 sim steps;
+    // hour mode: 10 hour-steps → 600 game-minutes.
+    expect(game.gameTime.step).toBe(60);
+    expect(game.gameTime.tick).toBe(600);
     game.dispose();
   });
 

@@ -26,7 +26,9 @@ describe('SaveManager (versioned, validated, corruption-resistant)', () => {
     game2.init();
     game2.loadFromSlot('test');
 
-    expect(game2.gameTime.tick).toBe(48);
+    // Hour mode: 48 sim ticks → 8 hour-steps = 480 game-minutes.
+    expect(game2.gameTime.tick).toBe(480);
+    expect(game2.gameTime.step).toBe(48);
     expect(game2.gameState.economy.treasury.republic).toBe(game.gameState.economy.treasury.republic);
     expect(game2.stateHash()).toBe(game.stateHash());
     game.dispose();

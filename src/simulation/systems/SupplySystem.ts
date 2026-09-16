@@ -15,8 +15,9 @@ const MAX_SUPPLY_REACH = 3; // BFS depth from the capital region
 export class SupplySystem implements SimulationSystemDef {
   readonly id = 'supply';
 
-  tick(context: SystemContext, tick: TickInfo): void {
-    if (tick.tick % SUPPLY_INTERVAL_TICKS !== 0) return;
+  tick(context: SystemContext, _tick: TickInfo): void {
+    // Cadence counts SIM STEPS (save-restored), not clock minutes.
+    if (context.time.step % SUPPLY_INTERVAL_TICKS !== 0) return;
     const { state, events } = context;
 
     for (const countryId of Object.keys(state.world.countries)) {

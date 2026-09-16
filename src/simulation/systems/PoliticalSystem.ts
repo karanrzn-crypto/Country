@@ -15,8 +15,8 @@ const EXHAUSTION_PER_WAR_DAILY = 0.01;
 export class PoliticalSystem implements SimulationSystemDef {
   readonly id = 'political';
 
-  tick(context: SystemContext, tick: TickInfo): void {
-    if (tick.tick % 24 !== 0) return; // daily
+  tick(context: SystemContext, _tick: TickInfo): void {
+    if (context.time.step % 24 !== 0) return; // daily sim-step cadence
     const { state } = context;
 
     for (const [countryId, political] of Object.entries(state.political.countries)) {

@@ -56,7 +56,9 @@ describe('streaming & performance architecture', () => {
     const elapsedMs = performance.now() - startedAt;
     // 1000 ticks on a tiny world: foundation sanity bound (not a benchmark).
     expect(elapsedMs).toBeLessThan(5000);
-    expect(game.gameTime.tick).toBe(1000);
+    // Hour mode: 1000 sim ticks → floor(1000/6)=166 hour-steps = 9960 minutes.
+    expect(game.gameTime.step).toBe(1000);
+    expect(game.gameTime.tick).toBe(9960);
     game.dispose();
   });
 });

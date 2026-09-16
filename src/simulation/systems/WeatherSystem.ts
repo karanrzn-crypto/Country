@@ -8,12 +8,16 @@ const WEATHER_INTERVAL_TICKS = 12;
  * Deterministic weather simulation. Consumes the shared seeded RNG only on
  * interval ticks, so the RNG stream stays aligned across save/load and
  * identical seeds always produce identical weather.
+ *
+ * The interval counts SIM STEPS (TimeSystem.step — restored by saves), NOT
+ * clock minutes: the time mode defines how the clock moves, weather evolves
+ * on its own sim cadence — the two are deliberately decoupled.
  */
 export class WeatherSystem implements SimulationSystemDef {
   readonly id = 'weather';
 
-  tick(context: SystemContext, tick: TickInfo): void {
-    if (tick.tick % WEATHER_INTERVAL_TICKS !== 0) return;
+  tick(context: SystemContext, _tick: TickInfo): void {
+    if (context.time.step % WEATHER_INTERVAL_TICKS !== 0) return;
     const { state, rng, events } = context;
     const regions = Object.keys(state.world.regions);
     if (regions.length === 0) return;

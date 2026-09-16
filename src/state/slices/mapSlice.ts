@@ -19,6 +19,7 @@
 
 import type { CountryId, ProvinceId, CityId } from '../../world/types';
 import type { MapLayerId } from '../../world/map/MapLayers';
+import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { DEFAULT_LAYER_VISIBILITY } from '../../world/map/MapLayers';
 
 export interface MapCameraState {
@@ -142,4 +143,63 @@ export function featureSelectionOf(slice: MapSlice): MapFeatureSelection | null 
     return { kind: 'building', buildingId: slice.selectedBuildingId };
   }
   return null;
+}
+
+/**
+ * ONE human-readable summary of THE central selection — every panel that
+ * shows "what is selected" renders THIS string, so the general Selection
+ * row and the feature detail block can never disagree (they read the same
+ * state through the same function). Resolution order mirrors the pick
+ * priority: feature kinds first, then the country hierarchy (city ⇒
+ * province ⇒ country), then the empty state.
+ *
+ * Pure function over (state, model) — unit-testable without DOM.
+ */
+export function selectionSummary(slice: MapSlice, model: StrategicMapModel): string {
+  const feature = featureSelectionOf(slice);
+  if (feature !== null) {
+    switch (feature.kind) {
+      case 'grid': {
+        // `countryId#gridId` → "B7 (grid cell, CountryName)".
+        const separator = feature.gridKey.indexOf('#');
+        const countryId = feature.gridKey.slice(0, separator);
+        const gridId = feature.gridKey.slice(separator + 1);
+        const country = model.countries[countryId];
+        return `${gridId} (grid cell, ${country?.name ?? countryId})`;
+      }
+      case 'river': {
+        const river = model.features.rivers.find((candidate) => candidate.id === feature.riverId);
+        return river !== undefined ? `${river.name} (river)` : 'unknown river';
+      }
+      case 'lake': {
+        const lake = model.features.lakes.find((candidate) => candidate.id === feature.lakeId);
+        return lake !== undefined ? `${lake.name} (lake)` : 'unknown lake';
+      }
+      case 'site': {
+        const site = model.features.sites.find((candidate) => candidate.id === feature.siteId);
+        return site !== undefined ? `${site.kind} (site)` : 'unknown site';
+      }
+      case 'building': {
+        const building = model.features.buildings.find(
+          (candidate) => candidate.id === feature.buildingId
+        );
+        return building !== undefined ? `${building.kind} (building)` : 'unknown building';
+      }
+    }
+  }
+  if (slice.selectedCityId !== null) {
+    const city = model.cities[slice.selectedCityId];
+    if (city !== undefined) {
+      return `${city.name} (city, ${city.isCapital ? 'capital' : 'city'})`;
+    }
+  }
+  if (slice.selectedProvinceId !== null) {
+    const province = model.provinces[slice.selectedProvinceId];
+    if (province !== undefined) return `${province.name} (province)`;
+  }
+  if (slice.selectedCountryId !== null) {
+    const country = model.countries[slice.selectedCountryId];
+    if (country !== undefined) return `${country.name} (country)`;
+  }
+  return 'nothing — click the map';
 }

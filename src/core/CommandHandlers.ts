@@ -3,6 +3,7 @@ import type { EventBus } from '../events/EventBus';
 import type { UIManager } from '../ui/UIManager';
 import type { CommandBus } from './CommandBus';
 import type { PlayerModeId } from '../player/types';
+import type { TimeMode } from '../time/TimeSystem';
 
 type EntityId = string;
 
@@ -17,6 +18,7 @@ export interface CoreGameApi {
   setSpeed(speed: number): void;
   setSpeedStep(index: number): void;
   cycleSpeed(): void;
+  setTimeMode(mode: TimeMode): void;
   setPlayerMode(mode: PlayerModeId): boolean;
   focusChunk(chunkId: string): void;
   selectEntities(entityIds: readonly EntityId[]): void;
@@ -48,6 +50,7 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('game.setSpeed', (cmd) => game.setSpeed(cmd.speed));
   bus.register('game.setSpeedStep', (cmd) => game.setSpeedStep(cmd.index));
   bus.register('game.cycleSpeed', () => game.cycleSpeed());
+  bus.register('game.setTimeMode', (cmd) => game.setTimeMode(cmd.mode));
   bus.register('player.setMode', (cmd) => game.setPlayerMode(cmd.mode));
   bus.register('player.focusChunk', (cmd) => game.focusChunk(cmd.chunkId));
   bus.register('player.select', (cmd) => game.selectEntities(cmd.entityIds));

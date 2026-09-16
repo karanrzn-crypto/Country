@@ -18,6 +18,8 @@ export interface TickInfoPayload {
   readonly day: number;
   readonly hour: number;
   readonly minute: number;
+  /** GAME-MINUTES the clock advanced this tick (0 on cadence-only ticks). */
+  readonly minutesAdvanced: number;
 }
 
 export interface CalendarChangePayload {
@@ -38,9 +40,11 @@ export interface GameEventMap {
 
   // —— time ——
   'time.tick': TickInfoPayload;
+  'time.hourChanged': CalendarChangePayload;
   'time.dayChanged': CalendarChangePayload;
   'time.monthChanged': CalendarChangePayload;
   'time.yearChanged': CalendarChangePayload;
+  'time.modeChanged': { readonly mode: 'hour' | 'day' | 'month' | 'year'; readonly index: number };
 
   // —— world / streaming ——
   'world.chunkActivated': { readonly chunkId: string; readonly regionId: string; readonly lod: LODLevel };

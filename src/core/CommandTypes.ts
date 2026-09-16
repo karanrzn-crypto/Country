@@ -11,6 +11,7 @@ export type GameCommand =
   | { readonly type: 'game.setSpeed'; readonly speed: number }
   | { readonly type: 'game.setSpeedStep'; readonly index: number }
   | { readonly type: 'game.cycleSpeed' }
+  | { readonly type: 'game.setTimeMode'; readonly mode: 'hour' | 'day' | 'month' | 'year' }
   | { readonly type: 'player.setMode'; readonly mode: PlayerModeId }
   | { readonly type: 'player.focusChunk'; readonly chunkId: string }
   | { readonly type: 'player.select'; readonly entityIds: readonly EntityId[] }

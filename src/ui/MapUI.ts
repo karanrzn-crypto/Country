@@ -6,7 +6,8 @@ import { MAP_LAYERS, type MapLayerGroup, type MapLayerId } from '../world/map/Ma
 import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
-import { describeGridCell } from '../world/map/MapGeography';
+import { describeGridCell, describeProvince } from '../world/map/MapGeography';
+import { selectionSummary } from '../state/slices/mapSlice';
 import {
   buildBiomeLegend,
   buildElevationLegend,
@@ -240,7 +241,8 @@ export class MapUI {
 
     const signature =
       `${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
-      `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}`;
+      `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}` +
+      `|${map.selectedProvinceId}`;
     if (signature === this.featureSignature) return;
     this.featureSignature = signature;
     for (const row of this.featureRows) row.remove();
@@ -283,6 +285,40 @@ export class MapUI {
     const yesNo = (value: boolean): string => (value ? '✓' : '✗');
 
     let featureVisible = false;
+
+    // —— PROVINCE (independent province layer: clickable + info block) ——
+    // Province selection lives in the SAME central state as every other
+    // feature kind; the block reads the central model via describeProvince.
+    if (map.selectedProvinceId !== null && map.selectedCityId === null && map.selectedGridKey === null) {
+      const info = describeProvince(model, map.selectedProvinceId);
+      if (info !== null) {
+        featureVisible = true;
+        this.featureTitle?.setText(`PROVINCE — ${info.name}`);
+        addRow('Province', info.name);
+        addRow('Country', model.countries[info.countryId]?.name ?? info.countryId);
+        addRow('Capital', info.capitalCityId !== null ? (model.cities[info.capitalCityId]?.name ?? info.capitalCityId) : 'None');
+        addChips(
+          'Cities',
+          info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
+        );
+        addRow('Population', formatCompact(info.population));
+        addRow('Terrain', info.terrainType);
+        addRow('Area', `${info.areaCells} cells`);
+        addChips('Resources', [...info.resourceIds]);
+        addRow('Buildings', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'None');
+        addRow(
+          'Infrastructure',
+          `Roads ${info.infrastructure.roads} · Railways ${info.infrastructure.railways} · ` +
+            `Airports ${info.infrastructure.airports} · Ports ${info.infrastructure.ports}`
+        );
+        addRow('Development', `${Math.round(info.developmentLevel * 100)}%`);
+        addRow('Strategic Value', String(info.strategicValue));
+        addChips(
+          'Neighbors',
+          info.neighborProvinceIds.map((neighborId) => model.provinces[neighborId]?.name ?? neighborId)
+        );
+      }
+    }
 
     // —— GRID CELL (the spec's exact block; empty cells say None / 0) ——
     if (map.selectedGridKey !== null) {
@@ -485,10 +521,6 @@ export class MapUI {
       selectedCountryId !== null ? model.countries[selectedCountryId] : undefined;
     const countryState: CountryState | undefined =
       selectedCountryId !== null ? countrySlice[selectedCountryId] : undefined;
-    const province =
-      state.selectedProvinceId !== null ? model.provinces[state.selectedProvinceId] : undefined;
-    const city = state.selectedCityId !== null ? model.cities[state.selectedCityId] : undefined;
-
     const hasDetail = country !== undefined && countryState !== undefined;
     this.detailContainer?.setVisible(hasDetail);
     this.basicContainer.setVisible(!hasDetail);
@@ -537,14 +569,10 @@ export class MapUI {
       Country: country !== undefined ? country.name : '—',
       Provinces: country !== undefined ? String(country.provinceIds.length) : '—',
       Cities: country !== undefined ? String(country.cityIds.length) : '—',
-      Selection:
-        city !== undefined
-          ? `${city.name} (city, ${city.isCapital ? 'capital' : 'city'})`
-          : province !== undefined
-            ? `${province.name} (province)`
-            : country !== undefined
-              ? `${country.name} (country)`
-              : 'nothing — click the map'
+      // ONE central summary for EVERY selection kind — the same state (and
+      // the same resolver) the feature detail block uses, so the panels can
+      // never contradict each other.
+      Selection: selectionSummary(state, model)
     };
     for (const row of this.infoRows) {
       row.value.setText(values[row.label] ?? '');

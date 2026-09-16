@@ -3,6 +3,7 @@ import type { UIElement } from './adapter/UIDomAdapter';
 import { buildHudModel } from './HUDModel';
 import { formatSpeedLabel } from './HUDModel';
 import { formatCalendarElapsed } from '../time/Calendar';
+import type { TimeMode } from '../time/TimeSystem';
 import type { PlayerModeSystem } from '../player/PlayerModeSystem';
 import type { CommandBus } from '../core/CommandBus';
 
@@ -19,6 +20,7 @@ export class HUDSystem {
   private readonly timeBar: UIElement;
   private readonly dateLabel: UIElement;
   private readonly pauseButton: UIElement;
+  private readonly modeButtons: UIElement[] = [];
   private readonly speedButtons: UIElement[] = [];
   private timeBarBuilt = false;
 
@@ -28,18 +30,19 @@ export class HUDSystem {
     private readonly modes: PlayerModeSystem,
     private readonly commands: CommandBus
   ) {
-    // —— time bar (top-center): date + play/pause + speed steps ——
+    // —— time bar (top-center): date + MODE segment + play/pause + speeds ——
     this.timeBar = adapter.create('div', 'time-bar');
     this.dateLabel = adapter.create('span', 'time-date');
     this.timeBar.appendChild(this.dateLabel);
+    // Pause is created NOW but appended on first update, AFTER the mode
+    // segment (button order: date · Hour/Day/Month/Year · pause · speeds).
     this.pauseButton = adapter.create('button', 'time-btn pause');
     this.pauseButton.onClick(() => {
       this.commands.send({ type: 'game.togglePause' });
     });
-    this.timeBar.appendChild(this.pauseButton);
     container.appendChild(this.timeBar);
-    // Speed buttons are added on first update — they are generated from the
-    // data-driven speed-step list owned by the TimeSystem.
+    // Mode + speed buttons are added on first update — they are generated
+    // from the data-driven lists owned by the TimeSystem.
 
     // —— status panel (bottom-left) ——
     this.panel = adapter.create('div', 'hud');
@@ -60,10 +63,26 @@ export class HUDSystem {
     }
   }
 
-  /** Builds the speed-step buttons once, from the TimeSystem's own list. */
-  private ensureSpeedButtons(context: SystemContext): void {
+  /** Builds the mode + speed buttons once, from the TimeSystem's own lists. */
+  private ensureTimeBarButtons(context: SystemContext): void {
     if (this.timeBarBuilt) return;
     this.timeBarBuilt = true;
+    // —— mode segment: the UNIT the clock advances in ——
+    const modeLabels: Record<TimeMode, string> = { hour: 'Hour', day: 'Day', month: 'Month', year: 'Year' };
+    for (const mode of context.time.timeModeList) {
+      const button = this.adapter.create('button', 'time-btn mode');
+      button.setText(modeLabels[mode]);
+      button.setAttribute('title', `Advance by ${modeLabels[mode].toLowerCase()}`);
+      const modeValue = mode;
+      button.onClick(() => {
+        this.commands.send({ type: 'game.setTimeMode', mode: modeValue });
+      });
+      this.timeBar.appendChild(button);
+      this.modeButtons.push(button);
+    }
+    // Pause follows the mode segment (appended here — see constructor).
+    this.timeBar.appendChild(this.pauseButton);
+    // —— speed steps: how FAST the chosen unit passes (separate from mode) ——
     const steps = context.time.speedStepList;
     for (let index = 0; index < steps.length; index++) {
       const button = this.adapter.create('button', 'time-btn speed');
@@ -79,7 +98,7 @@ export class HUDSystem {
 
   update(context: SystemContext): void {
     const state = context.state;
-    this.ensureSpeedButtons(context);
+    this.ensureTimeBarButtons(context);
     const modeName = state.player.mode !== null ? this.modes.modeDef(state.player.mode).name : '—';
     const model = buildHudModel(state, modeName, context.world.counts());
     const values = [model.mode, model.treasury, model.population, model.chunks];
@@ -88,11 +107,17 @@ export class HUDSystem {
     }
 
     // —— time bar reflects the clock (read-only view of the source of truth) ——
-    // Campaign-elapsed form of the central clock: "Year 1 — Month 1 — Day 1 — 08:00".
+    // Campaign-elapsed form of the central clock: "Year 1 — January — Day 1 — 08:00".
     this.dateLabel.setText(formatCalendarElapsed(context.time.date, context.time.startDate));
     const paused = context.time.isPaused;
     this.pauseButton.setText(paused ? 'Play' : 'Pause');
     this.pauseButton.setClass(paused ? 'time-btn pause stopped' : 'time-btn pause');
+    const activeModeIndex = context.time.timeModeIndex;
+    for (let index = 0; index < this.modeButtons.length; index++) {
+      this.modeButtons[index].setClass(
+        index === activeModeIndex ? 'time-btn mode on' : 'time-btn mode'
+      );
+    }
     const activeIndex = context.time.speedStepIndex;
     for (let index = 0; index < this.speedButtons.length; index++) {
       this.speedButtons[index].setClass(

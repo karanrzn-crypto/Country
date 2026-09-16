@@ -18,6 +18,10 @@ export class CountryLayer {
 
   private readonly countryMaterials = new Map<string, THREE.MeshBasicMaterial>();
   private readonly baseColors = new Map<string, THREE.Color>();
+  /** Per-province materials — ONE selected province is brightened at a time. */
+  private readonly provinceMaterials = new Map<string, THREE.MeshBasicMaterial>();
+  private readonly provinceBaseColors = new Map<string, THREE.Color>();
+  private selectedProvinceId: string | null = null;
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
 
@@ -49,18 +53,22 @@ export class CountryLayer {
       this.countryGroup.add(countryMesh);
     });
 
-    const provinceMaterial = new THREE.MeshBasicMaterial({
-      color: theme.provinceFill,
-      transparent: true,
-      opacity: theme.provinceFillOpacity,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
-    this.materials.push(provinceMaterial);
     for (const province of Object.values(model.provinces) as readonly MapProvince[]) {
       const geometry = triangulateRing(province.ring.points, 0.6);
       this.geometries.push(geometry);
-      const mesh = new THREE.Mesh(geometry, provinceMaterial);
+      // Per-province material: the selection highlight recolors ONE province
+      // without touching any other (same pattern as the country fills).
+      const material = new THREE.MeshBasicMaterial({
+        color: theme.provinceFill,
+        transparent: true,
+        opacity: theme.provinceFillOpacity,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      this.materials.push(material);
+      this.provinceMaterials.set(province.id, material);
+      this.provinceBaseColors.set(province.id, new THREE.Color(theme.provinceFill));
+      const mesh = new THREE.Mesh(geometry, material);
       mesh.renderOrder = 3;
       this.provinceGroup.add(mesh);
     }
@@ -80,6 +88,32 @@ export class CountryLayer {
         material.color.copy(base);
       }
     }
+    // Country highlight and province highlight share the tint pipeline —
+    // re-apply the province choice so the newer call never resets it.
+    this.applyProvinceHighlight(theme);
+  }
+
+  /**
+   * Province-layer highlight (§3): brightens the SELECTED province's fill
+   * (same selected-tint pipeline as countries). Material recolor only —
+   * no geometry is mutated, no GPU object is created (renderer as view).
+   */
+  setSelectedProvince(provinceId: string | null, theme: MapTheme): void {
+    if (provinceId === this.selectedProvinceId) return;
+    this.selectedProvinceId = provinceId;
+    this.applyProvinceHighlight(theme);
+  }
+
+  private applyProvinceHighlight(theme: MapTheme): void {
+    const tint = new THREE.Color(theme.selectedTint);
+    for (const [provinceId, material] of this.provinceMaterials) {
+      const base = this.provinceBaseColors.get(provinceId) as THREE.Color;
+      if (provinceId === this.selectedProvinceId) {
+        material.color.copy(base).lerp(tint, Math.min(1, theme.selectedOpacity * 1.6));
+      } else {
+        material.color.copy(base);
+      }
+    }
   }
 
   dispose(): void {
@@ -87,6 +121,10 @@ export class CountryLayer {
     for (const material of this.materials) material.dispose();
     this.geometries.length = 0;
     this.materials.length = 0;
+    this.countryMaterials.clear();
+    this.baseColors.clear();
+    this.provinceMaterials.clear();
+    this.provinceBaseColors.clear();
     this.landGroup.clear();
     this.countryGroup.clear();
     this.provinceGroup.clear();

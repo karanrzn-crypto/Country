@@ -54,9 +54,9 @@ describe('EventBus', () => {
     const bus = new EventBus();
     let count = 0;
     const off = bus.on('time.tick', () => count++);
-    bus.emit('time.tick', { tick: 1, year: 1, month: 1, day: 1, hour: 0, minute: 0 });
+    bus.emit('time.tick', { tick: 1, year: 1, month: 1, day: 1, hour: 0, minute: 0, minutesAdvanced: 1 });
     off();
-    bus.emit('time.tick', { tick: 2, year: 1, month: 1, day: 1, hour: 1, minute: 15 });
+    bus.emit('time.tick', { tick: 2, year: 1, month: 1, day: 1, hour: 1, minute: 15, minutesAdvanced: 0 });
     expect(count).toBe(1);
   });
 

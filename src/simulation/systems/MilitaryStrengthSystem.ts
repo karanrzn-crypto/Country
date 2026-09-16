@@ -25,8 +25,9 @@ interface UnitLike {
 export class MilitaryStrengthSystem implements SimulationSystemDef {
   readonly id = 'military_strength';
 
-  tick(context: SystemContext, tick: TickInfo): void {
-    if (tick.tick % STRENGTH_INTERVAL_TICKS !== 0) return;
+  tick(context: SystemContext, _tick: TickInfo): void {
+    // Cadence counts SIM STEPS (save-restored), not clock minutes.
+    if (context.time.step % STRENGTH_INTERVAL_TICKS !== 0) return;
     const { state, data } = context;
     const units = state.military.units as Record<string, UnitLike>;
 

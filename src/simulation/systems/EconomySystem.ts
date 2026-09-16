@@ -15,7 +15,10 @@ export class EconomySystem implements SimulationSystemDef {
 
   tick(context: SystemContext, tick: TickInfo): void {
     const { state, config, data, events } = context;
-    const dayFraction = tick.minutesPerTick / (60 * 24);
+    // Mode-aware: the clock advances one MODE UNIT per cadence boundary, so
+    // rates accrue from the MINUTES this tick actually advanced (0 on
+    // non-boundary ticks) — per-game-day economics stay exact in every mode.
+    const dayFraction = tick.minutesAdvanced / (60 * 24);
     const economy = state.economy;
 
     // —— factory production ——

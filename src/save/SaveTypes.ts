@@ -24,8 +24,14 @@ export interface SaveMeta {
 
 export interface SaveRuntimeSnapshot {
   readonly tick: number;
+  /** Sim-step counter — interval cadences continue identically after load. */
+  readonly stepCounter?: number;
   readonly rngState: number;
   readonly ids: IdGeneratorState;
+  /** Time mode at save time (optional — older saves predate it). */
+  readonly timeMode?: 'hour' | 'day' | 'month' | 'year';
+  /** Speed step index at save time (optional — older saves predate it). */
+  readonly speedStepIndex?: number;
 }
 
 export interface SaveData {

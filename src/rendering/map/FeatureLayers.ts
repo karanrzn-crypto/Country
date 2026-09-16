@@ -709,15 +709,15 @@ export class GridLayer {
     }
   }
 
-  /** World-space lattice corners of a cell (nw, ne, se, sw). */
+  /**
+   * World-space lattice corners of a cell (nw, ne, se, sw).
+   * Deliberately THE SAME shared helper the merged grid lines, lakes and
+   * pick geometry derive from (`cellCornerPoints` / `latticeQuad` on the
+   * model's lattice) — the selection highlight therefore covers EXACTLY the
+   * drawn cell: no offset, no scale, no partial fill, ever.
+   */
   private cornerLatticeOf(cellIndex: number): readonly MapPoint[] {
-    const stride = this.columns + 1;
-    const cz = Math.floor(cellIndex / this.columns);
-    const cx = cellIndex - cz * this.columns;
-    const nw = cz * stride + cx;
-    const lattice = this.modelLattice;
-    const at = (index: number): MapPoint => lattice[index] ?? { x: 0, z: 0 };
-    return [at(nw), at(nw + 1), at(nw + stride + 1), at(nw + stride)];
+    return cellCornerPoints(cellIndex, this.modelLattice, this.columns);
   }
 
   dispose(): void {

@@ -216,6 +216,9 @@ export class StrategicMapRenderer {
       rivers: riverLayer.group,
       lakes: lakeLayer.group,
       grid: gridLayer.group,
+      // ONE user-facing 'Provinces' layer: province border lines AND the
+      // per-province fills (with the selection highlight) live together —
+      // toggling it hides/shows the whole province presentation.
       provinceBorders: this.borderLayer.provinceGroup,
       cityAreas: this.cityLayer.cityAreasGroup,
       countryBorders: this.borderLayer.countryGroup,
@@ -237,6 +240,8 @@ export class StrategicMapRenderer {
       labels: this.labelLayer.group
     };
     groups.countryBorders.add(this.borderLayer.coastGroup);
+    // Province fills ride on the 'Provinces' layer group (see groups table).
+    groups.provinceBorders.add(this.countryLayer.provinceGroup);
 
     this.root.add(this.ocean);
     for (const layerId of MAP_LAYER_ORDER) {
@@ -309,6 +314,7 @@ export class StrategicMapRenderer {
     if (selectionKey !== this.lastSelectionKey) {
       this.lastSelectionKey = selectionKey;
       this.countryLayer.setSelection(map.selectedCountryId, this.theme);
+      this.countryLayer.setSelectedProvince(map.selectedProvinceId, this.theme);
       this.cityLayer.setSelectedCity(map.selectedCityId, this.model);
       this.borderLayer.setSelectedCountry(map.selectedCountryId, this.model, this.theme);
       const gridCell =

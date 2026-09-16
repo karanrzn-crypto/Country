@@ -38,24 +38,27 @@ describe('Game clock: pause / resume / speed steps', () => {
     game.dispose();
   });
 
-  it('every tick advances time exactly once (no double-advance)', () => {
+  it('every tick advances the step counter exactly once (no double-advance)', () => {
     const game = createTestGame({ seed: 77 });
     let tickEvents = 0;
     game.gameEvents.on('time.tick', () => tickEvents++);
     game.runFrames(90);
-    expect(tickEvents).toBe(game.gameTime.tick);
+    // One time.tick heartbeat per sim step, and the clock is EXACTLY
+    // Hour-mode math over that step count: 60 min per 6 steps.
+    expect(tickEvents).toBe(game.gameTime.step);
+    expect(game.gameTime.tick).toBe(60 * Math.floor(game.gameTime.step / 6));
     game.dispose();
   });
 
   it('setSpeedStep command selects a data-driven step through the bus', () => {
     const game = createTestGame({ seed: 77 });
-    expect(game.gameTime.speedStepList).toEqual([1, 2, 5, 10]);
+    expect(game.gameTime.speedStepList).toEqual([1, 5, 10]);
     game.gameCommands.send({ type: 'game.setSpeedStep', index: 2 });
     game.frame(1 / 60);
-    expect(game.gameTime.speed).toBe(5);
+    expect(game.gameTime.speed).toBe(10);
     game.gameCommands.send({ type: 'game.cycleSpeed' });
     game.frame(1 / 60);
-    expect(game.gameTime.speed).toBe(10);
+    expect(game.gameTime.speed).toBe(1); // wraps back to the slowest
     game.dispose();
   });
 
@@ -85,15 +88,16 @@ describe('Game clock: pause / resume / speed steps', () => {
     game.dispose();
   });
 
-  it('simulated time steps MINUTE by MINUTE with exact hour/day rollover', () => {
+  it('HOUR mode steps hour by hour with exact midnight rollover', () => {
     const game = createTestGame({ seed: 77 });
-    game.runTicks(61); // 61 game-minutes after 2030-01-01 00:00
+    // Hour cadence: one 60-minute step per 6 sim ticks → 61 ticks = 10 steps.
+    game.runTicks(61);
     const date = game.gameTime.date;
-    expect(date.hour).toBe(1);
-    expect(date.minute).toBe(1);
+    expect(date.hour).toBe(10);
+    expect(date.minute).toBe(0);
     expect(date.day).toBe(1);
-    // Run to exactly midnight: 24 h = 1440 min → day 2, 00:00.
-    game.runTicks(1440 - 61);
+    // Run to exactly midnight: 24 h = 24 steps = 144 ticks → day 2, 00:00.
+    game.runTicks(144 - 61);
     const midnight = game.gameTime.date;
     expect(midnight.day).toBe(2);
     expect(midnight.hour).toBe(0);

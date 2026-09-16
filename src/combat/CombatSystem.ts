@@ -84,7 +84,9 @@ export class CombatSystem implements PhaseSystem {
   update(context: SystemContext, update: SystemUpdate): void {
     if (update.kind !== 'tick' || !this.enabled) return;
     if (!context.config.combat.enabled) return;
-    const tickNumber = update.tick.tick;
+    // Combat cadence (respawns, cooldowns, engagement timeouts) counts SIM
+    // STEPS — save-restored — never clock minutes (mode-dependent).
+    const tickNumber = context.time.step;
 
     // —— respawns ——
     for (const entityId of this.healths.processRespawns(tickNumber)) {

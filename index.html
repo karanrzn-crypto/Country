@@ -30,7 +30,7 @@
       .hud .hud-key { color: #8a94a6; }
       .hud .hud-value { color: #e8edf5; }
 
-      /* —— time bar (top-center): date + play/pause + speed steps —— */
+      /* —— time bar (top-center): date + mode segment + play/pause + speeds —— */
       .time-bar {
         position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
         display: flex; align-items: center; gap: 5px;
@@ -49,6 +49,8 @@
       }
       .time-btn:hover { background: #243149; border-color: #4a5f88; }
       .time-btn.on { border-color: #4a7f4a; color: #b8e6b8; background: #1d2b1d; font-weight: 700; }
+      /* Mode segment (Hour/Day/Month/Year): blue accent, distinct from speed. */
+      .time-btn.mode.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
       .time-btn.pause.stopped { border-color: #8a6d2f; color: #ffd27f; background: #2b2312; font-weight: 700; }
 
       /* —— biome legend (right edge, visible only while the layer is on) —— */

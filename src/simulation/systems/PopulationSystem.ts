@@ -16,9 +16,10 @@ const ABSTRACT_UPDATE_INTERVAL_TICKS = 720; // monthly — cheap aggregate path
 export class PopulationSystem implements SimulationSystemDef {
   readonly id = 'population';
 
-  tick(context: SystemContext, tick: TickInfo): void {
-    const dailyUpdate = tick.tick % 24 === 0;
-    const abstractUpdate = tick.tick % ABSTRACT_UPDATE_INTERVAL_TICKS === 0;
+  tick(context: SystemContext, _tick: TickInfo): void {
+    // Cadences count SIM STEPS (save-restored), not clock minutes.
+    const dailyUpdate = context.time.step % 24 === 0;
+    const abstractUpdate = context.time.step % ABSTRACT_UPDATE_INTERVAL_TICKS === 0;
     if (!dailyUpdate && !abstractUpdate) return;
     const { state, world, events } = context;
 

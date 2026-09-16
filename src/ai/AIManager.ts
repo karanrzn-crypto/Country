@@ -71,7 +71,9 @@ export class AIManager implements PhaseSystem {
   update(context: SystemContext, update: SystemUpdate): void {
     if (update.kind !== 'tick' || !this.enabled) return;
     const interval = context.config.ai.decisionIntervalTicks;
-    if (update.tick.tick % interval !== 0) return;
+    // AI cadence counts SIM STEPS (save-restored), not clock minutes.
+    const step = context.time.step;
+    if (step % interval !== 0) return;
 
     for (const agent of this.agents.values()) {
       const metrics = computeFactionMetrics(context.state, agent.factionId);
@@ -88,16 +90,16 @@ export class AIManager implements PhaseSystem {
       }
 
       // Standing orders per selected strategy (executors arrive in Phase 2).
-      if (agent.currentStrategyId !== null && update.tick.tick - agent.lastDecisionTick >= interval) {
+      if (agent.currentStrategyId !== null && step - agent.lastDecisionTick >= interval) {
         const strategy = this.strategies.get(agent.currentStrategyId);
         this.orderSystem.issue(
           agent.factionId,
           `execute_strategy:${strategy.id}`,
           {},
           strategy.priority,
-          update.tick.tick
+          step
         );
-        agent.lastDecisionTick = update.tick.tick;
+        agent.lastDecisionTick = step;
       }
     }
   }
