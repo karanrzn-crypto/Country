@@ -24,6 +24,7 @@
         background: rgba(13, 18, 28, 0.85);
         border: 1px solid #2a3446; border-radius: 6px;
         padding: 8px 12px; min-width: 260px;
+        z-index: 20; /* HUD stays above the info panel where they could meet */
       }
       .hud .hud-title { color: #7fb2ff; font-weight: 700; letter-spacing: 1px; }
       .hud .hud-row { display: flex; justify-content: space-between; gap: 16px; }
@@ -37,6 +38,7 @@
         background: rgba(13, 18, 28, 0.88);
         border: 1px solid #2a3446; border-radius: 6px;
         padding: 6px 10px;
+        z-index: 30; /* never buried by the info panel or other map UI */
       }
       .time-date {
         color: #e8edf5; font-weight: 700; letter-spacing: 1px; margin-right: 6px;
@@ -126,10 +128,26 @@
 
       .map-info-panel {
         position: absolute; top: 12px; left: 12px;
+        /* Responsive width: capped fraction of the viewport — the panel can
+           never smother the map (§G). Content longer than the box wraps or
+           scrolls INSIDE the panel. */
+        width: min(320px, 34vw);
+        min-width: 232px;
+        max-width: min(340px, 44vw);
         background: rgba(13, 18, 28, 0.88);
         border: 1px solid #2a3446; border-radius: 6px;
-        padding: 10px 14px; min-width: 280px;
-        max-height: calc(100% - 24px); overflow: auto;
+        padding: 10px 14px;
+        /* Height limited: leaves the bottom HUD clear; long content scrolls. */
+        max-height: calc(100% - 148px);
+        overflow: auto;
+      }
+      @media (max-width: 1000px) {
+        /* The time bar wraps to two rows at this width — start the panel
+           BELOW it so the two never overlap (Time Bar always fully usable). */
+        .map-info-panel { width: min(300px, 46vw); top: 124px; max-height: calc(100% - 262px); }
+      }
+      @media (max-width: 700px) {
+        .map-info-panel { width: min(270px, 58vw); padding: 8px 10px; top: 124px; max-height: calc(100% - 242px); }
       }
       .map-info-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
       .map-info-flag { width: 30px; height: 20px; border: 1px solid #2a3446; border-radius: 2px; display: block; flex: 0 0 auto; }
@@ -155,9 +173,9 @@
       .map-country-row { display: flex; align-items: center; gap: 8px; }
       .map-row-flag { width: 24px; height: 16px; border: 1px solid #2a3446; border-radius: 2px; display: block; flex: 0 0 auto; }
       .map-info-title { color: #7fb2ff; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
-      .map-info-row { display: flex; justify-content: space-between; gap: 16px; }
-      .map-info-key { color: #8a94a6; }
-      .map-info-value { color: #e8edf5; font-weight: 600; }
+      .map-info-row { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+      .map-info-key { color: #8a94a6; flex: 0 0 auto; }
+      .map-info-value { color: #e8edf5; font-weight: 600; text-align: right; overflow-wrap: anywhere; min-width: 0; }
       .map-layers-title { color: #8a94a6; margin-top: 8px; font-size: 11px; letter-spacing: 1px; }
       .map-layers { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; max-width: 300px; }
       .map-layer-toggle {

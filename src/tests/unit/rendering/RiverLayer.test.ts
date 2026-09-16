@@ -4,7 +4,8 @@ import {
   RiverLayer,
   LakeLayer,
   riverWidthAt,
-  buildRiverRibbons
+  buildRiverRibbons,
+  riverDrawnRuns
 } from '../../../rendering/map/FeatureLayers';
 import { SURFACE_FILL_Y } from '../../../rendering/map/MapSurface';
 import { generateStrategicMap } from '../../../world/map/MapGenerator';
@@ -49,11 +50,17 @@ describe('river ribbons (natural water in every surface mode)', () => {
     const riverMesh = layer.group.children[0] as THREE.Mesh;
     expect(riverMesh?.isMesh).toBe(true);
     const geometry = riverMesh.geometry as THREE.BufferGeometry;
-    // Merged: exactly (points − 1) segments × 6 vertices per river.
-    const expectedVertices = model.features.rivers.reduce(
-      (sum, river) => sum + (river.polyline.length - 1) * 6,
-      0
-    );
+    // Merged: exactly Σ over rivers of Σ drawn-run spans × 6 vertices
+    // (rivers are CLIPPED where they run through lakes — the drawn spans
+    // are the runs of non-lake cells extended by one shore point each).
+    const lakeCells = new Set<number>();
+    for (const lake of model.features.lakes) {
+      for (const cellIndex of lake.cells) lakeCells.add(cellIndex);
+    }
+    const expectedVertices = model.features.rivers.reduce((sum, river) => {
+      const spans = riverDrawnRuns(river, lakeCells);
+      return sum + spans.reduce((s, [a, b]) => s + (b - a) * 6, 0);
+    }, 0);
     const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
     expect(pos.count).toBe(expectedVertices);
     // Every vertex floats just above the surface plane (terrain-following).

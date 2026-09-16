@@ -22,6 +22,16 @@ export class CountryLayer {
   private readonly provinceMaterials = new Map<string, THREE.MeshBasicMaterial>();
   private readonly provinceBaseColors = new Map<string, THREE.Color>();
   private selectedProvinceId: string | null = null;
+  /** Ring polygons by province id — source for the selection overlay. */
+  private readonly provinceRings = new Map<string, MapProvince>();
+  /**
+   * Dedicated SELECTION overlay above every map level (depthTest off) —
+   * the per-province fill lives under the opaque biomes/terrain surface,
+   * so the highlight would be invisible there. This mesh guarantees the
+   * selected province reads clearly in EVERY surface mode (§D).
+   */
+  private readonly provinceHighlightMesh: THREE.Mesh;
+  private readonly provinceHighlightMaterial: THREE.MeshBasicMaterial;
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
 
@@ -68,10 +78,28 @@ export class CountryLayer {
       this.materials.push(material);
       this.provinceMaterials.set(province.id, material);
       this.provinceBaseColors.set(province.id, new THREE.Color(theme.provinceFill));
+      this.provinceRings.set(province.id, province);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.renderOrder = 3;
       this.provinceGroup.add(mesh);
     }
+
+    // Selection overlay: one reusable mesh ABOVE the surface (depthTest
+    // off, high render order); geometry swapped only on selection change.
+    this.provinceHighlightMaterial = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(theme.provinceSelectColor),
+      transparent: true,
+      opacity: theme.provinceSelectOpacity,
+      depthWrite: false,
+      depthTest: false,
+      side: THREE.DoubleSide
+    });
+    this.materials.push(this.provinceHighlightMaterial);
+    this.provinceHighlightMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.provinceHighlightMaterial);
+    this.provinceHighlightMesh.renderOrder = 13;
+    this.provinceHighlightMesh.visible = false;
+    this.provinceHighlightMesh.frustumCulled = false;
+    this.provinceGroup.add(this.provinceHighlightMesh);
   }
 
   /**
@@ -88,32 +116,37 @@ export class CountryLayer {
         material.color.copy(base);
       }
     }
-    // Country highlight and province highlight share the tint pipeline —
-    // re-apply the province choice so the newer call never resets it.
-    this.applyProvinceHighlight(theme);
   }
 
   /**
-   * Province-layer highlight (§3): brightens the SELECTED province's fill
-   * (same selected-tint pipeline as countries). Material recolor only —
-   * no geometry is mutated, no GPU object is created (renderer as view).
+   * Province-layer highlight (§D): the dedicated overlay mesh shows the
+   * selected province's EXACT ring polygon above every map level; the faint
+   * per-province fill keeps its base color (the overlay carries the accent).
+   * Material/geometry swap only — no per-frame work.
    */
   setSelectedProvince(provinceId: string | null, theme: MapTheme): void {
     if (provinceId === this.selectedProvinceId) return;
     this.selectedProvinceId = provinceId;
-    this.applyProvinceHighlight(theme);
-  }
-
-  private applyProvinceHighlight(theme: MapTheme): void {
-    const tint = new THREE.Color(theme.selectedTint);
-    for (const [provinceId, material] of this.provinceMaterials) {
-      const base = this.provinceBaseColors.get(provinceId) as THREE.Color;
-      if (provinceId === this.selectedProvinceId) {
-        material.color.copy(base).lerp(tint, Math.min(1, theme.selectedOpacity * 1.6));
-      } else {
-        material.color.copy(base);
-      }
+    const mesh = this.provinceHighlightMesh;
+    const previous = mesh.geometry;
+    if (provinceId === null) {
+      mesh.visible = false;
+      mesh.geometry = new THREE.BufferGeometry();
+      previous.dispose();
+      return;
     }
+    const province = this.provinceRings.get(provinceId);
+    if (province === undefined) {
+      mesh.visible = false;
+      mesh.geometry = new THREE.BufferGeometry();
+      previous.dispose();
+      return;
+    }
+    this.provinceHighlightMaterial.color.set(theme.provinceSelectColor);
+    this.provinceHighlightMaterial.opacity = theme.provinceSelectOpacity;
+    mesh.geometry = triangulateRing(province.ring.points, 1.2);
+    previous.dispose();
+    mesh.visible = true;
   }
 
   dispose(): void {

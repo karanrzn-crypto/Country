@@ -20,6 +20,8 @@
   "selectedOpacity": 0.4,
   "provinceFill": "#000000",
   "provinceFillOpacity": 0.07,
+  "provinceSelectColor": "#e7bd52",
+  "provinceSelectOpacity": 0.34,
   "coastStroke": "#12354f",
   "countryBorderStroke": "#3a2f22",
   "provinceBorderStroke": "#6b5f48",

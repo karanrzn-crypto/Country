@@ -151,6 +151,8 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
     selectedOpacity: { type: 'number', min: 0, max: 1 },
     provinceFill: colorField,
     provinceFillOpacity: { type: 'number', min: 0, max: 1 },
+    provinceSelectColor: colorField,
+    provinceSelectOpacity: { type: 'number', min: 0, max: 1 },
     coastStroke: colorField,
     countryBorderStroke: colorField,
     provinceBorderStroke: colorField,

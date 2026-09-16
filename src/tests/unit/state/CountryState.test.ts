@@ -68,13 +68,16 @@ describe('country data foundation (Part 2)', () => {
 
   // —— slice join ——
 
-  it('every map country gets a complete state with data-driven name + flag', () => {
+  it('every map country gets a complete state with model-driven name + flag', () => {
     const slice = build();
     for (const id of map.countryOrder) {
       const state = slice.countries[id];
       expect(state).toBeDefined();
       expect(state.id).toBe(id);
-      expect(state.name).toBe(data.countryProfile(id).name);
+      // ONE naming source: with a map model, the slice carries the MODEL's
+      // name (the map is what the player clicks — panel, labels, cities and
+      // provinces can never disagree about who is who).
+      expect(state.name).toBe(map.countries[id].name);
       expect(state.flag.colors.length).toBeGreaterThan(0);
       expect(state.flag.emblem).toBeDefined();
     }

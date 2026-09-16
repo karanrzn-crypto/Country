@@ -278,6 +278,10 @@ export interface MapThemeData {
   readonly selectedOpacity: number;
   readonly provinceFill: string;
   readonly provinceFillOpacity: number;
+  /** Selection highlight of ONE province — clearly visible, distinct from
+   * the (whitish) country selection tint, never neon. */
+  readonly provinceSelectColor: string;
+  readonly provinceSelectOpacity: number;
   readonly coastStroke: string;
   readonly countryBorderStroke: string;
   readonly provinceBorderStroke: string;

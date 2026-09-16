@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { StrategicMapModel, MapSite, MapRiver, MapBuilding, MapPoint } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
+import { visibleCellPolygon } from '../../world/map/MapQueries';
 import { type MapTheme } from './MapTheme';
 import {
   type RGB,
@@ -58,13 +59,18 @@ export class CellFillLayer {
     const positions: number[] = [];
     const colors: number[] = [];
     const cellCount = model.features.biomes.length;
+    const heights = buildVertexElevationGrid(model, this.columns);
     for (let cellIndex = 0; cellIndex < cellCount; cellIndex++) {
       const color = this.colorAt(cellIndex, model);
       if (color === null) continue;
       const [nw, ne, se, sw] = cellCornerPoints(cellIndex, model.lattice, this.columns);
+      // The tint FOLLOWS the surface relief (same height function as water,
+      // slightly lower lift) so it can never sink below the lifted terrain
+      // in biomes/terrain mode.
+      const y = surfaceTopY(heights, this.columns, cellIndex) + TINT_LIFT;
       // Two triangles: NW-SW-SE and NW-SE-NE (DoubleSide — winding-free).
       for (const point of [nw, sw, se, nw, se, ne]) {
-        positions.push(point.x, CellFillLayer.FILL_Y, point.z);
+        positions.push(point.x, y, point.z);
         colors.push(color.r, color.g, color.b);
       }
     }
@@ -81,12 +87,9 @@ export class CellFillLayer {
       side: THREE.DoubleSide
     });
     const mesh = new THREE.Mesh(this.geometry, this.material);
-    mesh.renderOrder = 5; // translucent tint ABOVE the surface (4), below rivers (6)
+    mesh.renderOrder = 5; // translucent tint ABOVE the surface (4), below water (6)
     this.group.add(mesh);
   }
-
-  /** Cell-fill height — ABOVE the land surface (0.7), below borders/rivers. */
-  private static readonly FILL_Y = 0.72;
 
   /** Drops GPU objects; the next ensureBuilt rebuilds from current data. */
   invalidate(): void {
@@ -297,15 +300,26 @@ export function createSeaRoutesLayer(theme: MapTheme): LineFeatureLayer {
 
 /** Small lift keeping water ON TOP of the (relief-lifted) land surface. */
 const WATER_LIFT = 0.05;
+/** Tint fills ride just under the water lift, above the raw surface. */
+const TINT_LIFT = 0.02;
+/** Grid lines: between tints and water. */
+const GRID_LINE_LIFT = 0.03;
+/** Selection/hover overlays: above everything visual (with depthTest off). */
+const HOVER_LIFT = 0.04;
+const SELECT_FILL_LIFT = 0.05;
+const SELECT_OUTLINE_LIFT = 0.06;
+/** A river stub reaching into a lake sits a hair ABOVE the lake surface —
+ * a tiny controlled offset that kills coplanar z-fighting at the joint. */
+const RIVER_OVER_LAKE_LIFT = 0.02;
 
 /**
- * Height of the water surface for a cell: ABOVE the rendered land surface
- * within that cell (the surface's height is a convex blend of the cell's
- * four corner heights — the max corner therefore dominates everywhere in
- * the cell), so rivers/lakes stay visible in EVERY mode and never sink
- * into lifted relief.
+ * Height of the surface (terrain relief) within a cell: the land mesh's
+ * height is a convex blend of the cell's four corner heights, so the MAX
+ * corner dominates everywhere in the cell. Everything that must stay
+ * VISIBLE on the ground (tints, grid, water) derives its height from HERE —
+ * one height function, zero burial in any surface mode.
  */
-function waterSurfaceY(heights: Float64Array, columns: number, cellIndex: number): number {
+export function surfaceTopY(heights: Float64Array, columns: number, cellIndex: number): number {
   const cz = Math.floor(cellIndex / columns);
   const cx = cellIndex - cz * columns;
   const stride = columns + 1;
@@ -315,7 +329,16 @@ function waterSurfaceY(heights: Float64Array, columns: number, cellIndex: number
     heights[(cz + 1) * stride + cx + 1],
     heights[(cz + 1) * stride + cx]
   );
-  return SURFACE_FILL_Y + maxCorner * SURFACE_RELIEF_AMPLITUDE + WATER_LIFT;
+  return SURFACE_FILL_Y + maxCorner * SURFACE_RELIEF_AMPLITUDE;
+}
+
+/**
+ * Height of the water surface for a cell: ABOVE the rendered land surface,
+ * so rivers/lakes stay visible in EVERY mode and never sink into lifted
+ * relief.
+ */
+function waterSurfaceY(heights: Float64Array, columns: number, cellIndex: number): number {
+  return surfaceTopY(heights, columns, cellIndex) + WATER_LIFT;
 }
 
 /** Natural river width (world units): tapers source → mouth, grows with length. */
@@ -330,11 +353,53 @@ export function riverWidthAt(
 }
 
 /**
+ * The spans of a river polyline that the renderer should DRAW: the river
+ * is clipped where it runs THROUGH a lake so its ribbon terminates at the
+ * lake boundary instead of crossing the lake surface as an artificial
+ * stripe. Each run of non-lake points is extended by EXACTLY ONE lake
+ * point at each end (where one exists) — the ribbon tip therefore reaches
+ * ONTO the lake surface and reads as a natural inflow/outflow connection.
+ *
+ * Pure function (unit-testable): run interiors are strictly non-lake, run
+ * boundaries (when truncated) are lake cells, and every non-lake index is
+ * covered exactly once — Source/Mouth/tributaries/flow direction/width
+ * variation are untouched (§F).
+ */
+export function riverDrawnRuns(
+  river: MapRiver,
+  lakeCells: ReadonlySet<number>
+): readonly (readonly [number, number])[] {
+  const count = river.cells.length;
+  const runs: (readonly [number, number])[] = [];
+  let index = 0;
+  while (index < count) {
+    if (lakeCells.has(river.cells[index])) {
+      index++;
+      continue;
+    }
+    let end = index;
+    while (end + 1 < count && !lakeCells.has(river.cells[end + 1])) end++;
+    // Extend each end by one lake-boundary point so the ribbon visually
+    // connects to the lake surface (never more than one — no crossing).
+    const start = index > 0 ? index - 1 : index;
+    const stop = end < count - 1 ? end + 1 : end;
+    runs.push([start, stop] as const);
+    index = end + 1;
+  }
+  return runs;
+}
+
+/**
  * ONE merged ribbon mesh for ALL rivers — a triangle strip along each
  * river polyline with a natural, tapering width (narrow at the source,
  * widest at the mouth) and smooth per-point normals, so rivers read as
  * flowing water instead of artificial 1-px lines. Ribbon height follows
  * the terrain surface (water stays on the ground in every mode).
+ *
+ * Rivers are clipped at LAKE boundaries (riverDrawnRuns): inside a lake
+ * the water is the lake surface — the river ribbon stops at the shore and
+ * reconnects on the other side, with a hair-thin lift over the lake
+ * surface at the joints so no coplanar z-fighting can occur.
  */
 export function buildRiverRibbons(
   model: StrategicMapModel,
@@ -344,35 +409,45 @@ export function buildRiverRibbons(
   if (model.features.rivers.length === 0) return null;
   const heights = buildVertexElevationGrid(model, columns);
   const width = theme.layerColors.riverWidth;
+  const lakeCells = new Set<number>();
+  for (const lake of model.features.lakes) {
+    for (const cellIndex of lake.cells) lakeCells.add(cellIndex);
+  }
   const positions: number[] = [];
   for (const river of model.features.rivers) {
     const polyline = river.polyline;
     if (polyline.length < 2) continue;
-    // Per-point frame: tangent (central difference) → perpendicular normal.
-    const left: { x: number; y: number; z: number }[] = [];
-    const right: { x: number; y: number; z: number }[] = [];
-    for (let i = 0; i < polyline.length; i++) {
-      const previous = polyline[Math.max(0, i - 1)];
-      const next = polyline[Math.min(polyline.length - 1, i + 1)];
-      const tx = next.x - previous.x;
-      const tz = next.z - previous.z;
-      const length = Math.hypot(tx, tz) || 1;
-      const nx = -tz / length;
-      const nz = tx / length;
-      const halfWidth = riverWidthAt(river, i / (polyline.length - 1), width) / 2;
-      const point = polyline[i];
-      const y = waterSurfaceY(heights, columns, river.cells[i]);
-      left.push({ x: point.x + nx * halfWidth, y, z: point.z + nz * halfWidth });
-      right.push({ x: point.x - nx * halfWidth, y, z: point.z - nz * halfWidth });
-    }
-    for (let i = 1; i < polyline.length; i++) {
-      const li = left[i];
-      const ri = right[i];
-      const liPrev = left[i - 1];
-      const riPrev = right[i - 1];
-      // Two triangles per segment (DoubleSide — winding-free).
-      for (const vertex of [liPrev, riPrev, ri, liPrev, ri, li]) {
-        positions.push(vertex.x, vertex.y, vertex.z);
+    for (const [startIndex, endIndex] of riverDrawnRuns(river, lakeCells)) {
+      if (endIndex - startIndex < 1) continue;
+      // Per-point frame: tangent (central difference, clamped to the run)
+      // → perpendicular normal.
+      const left: { x: number; y: number; z: number }[] = [];
+      const right: { x: number; y: number; z: number }[] = [];
+      for (let i = startIndex; i <= endIndex; i++) {
+        const previous = polyline[Math.max(startIndex, i - 1)];
+        const next = polyline[Math.min(endIndex, i + 1)];
+        const tx = next.x - previous.x;
+        const tz = next.z - previous.z;
+        const length = Math.hypot(tx, tz) || 1;
+        const nx = -tz / length;
+        const nz = tx / length;
+        const halfWidth = riverWidthAt(river, i / (polyline.length - 1), width) / 2;
+        const point = polyline[i];
+        const inLake = lakeCells.has(river.cells[i]);
+        const y =
+          waterSurfaceY(heights, columns, river.cells[i]) + (inLake ? RIVER_OVER_LAKE_LIFT : 0);
+        left.push({ x: point.x + nx * halfWidth, y, z: point.z + nz * halfWidth });
+        right.push({ x: point.x - nx * halfWidth, y, z: point.z - nz * halfWidth });
+      }
+      for (let i = 1; i < left.length; i++) {
+        const li = left[i];
+        const ri = right[i];
+        const liPrev = left[i - 1];
+        const riPrev = right[i - 1];
+        // Two triangles per segment (DoubleSide — winding-free).
+        for (const vertex of [liPrev, riPrev, ri, liPrev, ri, li]) {
+          positions.push(vertex.x, vertex.y, vertex.z);
+        }
       }
     }
   }
@@ -414,7 +489,9 @@ export class RiverLayer {
       });
       this.materials.push(material);
       const mesh = new THREE.Mesh(riverGeometry, material);
-      mesh.renderOrder = 6;
+      // Explicit water stacking (Terrain → Lake → River): lakes stay at 6,
+      // rivers draw right after them — no coplanar tie, no z-fighting.
+      mesh.renderOrder = 6.5;
       this.group.add(mesh);
     }
   }
@@ -495,20 +572,19 @@ export class GridLayer {
   private geometry: THREE.BufferGeometry | null = null;
   private material: THREE.LineBasicMaterial | null = null;
   private built = false;
-  // —— interaction overlay state (preallocated, updated in place) ——
+  // —— interaction overlay state (rebuilt ONLY on selection/hover change) ——
   private selectFillMesh: THREE.Mesh | null = null;
   private selectOutlineMesh: THREE.LineLoop | null = null;
   private hoverFillMesh: THREE.Mesh | null = null;
-  private selectFillGeometry: THREE.BufferGeometry | null = null;
-  private selectOutlineGeometry: THREE.BufferGeometry | null = null;
-  private hoverFillGeometry: THREE.BufferGeometry | null = null;
   private selectFillMaterial: THREE.MeshBasicMaterial | null = null;
   private selectOutlineMaterial: THREE.LineBasicMaterial | null = null;
   private hoverFillMaterial: THREE.MeshBasicMaterial | null = null;
   private selectedCell = -1;
   private hoveredCell = -1;
-  /** Lattice points cache — set during ensureBuilt (the model arrives there). */
-  private modelLattice: readonly MapPoint[] = [];
+  /** The static model — set during ensureBuilt (the lazy build). */
+  private model: StrategicMapModel | null = null;
+  /** Shared vertex-elevation grid for surface-following heights. */
+  private heights: Float64Array | null = null;
 
   constructor(
     private readonly columns: number,
@@ -519,7 +595,8 @@ export class GridLayer {
   ensureBuilt(model: StrategicMapModel): void {
     if (this.built) return;
     this.built = true;
-    this.modelLattice = model.lattice;
+    this.model = model;
+    this.heights = buildVertexElevationGrid(model, this.columns);
     const cellCount = model.features.biomes.length;
     const owner = model.features.cellOwner;
     const emitted = new Set<string>();
@@ -527,6 +604,7 @@ export class GridLayer {
     const color = rgb(this.theme.layerColors.gridColor);
     const latticePoints = model.lattice;
     const stride = this.columns + 1;
+    const heights = this.heights;
     const latticeIndexOf = (cellIndex: number, corner: 0 | 1 | 2 | 3): number => {
       const cz = Math.floor(cellIndex / this.columns);
       const cx = cellIndex - cz * this.columns;
@@ -539,7 +617,13 @@ export class GridLayer {
       emitted.add(key);
       const pa = latticePoints[a];
       const pb = latticePoints[b];
-      positions.push(pa.x, GridLayer.LINE_Y, pa.z, pb.x, GridLayer.LINE_Y, pb.z);
+      // The line FOLLOWS the terrain relief (max endpoint height — the
+      // bilinear surface between two vertices never exceeds it) so the grid
+      // stays ON the ground in every surface mode instead of sinking below
+      // lifted terrain.
+      const y =
+        SURFACE_FILL_Y + Math.max(heights[a], heights[b]) * SURFACE_RELIEF_AMPLITUDE + GRID_LINE_LIFT;
+      positions.push(pa.x, y, pa.z, pb.x, y, pb.z);
     };
     for (let cellIndex = 0; cellIndex < cellCount; cellIndex++) {
       if (owner[cellIndex] < 0) continue; // ocean
@@ -555,39 +639,38 @@ export class GridLayer {
         emitEdge(latticeIndexOf(cellIndex, 3), latticeIndexOf(cellIndex, 2));
       }
     }
-    if (positions.length === 0) return;
-    this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    this.geometry.computeBoundingSphere();
-    this.material = new THREE.LineBasicMaterial({
-      vertexColors: false,
-      color: new THREE.Color(color.r, color.g, color.b),
-      transparent: true,
-      opacity: this.theme.layerColors.gridOpacity,
-      depthWrite: false
-    });
-    const segments = new THREE.LineSegments(this.geometry, this.material);
-    segments.renderOrder = 5;
-    this.group.add(segments);
+    if (positions.length > 0) {
+      this.geometry = new THREE.BufferGeometry();
+      this.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      this.geometry.computeBoundingSphere();
+      this.material = new THREE.LineBasicMaterial({
+        vertexColors: false,
+        color: new THREE.Color(color.r, color.g, color.b),
+        transparent: true,
+        opacity: this.theme.layerColors.gridOpacity,
+        depthWrite: false
+      });
+      const segments = new THREE.LineSegments(this.geometry, this.material);
+      segments.renderOrder = 5;
+      this.group.add(segments);
+    }
 
-    // —— interaction overlays: ONE preallocated fill + outline quad each for
-    // the selected and the hovered cell (rewritten IN PLACE on change — no
-    // per-frame allocation, no rebuild of the merged grid) ——
+    // —— interaction overlays: the SELECTED and HOVERED cell are drawn as
+    // the EXACT visible cell polygon (visibleCellPolygon — the same geometry
+    // picking resolves), deliberately ABOVE every map level with
+    // depthTest off, so terrain relief, water, country fills or tints can
+    // never bury or cut them ("half-selected cell" is impossible). ——
     const selectColor = rgb(this.theme.layerColors.gridSelectColor);
     this.selectFillMaterial = new THREE.MeshBasicMaterial({
       color: new THREE.Color(selectColor.r, selectColor.g, selectColor.b),
       transparent: true,
       opacity: this.theme.layerColors.gridSelectOpacity,
       depthWrite: false,
+      depthTest: false,
       side: THREE.DoubleSide
     });
-    this.selectFillGeometry = new THREE.BufferGeometry();
-    this.selectFillGeometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(new Float32Array(12), 3)
-    );
-    const selectFill = new THREE.Mesh(this.selectFillGeometry, this.selectFillMaterial);
-    selectFill.renderOrder = 4;
+    const selectFill = new THREE.Mesh(new THREE.BufferGeometry(), this.selectFillMaterial);
+    selectFill.renderOrder = 15;
     selectFill.visible = false;
     selectFill.frustumCulled = false;
     this.group.add(selectFill);
@@ -598,15 +681,11 @@ export class GridLayer {
       color: new THREE.Color(outlineColor.r, outlineColor.g, outlineColor.b),
       transparent: true,
       opacity: 0.95,
-      depthWrite: false
+      depthWrite: false,
+      depthTest: false
     });
-    this.selectOutlineGeometry = new THREE.BufferGeometry();
-    this.selectOutlineGeometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(new Float32Array(12), 3)
-    );
-    const selectOutline = new THREE.LineLoop(this.selectOutlineGeometry, this.selectOutlineMaterial);
-    selectOutline.renderOrder = 6;
+    const selectOutline = new THREE.LineLoop(new THREE.BufferGeometry(), this.selectOutlineMaterial);
+    selectOutline.renderOrder = 16;
     selectOutline.visible = false;
     selectOutline.frustumCulled = false;
     this.group.add(selectOutline);
@@ -618,15 +697,11 @@ export class GridLayer {
       transparent: true,
       opacity: this.theme.layerColors.gridHoverOpacity,
       depthWrite: false,
+      depthTest: false,
       side: THREE.DoubleSide
     });
-    this.hoverFillGeometry = new THREE.BufferGeometry();
-    this.hoverFillGeometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(new Float32Array(12), 3)
-    );
-    const hoverFill = new THREE.Mesh(this.hoverFillGeometry, this.hoverFillMaterial);
-    hoverFill.renderOrder = 4;
+    const hoverFill = new THREE.Mesh(new THREE.BufferGeometry(), this.hoverFillMaterial);
+    hoverFill.renderOrder = 14;
     hoverFill.visible = false;
     hoverFill.frustumCulled = false;
     this.group.add(hoverFill);
@@ -634,90 +709,86 @@ export class GridLayer {
 
     this.built = true;
     // Re-apply any selection/hover that arrived before the lazy build.
-    this.writeCell(this.selectFillGeometry, this.selectOutlineGeometry, this.selectedCell);
-    this.writeCell(this.hoverFillGeometry, null, this.hoveredCell);
-    selectFill.visible = this.selectedCell >= 0;
-    selectOutline.visible = this.selectedCell >= 0;
-    hoverFill.visible = this.hoveredCell >= 0 && this.hoveredCell !== this.selectedCell;
+    this.redrawSelection();
+    this.redrawHover();
   }
 
-  /** Sits just above the land surface, below rivers/borders. */
-  static readonly LINE_Y = 0.62;
-
   /**
-   * Marks a cell as SELECTED (clear fill + bright outline). Pass −1/null to
-   * clear. Safe to call before ensureBuilt (applied on the lazy build).
+   * Marks a cell as SELECTED (fill + bright outline over the EXACT visible
+   * polygon). Pass −1/null to clear. Safe to call before ensureBuilt
+   * (applied on the lazy build). Rebuilds only on CHANGE — never per frame.
    */
   setSelectedCell(cellIndex: number | null): void {
     const next = cellIndex ?? -1;
     if (next === this.selectedCell) return;
     this.selectedCell = next;
     if (!this.built) return;
-    this.writeCell(this.selectFillGeometry, this.selectOutlineGeometry, next);
+    this.redrawSelection();
   }
 
   /**
-   * Marks the HOVERED cell (light fill, no outline). Only rewrites the 12
-   * floats when the hovered cell actually CHANGES — pointer moves across a
-   * static map never allocate.
+   * Marks the HOVERED cell (light fill over the exact visible polygon, no
+   * outline). Rebuilds only when the hovered cell CHANGES — pointer moves
+   * across a static map do no geometry work.
    */
   setHoveredCell(cellIndex: number | null): void {
     const next = cellIndex ?? -1;
     if (next === this.hoveredCell) return;
     this.hoveredCell = next;
     if (!this.built) return;
-    this.writeCell(this.hoverFillGeometry, null, next);
+    this.redrawHover();
   }
 
-  /** Writes the 4 lattice corners of a cell into a fill + outline buffer. */
-  private writeCell(
-    fill: THREE.BufferGeometry | null,
-    outline: THREE.BufferGeometry | null,
-    cellIndex: number
+  /** Surface-following overlay height for a cell (+ a small lift). */
+  private overlayY(cellIndex: number, lift: number): number {
+    if (this.heights === null || this.model === null) return SURFACE_FILL_Y + lift;
+    return surfaceTopY(this.heights, this.columns, cellIndex) + lift;
+  }
+
+  /** Rebuilds the selection fill + outline from the visible polygon. */
+  private redrawSelection(): void {
+    const fillMesh = this.selectFillMesh;
+    const outlineMesh = this.selectOutlineMesh;
+    if (fillMesh === null || outlineMesh === null) return;
+    const cell = this.selectedCell;
+    if (cell < 0 || this.model === null) {
+      fillMesh.visible = false;
+      outlineMesh.visible = false;
+      this.swapGeometry(fillMesh, null);
+      this.swapGeometry(outlineMesh, null);
+      return;
+    }
+    // THE shared geometry: exactly what picking resolves and the map shows.
+    const { points } = visibleCellPolygon(this.model, cell, this.columns);
+    this.swapGeometry(fillMesh, polygonFillGeometry(points, this.overlayY(cell, SELECT_FILL_LIFT)));
+    fillMesh.visible = true;
+    this.swapGeometry(outlineMesh, polygonOutlineGeometry(points, this.overlayY(cell, SELECT_OUTLINE_LIFT)));
+    outlineMesh.visible = true;
+  }
+
+  /** Rebuilds the hover fill from the visible polygon. */
+  private redrawHover(): void {
+    const hoverMesh = this.hoverFillMesh;
+    if (hoverMesh === null) return;
+    const cell = this.hoveredCell;
+    if (cell < 0 || cell === this.selectedCell || this.model === null) {
+      hoverMesh.visible = false;
+      this.swapGeometry(hoverMesh, null);
+      return;
+    }
+    const { points } = visibleCellPolygon(this.model, cell, this.columns);
+    this.swapGeometry(hoverMesh, polygonFillGeometry(points, this.overlayY(cell, HOVER_LIFT)));
+    hoverMesh.visible = true;
+  }
+
+  /** Swaps a mesh's geometry (disposing the old) — selection-change only. */
+  private swapGeometry(
+    mesh: THREE.Mesh | THREE.LineLoop,
+    next: THREE.BufferGeometry | null
   ): void {
-    if (fill === null) return;
-    const fillPosition = fill.getAttribute('position') as THREE.BufferAttribute;
-    const outlinePosition =
-      outline !== null ? (outline.getAttribute('position') as THREE.BufferAttribute) : null;
-    const visible = cellIndex >= 0;
-    if (this.selectFillMesh !== null && fill === this.selectFillGeometry) {
-      this.selectFillMesh.visible = visible;
-    }
-    if (this.hoverFillMesh !== null && fill === this.hoverFillGeometry) {
-      this.hoverFillMesh.visible = visible && cellIndex !== this.selectedCell;
-    }
-    if (this.selectOutlineMesh !== null && outline === this.selectOutlineGeometry) {
-      this.selectOutlineMesh.visible = visible;
-    }
-    if (!visible) return;
-    const corners = this.cornerLatticeOf(cellIndex);
-    // Quad triangles: nw, ne, se / nw, se, sw (y = slightly below the lines).
-    const y = GridLayer.LINE_Y - 0.04;
-    const quad = [0, 1, 2, 0, 2, 3];
-    let i = 0;
-    for (const corner of quad) {
-      const point = corners[corner];
-      fillPosition.setXYZ(i++, point.x, y, point.z);
-    }
-    fillPosition.needsUpdate = true;
-    if (outlinePosition !== null) {
-      const oy = GridLayer.LINE_Y + 0.04;
-      for (let c = 0; c < 4; c++) {
-        outlinePosition.setXYZ(c, corners[c].x, oy, corners[c].z);
-      }
-      outlinePosition.needsUpdate = true;
-    }
-  }
-
-  /**
-   * World-space lattice corners of a cell (nw, ne, se, sw).
-   * Deliberately THE SAME shared helper the merged grid lines, lakes and
-   * pick geometry derive from (`cellCornerPoints` / `latticeQuad` on the
-   * model's lattice) — the selection highlight therefore covers EXACTLY the
-   * drawn cell: no offset, no scale, no partial fill, ever.
-   */
-  private cornerLatticeOf(cellIndex: number): readonly MapPoint[] {
-    return cellCornerPoints(cellIndex, this.modelLattice, this.columns);
+    const previous = mesh.geometry;
+    mesh.geometry = next ?? new THREE.BufferGeometry();
+    if (previous !== mesh.geometry) previous.dispose();
   }
 
   dispose(): void {
@@ -729,20 +800,51 @@ export class GridLayer {
     this.selectFillMesh = null;
     this.selectOutlineMesh = null;
     this.hoverFillMesh = null;
-    this.selectFillGeometry?.dispose();
-    this.selectFillGeometry = null;
-    this.selectOutlineGeometry?.dispose();
-    this.selectOutlineGeometry = null;
-    this.hoverFillGeometry?.dispose();
-    this.hoverFillGeometry = null;
     this.selectFillMaterial?.dispose();
     this.selectFillMaterial = null;
     this.selectOutlineMaterial?.dispose();
     this.selectOutlineMaterial = null;
     this.hoverFillMaterial?.dispose();
     this.hoverFillMaterial = null;
+    this.model = null;
+    this.heights = null;
     this.built = false;
   }
+}
+
+/**
+ * Flat triangulated fill for a polygon at height `y` (ShapeUtils/earcut —
+ * robust for the concave clipped-border polygons). Built only when the
+ * selection or hover CHANGES — never per frame.
+ */
+function polygonFillGeometry(points: readonly MapPoint[], y: number): THREE.BufferGeometry {
+  const contour = points.map((point) => new THREE.Vector2(point.x, point.z));
+  const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
+  const positions = new Float32Array(triangles.length * 9);
+  let offset = 0;
+  for (const [a, b, c] of triangles) {
+    for (const index of [a, b, c]) {
+      positions[offset++] = points[index].x;
+      positions[offset++] = y;
+      positions[offset++] = points[index].z;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return geometry;
+}
+
+/** Closed loop outline for a polygon at height `y`. */
+function polygonOutlineGeometry(points: readonly MapPoint[], y: number): THREE.BufferGeometry {
+  const positions = new Float32Array(points.length * 3);
+  for (let index = 0; index < points.length; index++) {
+    positions[index * 3] = points[index].x;
+    positions[index * 3 + 1] = y;
+    positions[index * 3 + 2] = points[index].z;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return geometry;
 }
 
 // ———————————————————————————— site markers ————————————————————————————

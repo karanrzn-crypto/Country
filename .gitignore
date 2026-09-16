@@ -55,3 +55,4 @@ desktop.ini
 
 # dev/debug artifacts
 scripts/
+.browser-verify/

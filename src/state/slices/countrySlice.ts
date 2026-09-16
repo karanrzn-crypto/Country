@@ -138,7 +138,11 @@ export function buildCountrySlice(
 
     countries[countryId] = {
       id: countryId,
-      name: profile.name,
+      // ONE naming source: the map model's name wins when a model exists —
+      // the panel, the map labels, cities and provinces must never disagree
+      // about who is who (the data profile name is only the model-less
+      // fallback).
+      name: mapCountry !== undefined ? mapCountry.name : profile.name,
       flag: { ...profile.flag, colors: [...profile.flag.colors] },
       capitalId: mapCountry !== undefined ? mapCountry.capitalCityId : null,
       population: profile.population,

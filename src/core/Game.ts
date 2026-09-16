@@ -733,12 +733,23 @@ export class Game {
       visibility.industry === true ||
       visibility.military === true;
     const anyBuildingLayer = visibility.buildings === true || visibility.airports === true;
+    // PRECISE hit testing (§H): markers are drawn at FIXED world sizes, so
+    // their hit radius is fixed world size too — never a zoom-scaled
+    // fraction of the viewport (which used to grow to ~half a cell when
+    // zoomed out and steal cell clicks for far-away cities/rivers).
+    //   city hit  = between the drawn marker radius and the theme hit radius
+    //   river hit = just outside the widest ribbon half-width — a click on
+    //               the river SURFACE hits the river, open ground never does
+    const theme = this.data.mapTheme;
+    const zoomRadius = this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight;
+    const pickRadius = Math.min(
+      Math.max(zoomRadius, theme.cityRadius),
+      theme.cityHitRadius
+    );
+    const riverPickDistance = Math.max(theme.layerColors.riverWidth.max * 0.5 + 0.4, 0.9);
     return {
-      pickRadius: this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight,
-      riverPickDistance: Math.max(
-        this.config.map.pickRadiusFraction * this.state.map.camera.viewHeight,
-        this.config.map.cellSize * 0.35
-      ),
+      pickRadius,
+      riverPickDistance,
       columns: this.config.map.columns,
       rows: this.config.map.rows,
       cellSize: this.config.map.cellSize,
@@ -747,7 +758,9 @@ export class Game {
         rivers: visibility.rivers !== false,
         lakes: visibility.lakes !== false,
         sites: anySiteLayer,
-        buildings: anyBuildingLayer
+        buildings: anyBuildingLayer,
+        cities: visibility.cities !== false,
+        capitals: visibility.capitals !== false
       }
     };
   }
