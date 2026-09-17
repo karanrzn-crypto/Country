@@ -31,7 +31,6 @@ export const KM_PER_WORLD_UNIT = 4;
 
 /** One city-to-city connection (the drawn route between two settlements). */
 export interface CityConnection {
-  /** Stable id derived from the constituent network link ids. */
   id: string;
   kind: CityAreaLinkKind;
   /** City ids of the two endpoints (never equal, undirected pair). */
@@ -40,8 +39,13 @@ export interface CityConnection {
   /** Province ids of the endpoint cities (from the area records). */
   provinceA: string;
   provinceB: string;
+  /** Country ids of the endpoint cities (from the area records). */
+  countryA: string;
+  countryB: string;
   /** True when the route crosses a province border. */
   crossProvince: boolean;
+  /** True when the route crosses a COUNTRY border (مرزی — an international road). */
+  crossCountry: boolean;
   /** Continuous world-space path; endpoints sit on the two city positions. */
   path: readonly MapPoint[];
   /** Path length in world units (sum of the constituent link lengths). */
@@ -105,7 +109,10 @@ export function cityConnectionsOf(network: CityAreaNetwork): CityConnection[] {
       cityB: areaB.cityId,
       provinceA: areaA.provinceId,
       provinceB: areaB.provinceId,
+      countryA: areaA.countryId,
+      countryB: areaB.countryId,
       crossProvince: areaA.provinceId !== areaB.provinceId,
+      crossCountry: areaA.countryId !== areaB.countryId,
       path: [...link.path],
       length: link.length,
       linkIds: [link.id]
@@ -158,7 +165,10 @@ export function cityConnectionsOf(network: CityAreaNetwork): CityConnection[] {
       cityB: ordered[1].cityId,
       provinceA,
       provinceB,
+      countryA: first.area.countryId,
+      countryB: second.area.countryId,
       crossProvince: provinceA !== provinceB,
+      crossCountry: first.area.countryId !== second.area.countryId,
       path: concatPaths(ordered[0].link.path, ordered[1].link.path),
       length: ordered[0].link.length + ordered[1].link.length,
       linkIds: [ordered[0].link.id, ordered[1].link.id]

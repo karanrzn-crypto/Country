@@ -504,7 +504,10 @@ export class MapUI {
         );
         addRow('فاصله', `${connectionLengthKm(connection).toLocaleString('en-US')} کیلومتر`);
         addRow('نوع', connection.kind === 'railway' ? 'راه‌آهن' : 'جاده');
-        addRow('گستره', connection.crossProvince ? 'بین‌استانی' : 'درون‌استانی');
+        addRow(
+          'گستره',
+          connection.crossCountry ? 'مرزی' : connection.crossProvince ? 'بین‌استانی' : 'درون‌استانی'
+        );
         // Link condition = the network's live maintenance state (0..1).
         const conditions = connection.linkIds
           .map((linkId) => context.state.cityAreas.network.links[linkId]?.condition)

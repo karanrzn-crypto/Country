@@ -39,11 +39,11 @@
       "workforce": 300 }
   ],
   "startingStockpiles": {
-    "resources": { "food": 50, "steel": 40, "oil": 30, "electronics": 10 },
+    "resources": { "food": 100, "steel": 80, "oil": 60, "electronics": 20 },
     "equipment": { "rifle": 200, "at_rifle": 20, "tank_gun": 10, "tank_armor_kit": 10, "ifv_gun": 12, "heli_gun": 4, "artillery_battery": 4 }
   },
   "strategicResources": {
-    "productionScale": 1.2,
+    "productionScale": 1.4,
     "importMarkup": 1.25,
     "priceTiers": {
       "supply": { "low": 0.85, "medium": 1.0, "high": 1.25 },
@@ -66,20 +66,20 @@
           "terrain": { "valley": 0.8, "lowland": 0.7, "hills": 0.6, "plains": 0.5, "mountain": 0.5, "plateau": 0.4, "highMountain": 0.3 }
         },
         "oil": {
-          "base": 6,
+          "base": 18,
           "biomes": { "desert": 1.0, "drylands": 0.65, "tundra": 0.45, "grassland": 0.35, "forest": 0.15, "jungle": 0.15 },
           "terrain": { "plateau": 0.7, "lowland": 0.6, "hills": 0.6, "valley": 0.5, "plains": 0.5, "mountain": 0.4, "highMountain": 0.2 }
         },
         "iron": {
-          "base": 6,
+          "base": 21,
           "terrain": { "hills": 1.0, "mountain": 0.9, "highMountain": 0.75, "plateau": 0.55, "plains": 0.35, "valley": 0.3, "lowland": 0.25 }
         },
         "coal": {
-          "base": 6,
+          "base": 21,
           "terrain": { "hills": 1.0, "mountain": 0.85, "plateau": 0.75, "highMountain": 0.6, "plains": 0.45, "lowland": 0.35, "valley": 0.35 }
         },
         "copper": {
-          "base": 4,
+          "base": 17,
           "terrain": { "mountain": 1.0, "highMountain": 0.9, "hills": 0.7, "plateau": 0.5, "plains": 0.25, "valley": 0.25, "lowland": 0.2 }
         },
         "gold": {

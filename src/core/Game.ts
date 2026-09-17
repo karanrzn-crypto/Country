@@ -19,7 +19,7 @@ import type { GameState } from '../state/GameState';
 import { DataRegistry } from '../data/DataRegistry';
 import { WorldManager } from '../world/WorldManager';
 import { generateStrategicMap } from '../world/map/MapGenerator';
-import { pickAt, hoverAt, clampCamera, type PickEligibility } from '../world/map/MapQueries';
+import { pickAt, hoverAt, clampCamera, latticeQuad, type PickEligibility } from '../world/map/MapQueries';
 import { findGridCell } from '../world/map/MapGeography';
 import {
   isKnownMapLayer,
@@ -34,7 +34,8 @@ import { clearMapSelection, setMapSelection, setFeatureSelection, type MapFeatur
 import {
   cityConnectionsOf,
   cityConnectionExists,
-  pickCityConnection
+  pickCityConnection,
+  distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
 import { AssetRegistry } from '../assets/AssetRegistry';
@@ -695,10 +696,24 @@ export class Game {
     }
     // City Areas network: clicking a route selects the city connection
     // (only while the layer is visible — you select what you can see).
-    const cityConnectionId = this.pickCityConnectionAt({ x, z });
-    if (cityConnectionId !== null) {
-      this.applyFeatureSelection({ kind: 'cityLink', connectionId: cityConnectionId });
-      return;
+    // A routed road shares its corridor with grid cells, so when the click
+    // ALSO sits inside a cell, whichever feature is genuinely CLOSER to the
+    // click point wins (a click on the road centerline selects the road; a
+    // click near the cell's own center selects the cell).
+    const cityConnection = this.pickCityConnectionAt({ x, z });
+    if (cityConnection !== null) {
+      const centroid =
+        result.gridCellKey !== null
+          ? this.gridCellCentroid(this.mapModel, result.cellIndex)
+          : null;
+      const distanceToCentroid =
+        centroid === null
+          ? Number.POSITIVE_INFINITY
+          : Math.hypot(x - centroid.x, z - centroid.z);
+      if (cityConnection.distance < distanceToCentroid) {
+        this.applyFeatureSelection({ kind: 'cityLink', connectionId: cityConnection.id });
+        return;
+      }
     }
     if (result.gridCellKey !== null) {
       this.applyFeatureSelection({ kind: 'grid', gridKey: result.gridCellKey });
@@ -811,12 +826,32 @@ export class Game {
    * Tolerance scales with the camera so zoomed-out clicks can still hit a
    * thin route, but never steals clicks resolved by pickAt above.
    */
-  private pickCityConnectionAt(point: { x: number; z: number }): string | null {
+  private pickCityConnectionAt(point: { x: number; z: number }): { id: string; distance: number } | null {
     if (this.state.map.layerVisibility.urbanRoads !== true) return null;
     const connections = cityConnectionsOf(this.state.cityAreas.network);
     if (connections.length === 0) return null;
     const tolerance = Math.max(1.2, this.state.map.camera.viewHeight * 0.012);
-    return pickCityConnection(connections, point, tolerance);
+    const id = pickCityConnection(connections, point, tolerance);
+    if (id === null) return null;
+    const connection = connections.find((entry) => entry.id === id);
+    if (connection === undefined) return null;
+    return { id, distance: distancePointToPath(point, connection.path) };
+  }
+
+  /** Lattice centroid of the cell the click resolved to (pick tie-break). */
+  private gridCellCentroid(
+    model: StrategicMapModel,
+    cellIndex: number
+  ): { x: number; z: number } | null {
+    if (cellIndex < 0) return null;
+    const quad = latticeQuad(model.lattice, cellIndex, this.config.map.columns);
+    let x = 0;
+    let z = 0;
+    for (const point of quad) {
+      x += point.x;
+      z += point.z;
+    }
+    return { x: x / 4, z: z / 4 };
   }
 
   /** Applies a validated feature selection (unknown ids are ignored with a

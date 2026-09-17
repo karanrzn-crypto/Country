@@ -42,10 +42,14 @@ import type {
 import type { Cell, LatticeData } from './MapGeometry';
 import { pointInRing } from './MapQueries';
 import type { MapRing } from './MapTypes';
+import { createRouteGrid, routePolylinePoints, routeDistance } from './MapRoutes';
 
 /** Tunable generation policy (module constants — one documented place). */
 const ROAD_DIRT_MAX_POPULATION = 250_000;
 const FACTORIES_PER_COUNTRY = 2;
+
+/** MST edge weight memo (city-pair → land-route distance). */
+type DistanceMemo = Map<string, number>;
 
 export interface MapClimateFields {
   /** Normalized elevation 0..1 per cell (ocean cells included). */
@@ -237,30 +241,17 @@ export function cellIndexOf(position: MapPoint, columns: number, cellSize: numbe
   return cz * columns + cx;
 }
 
-/** Deterministic organic midpoint: perpendicular jitter that is DATA, not a render hack. */
-function jitteredMidpoint(
-  a: MapPoint,
-  b: MapPoint,
-  rng: Random,
-  amplitudeFraction = 0.12
-): MapPoint {
-  const mx = (a.x + b.x) / 2;
-  const mz = (a.z + b.z) / 2;
-  const dx = b.x - a.x;
-  const dz = b.z - a.z;
-  const length = Math.hypot(dx, dz) || 1;
-  const offset = (rng.next() * 2 - 1) * length * amplitudeFraction;
-  return { x: mx + (-dz / length) * offset, z: mz + (dx / length) * offset };
-}
-
 // ———————————————————— graph helpers ————————————————————
 
 /**
  * Deterministic Prim MST over weighted points. Tie-breaks compare ids, so
- * the spanning tree is a pure function of the input lists.
+ * the spanning tree is a pure function of the input lists. `distance(a, b)`
+ * is the edge weight (terrain-aware land-route distance — a water crossing
+ * costs its penalty, so the tree prefers land detours through other cities).
  */
 function minimumSpanningTree(
-  nodes: readonly { id: string; position: MapPoint }[]
+  nodes: readonly { id: string; position: MapPoint }[],
+  distance: (a: MapPoint, b: MapPoint) => number
 ): { a: string; b: string; distance: number }[] {
   if (nodes.length <= 1) return [];
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -272,13 +263,13 @@ function minimumSpanningTree(
       if (inTree.has(node.id)) continue;
       for (const otherId of inTree) {
         const other = byId.get(otherId) as { id: string; position: MapPoint };
-        const distance = Math.hypot(node.position.x - other.position.x, node.position.z - other.position.z);
+        const distanceValue = distance(node.position, other.position);
         if (
           best === null ||
-          distance < best.distance - 1e-9 ||
-          (Math.abs(distance - best.distance) <= 1e-9 && node.id < best.b)
+          distanceValue < best.distance - 1e-9 ||
+          (Math.abs(distanceValue - best.distance) <= 1e-9 && node.id < best.b)
         ) {
-          best = { a: otherId, b: node.id, distance };
+          best = { a: otherId, b: node.id, distance: distanceValue };
         }
       }
     }
@@ -372,15 +363,54 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
   }
 
   // —— 2. roads (MST over ALL cities) + railways (MST over capitals) + sea routes ——
+  // ALL routes are terrain-aware (MapRoutes): roads/railways follow LAND
+  // (oceans/lakes cost a penalty, rivers read as narrow bridges) and sea
+  // routes stay IN the ocean following the coastline. No straight city-to-
+  // city lines through water, and no port-to-port lines across the land.
+  const lakeCellSet = new Set<number>();
+  for (const lake of input.lakes) for (const cellIndex of lake.cells) lakeCellSet.add(cellIndex);
+  const riverCellSet = new Set<number>();
+  for (const river of input.rivers) for (const cellIndex of river.cells) riverCellSet.add(cellIndex);
+  const routeGridInput = {
+    columns,
+    rows,
+    cellSize,
+    land,
+    lakeCells: lakeCellSet,
+    riverCells: riverCellSet,
+    cells,
+    lattice
+  };
+  const landGrid = createRouteGrid(routeGridInput, 'land');
+  const waterGrid = createRouteGrid(routeGridInput, 'water');
+  const landDistanceMemo: DistanceMemo = new Map();
+  const landDistance = (a: MapPoint, b: MapPoint): number => {
+    const key =
+      a.x < b.x || (a.x === b.x && a.z <= b.z)
+        ? `${a.x.toFixed(2)},${a.z.toFixed(2)}|${b.x.toFixed(2)},${b.z.toFixed(2)}`
+        : `${b.x.toFixed(2)},${b.z.toFixed(2)}|${a.x.toFixed(2)},${a.z.toFixed(2)}`;
+    const memoized = landDistanceMemo.get(key);
+    if (memoized !== undefined) return memoized;
+    const value = routeDistance(landGrid, a, b);
+    landDistanceMemo.set(key, value);
+    return value;
+  };
+
   const cityList = Object.values(cities);
   const lines: MapLineFeature[] = [];
 
   const roadEdges = minimumSpanningTree(
-    cityList.map((city) => ({ id: city.id, position: city.position }))
+    cityList.map((city) => ({ id: city.id, position: city.position })),
+    landDistance
   );
   for (const edge of roadEdges) {
     const a = cities[edge.a];
     const b = cities[edge.b];
+    // Legacy RNG draw: the routed polyline no longer jitters a midpoint, but
+    // the map's RNG SEQUENCE (deposit ore picks, positions, …) must stay
+    // byte-identical to the pre-routing generator — burn exactly the draw
+    // the old jitteredMidpoint consumed here.
+    rng.next();
     const kind =
       a.isCapital && b.isCapital
         ? 'highway'
@@ -394,28 +424,46 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       kind,
       cityA: a.id,
       cityB: b.id,
-      polyline: [a.position, jitteredMidpoint(a.position, b.position, rng), b.position]
+      polyline: routePolylinePoints(landGrid, a.position, b.position, 'land')
     });
   }
 
   const capitals = cityList.filter((city) => city.isCapital);
   const railEdges = minimumSpanningTree(
-    capitals.map((city) => ({ id: city.id, position: city.position }))
+    capitals.map((city) => ({ id: city.id, position: city.position })),
+    landDistance
   );
   for (const edge of railEdges) {
     const a = cities[edge.a];
     const b = cities[edge.b];
+    // Legacy RNG draw (see the road loop — keeps the RNG sequence stable).
+    rng.next();
     lines.push({
       id: `line_rail_${lines.length}`,
       kind: 'railway',
       cityA: a.id,
       cityB: b.id,
-      polyline: [a.position, jitteredMidpoint(a.position, b.position, rng, 0.08), b.position]
+      polyline: routePolylinePoints(landGrid, a.position, b.position, 'land')
     });
   }
 
   const coastalCitySet = new Set(input.coastalCityIds);
-  const ports = [...coastalCitySet].sort();
+  // A sea lane needs WATER at the harbor: only ports whose host cell really
+  // touches a water cell participate (defends the lane geometry against
+  // degenerate "ports" with no water access — their line could never be a
+  // natural sea route).
+  const hasWaterAccess = (cityId: string): boolean => {
+    const hostCell = cellIndexOf(cities[cityId].position, columns, cellSize);
+    const cx = hostCell % columns;
+    const cz = Math.floor(hostCell / columns);
+    return (
+      (cx > 0 && !land[hostCell - 1]) ||
+      (cx < columns - 1 && !land[hostCell + 1]) ||
+      (cz > 0 && !land[hostCell - columns]) ||
+      (cz < rows - 1 && !land[hostCell + columns])
+    );
+  };
+  const ports = [...coastalCitySet].filter(hasWaterAccess).sort();
   const linkedSeaPairs = new Set<string>();
   for (const cityId of ports) {
     const from = cities[cityId];
@@ -427,10 +475,9 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       if (other.countryId === from.countryId) continue;
       const pairKey = cityId < otherId ? `${cityId}|${otherId}` : `${otherId}|${cityId}`;
       if (linkedSeaPairs.has(pairKey)) continue;
-      const distance = Math.hypot(
-        from.position.x - other.position.x,
-        from.position.z - other.position.z
-      );
+      // Sea-route pairing uses the WATER distance — a harbor connects to the
+      // nearest FOREIGN harbor by actual sea lane, not by air line.
+      const distance = routeDistance(waterGrid, from.position, other.position);
       if (distance < bestDistance - 1e-9 || (Math.abs(distance - bestDistance) <= 1e-9 && otherId < (bestId ?? ''))) {
         bestDistance = distance;
         bestId = otherId;
@@ -444,14 +491,17 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       kind: 'seaRoute',
       cityA: from.id,
       cityB: other.id,
-      polyline: [from.position, other.position]
+      // Harbor line: follows the WATER (coastline-aware), with a gentle
+      // hashed bow so no two port pairs draw the same shape.
+      polyline: routePolylinePoints(waterGrid, from.position, other.position, 'water', {
+        bow: true
+      })
     });
   }
 
   // —— 3. sites: ports, resources (mines/oil), farms, factories, military ——
   // Lake cells are water: sites never target them.
-  const lakeCellSet = new Set<number>();
-  for (const lake of input.lakes) for (const cellIndex of lake.cells) lakeCellSet.add(cellIndex);
+  const lakeCellSetForSites = lakeCellSet;
   const sites: MapSite[] = [];
   const pushSite = (
     kind: MapSite['kind'],
@@ -489,7 +539,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     // Extractive resources: spread candidates, kind follows the local terrain.
     const targetResourceCount = Math.max(2, Math.min(5, Math.ceil(country.cellIds.length / 10)));
     const resourceCandidates = [...country.cellIds]
-      .filter((cellIndex) => !lakeCellSet.has(cellIndex))
+      .filter((cellIndex) => !lakeCellSetForSites.has(cellIndex))
       .sort((a, b) => elevation[b] - elevation[a] || a - b);
     const usedResourceCells = new Set<number>();
     const chosenCells = spreadCells(resourceCandidates, targetResourceCount, centroids);
@@ -526,7 +576,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     const desertCells = country.cellIds.filter(
       (cellIndex) =>
         (biomes[cellIndex] === 'desert' || biomes[cellIndex] === 'drylands') &&
-        !lakeCellSet.has(cellIndex) &&
+        !lakeCellSetForSites.has(cellIndex) &&
         !usedResourceCells.has(cellIndex)
     );
     const oilCount = Math.max(0, Math.min(3, Math.ceil(desertCells.length / 5)));
@@ -538,7 +588,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
 
     // Farms: grassland cells, spread for readability.
     const grassCells = country.cellIds.filter(
-      (cellIndex) => biomes[cellIndex] === 'grassland' && !lakeCellSet.has(cellIndex)
+      (cellIndex) => biomes[cellIndex] === 'grassland' && !lakeCellSetForSites.has(cellIndex)
     );
     const farmCount = Math.max(1, Math.min(3, Math.ceil(country.cellIds.length / 14)));
     for (const cellIndex of spreadCells(grassCells, farmCount, centroids)) {
@@ -549,7 +599,7 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
 
     // Lumber camps: forest cells → wood production sites (same pattern as farms).
     const forestCells = country.cellIds.filter(
-      (cellIndex) => biomes[cellIndex] === 'forest' && !lakeCellSet.has(cellIndex)
+      (cellIndex) => biomes[cellIndex] === 'forest' && !lakeCellSetForSites.has(cellIndex)
     );
     const lumberCount = Math.max(0, Math.min(3, Math.ceil(forestCells.length / 10)));
     for (const cellIndex of spreadCells(forestCells, lumberCount, centroids)) {

@@ -67,6 +67,56 @@ describe('strategic resource economy (global trade network)', () => {
     }, 0);
   }
 
+  it('the WORLD produces enough of every normal resource — no chronic unfilled shortage', () => {
+    // The user directive: global production must comfortably exceed global
+    // consumption for normal resources, so the "Global Supply is not
+    // enough" state never becomes the permanent world economy. Gold stays
+    // deliberately scarce (a luxury with no consumption).
+    const countryIds = mapModel.countryOrder.filter(
+      (id) => context.state.economy.resources[id] !== undefined
+    );
+    for (const resource of config.resources) {
+      if (resource.id === 'gold') continue;
+      const supply = globalSupplyOf(resource.id, countryIds);
+      const demand = globalDemandOf(resource.id, countryIds);
+      expect(
+        supply >= demand,
+        `${resource.id}: global supply ${supply} < global demand ${demand}`
+      ).toBe(true);
+      // No country may end the market pass with an unfilled shortage of a
+      // normal resource.
+      for (const countryId of countryIds) {
+        const unfilled = context.state.economy.resources[countryId]!.unfilledShortage[resource.id] ?? 0;
+        expect(unfilled, `${resource.id} unfilled in ${countryId}`).toBe(0);
+      }
+    }
+  });
+
+  it('abundance did not flatten the world — trade stays alive with exporters AND importers', () => {
+    const countryIds = mapModel.countryOrder.filter(
+      (id) => context.state.economy.resources[id] !== undefined
+    );
+    for (const resource of config.resources) {
+      if (resource.id === 'gold') continue;
+      let exporters = 0;
+      let importers = 0;
+      let surplusHolders = 0;
+      for (const countryId of countryIds) {
+        const record = context.state.economy.resources[countryId]!;
+        if ((record.exports[resource.id] ?? 0) > 0) exporters += 1;
+        if ((record.imports[resource.id] ?? 0) > 0) importers += 1;
+        const balance = (record.production[resource.id] ?? 0) - (record.consumption[resource.id] ?? 0);
+        if (balance > 0) surplusHolders += 1;
+      }
+      // At least one real sale, at least two real buyers, and a wider set
+      // of surplus holders (unsold potential is honest when one big
+      // exporter serves the whole demand).
+      expect(exporters, `${resource.id} exporters`).toBeGreaterThanOrEqual(1);
+      expect(importers, `${resource.id} importers`).toBeGreaterThanOrEqual(2);
+      expect(surplusHolders, `${resource.id} surplus holders`).toBeGreaterThanOrEqual(2);
+    }
+  });
+
   it('state creation computed a live resource record for every strategic country', () => {
     for (const countryId of mapModel.countryOrder) {
       const record = context.state.economy.resources[countryId];

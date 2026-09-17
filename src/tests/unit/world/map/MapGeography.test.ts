@@ -353,12 +353,14 @@ describe('Part 3 — water-safe city placement (spec §4)', () => {
       const hostCell = cityCellOf(city.id);
       const cx = hostCell % columns;
       const cz = Math.floor(hostCell / columns);
+      // The map EDGE itself is not water — only a REAL ocean neighbor makes
+      // a city coastal (edge cities get no ports / no fake sea lanes).
       const touchesOcean = [
         cx > 0 ? hostCell - 1 : -1,
         cx < columns - 1 ? hostCell + 1 : -1,
         cz > 0 ? hostCell - columns : -1,
         cz < rows - 1 ? hostCell + columns : -1
-      ].some((neighbor) => neighbor < 0 || features.biomes[neighbor] === 'ocean');
+      ].some((neighbor) => neighbor >= 0 && features.biomes[neighbor] === 'ocean');
       if (touchesOcean) {
         // Coastal: a port building exists for port cities.
         expect(city.infrastructure.portId !== null || city.gridId !== '').toBe(true);

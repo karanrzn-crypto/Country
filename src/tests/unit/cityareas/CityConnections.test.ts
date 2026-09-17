@@ -129,6 +129,26 @@ describe('City Connections — the city-level view of the City Areas network', (
     game.dispose();
   });
 
+  it('crossCountry matches the endpoint countries — international roads are مرزی (border) routes', () => {
+    const { game } = preparedGame(314);
+    const connections = cityConnectionsOf(game.gameState.cityAreas.network);
+    expect(connections.length).toBeGreaterThan(0);
+    for (const connection of connections) {
+      expect(connection.countryA).toBe(game.strategicMap.cities[connection.cityA].countryId);
+      expect(connection.countryB).toBe(game.strategicMap.cities[connection.cityB].countryId);
+      expect(connection.crossCountry).toBe(connection.countryA !== connection.countryB);
+      // A country-border road is always also a province-border road.
+      if (connection.crossCountry) expect(connection.crossProvince).toBe(true);
+    }
+    // Both classes exist on the multi-country map: the UI can distinguish
+    // مرزی (cross-country) from بین‌استانی (domestic inter-province).
+    const crossCountry = connections.filter((connection) => connection.crossCountry).length;
+    const domestic = connections.length - crossCountry;
+    expect(crossCountry).toBeGreaterThan(0);
+    expect(domestic).toBeGreaterThan(0);
+    game.dispose();
+  });
+
   it('connectionsOfCity is symmetric and merged road halves resolve to one route', () => {
     const { game } = preparedGame(315);
     const network = game.gameState.cityAreas.network;

@@ -1308,12 +1308,15 @@ function attemptGeneration(config: MapConfig, landFraction: number, options: Map
   for (const [cityId, hostCell] of hostCellOfCity) {
     const cx = hostCell % columns;
     const cz = Math.floor(hostCell / columns);
+    // A city is coastal only when a REAL ocean cell touches its host cell.
+    // The map edge itself is not water — counting it as ocean gave edge
+    // cities ports (and straight sea "lanes" over land) with no sea in sight.
     const touchesOcean = [
       cx > 0 ? hostCell - 1 : -1,
       cx < columns - 1 ? hostCell + 1 : -1,
       cz > 0 ? hostCell - columns : -1,
       cz < rows - 1 ? hostCell + columns : -1
-    ].some((neighbor) => neighbor < 0 || !landSet.has(neighbor));
+    ].some((neighbor) => neighbor >= 0 && !landSet.has(neighbor));
     if (touchesOcean) coastalCityIds.push(cityId);
   }
   const features = buildMapFeatures({
