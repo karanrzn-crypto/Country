@@ -17,6 +17,7 @@ import { buildGovernmentSlice } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
 import { createMacroEconomy } from '../economy/EconomySimulation';
 import { recomputeResourceEconomies } from '../economy/resources';
+import { emptyCountryResourceState } from '../economy/resourceTypes';
 import type { MacroEconomyState } from '../economy/macro';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { GameState } from './GameState';
@@ -231,10 +232,7 @@ export function healPhase2State(
   if (state.economy.resources === undefined) state.economy.resources = {};
   for (const countryId of mapModel.countryOrder) {
     if (state.economy.resources[countryId] === undefined) {
-      state.economy.resources[countryId] = {
-        production: {}, consumption: {}, imports: {}, exports: {},
-        importPolicy: {}, exportPolicy: {}, suppliers: {}, importCost: 0, exportIncome: 0
-      };
+      state.economy.resources[countryId] = emptyCountryResourceState();
     }
   }
   for (const countryId of Object.keys(state.economy.resources)) {

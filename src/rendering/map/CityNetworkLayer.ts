@@ -21,13 +21,17 @@ import { buildVertexElevationGrid, SURFACE_FILL_Y, SURFACE_RELIEF_AMPLITUDE } fr
  *  - cities highlighted with translucent discs, capitals with bright rings;
  *  - junction nodes marked with small diamonds.
  *
- * ROADS VISIBILITY: the road-class ribbons ARE roads on the map — they ride
- * above and follow the same polylines as the dedicated (thin) roads layer,
- * so with the ribbons up, toggling that layer alone changes nothing visible.
- * The renderer therefore forwards the roads layer flag here: roads OFF hides
- * the ROAD ribbons (railway/sea ribbons, discs, rings, junctions stay — they
- * belong to the City Areas view), roads ON restores the SAME mesh untouched
- * (visibility only — never a rebuild, never a data change).
+ * ROADS VISIBILITY (ONE source of truth — spec): the transport ribbons ARE
+ * lines on the map — they ride above and follow the same polylines as the
+ * dedicated (thin) roads/railways layers, so with the ribbons up, toggling
+ * those layers alone changes nothing visible. The renderer therefore
+ * forwards the ROADS layer flag here and EVERY transport ribbon class
+ * follows it — road routes, inter-city railways (the capital-to-capital
+ * spine) and sea links alike. Roads OFF → NO transport line of any kind is
+ * visible; roads ON → the SAME meshes come back untouched (visibility
+ * only — never a rebuild, never a data change). The city discs, capital
+ * rings and junction markers stay: they belong to the City Areas view,
+ * not to the roads.
  *
  * Performance contract (same as every map layer):
  *  - ONE merged vertex-colored ribbon mesh + 3 InstancedMeshes = ≤ 4 draw
@@ -61,6 +65,9 @@ export class CityNetworkLayer {
   private selectedConnectionId: string | null = null;
   /** The ROAD-class ribbon mesh — visibility follows the ROADS layer flag. */
   private roadRibbonMesh: THREE.Mesh | null = null;
+  /** The railway/sea-class ribbon mesh — SAME visibility source (one
+   *  ROADS flag governs every transport ribbon; no bypass paths). */
+  private otherRibbonMesh: THREE.Mesh | null = null;
   /** Last applied roads visibility (selection emphasis re-evaluates on flip). */
   private roadsVisible = true;
   /** Connections of the last rebuild (selection overlay source). */
@@ -85,9 +92,10 @@ export class CityNetworkLayer {
    * Per-frame sync: flips visibility and rebuilds ONLY when the network
    * shape changed (area/link counts — the topology is regenerated as a
    * whole, never mutated piecemeal). Cheap even when called every frame.
-   * `roadsVisible` is the ROADS layer flag: it hides/restores the ROAD
-   * ribbons WITHOUT touching the City Areas view itself (OFF = hide,
-   * ON = the same mesh back — data never rebuilt or dropped).
+   * `roadsVisible` is the ROADS layer flag — THE single visibility source
+   * for every transport ribbon (road / railway / sea): OFF hides them ALL
+   * (the capital-to-capital railway spine included), ON restores the SAME
+   * meshes — data never rebuilt or dropped.
    */
   sync(model: StrategicMapModel, network: CityAreaNetwork, visible: boolean, roadsVisible = true): void {
     const signature = `${Object.keys(network.areas).length}|${Object.keys(network.links).length}`;
@@ -96,10 +104,11 @@ export class CityNetworkLayer {
     }
     this.group.visible = visible;
     if (this.roadRibbonMesh !== null) this.roadRibbonMesh.visible = roadsVisible;
+    if (this.otherRibbonMesh !== null) this.otherRibbonMesh.visible = roadsVisible;
     if (roadsVisible !== this.roadsVisible) {
       this.roadsVisible = roadsVisible;
       // The selection emphasis rides ABOVE the route — re-evaluate it so a
-      // selected ROAD connection never stays bright while roads are hidden.
+      // selected connection never stays bright while roads are hidden.
       this.redrawSelection();
     }
   }
@@ -112,6 +121,11 @@ export class CityNetworkLayer {
   /** The ROAD-class ribbon mesh (visibility governed by the ROADS layer). */
   get roadRibbon(): THREE.Mesh | null {
     return this.roadRibbonMesh;
+  }
+
+  /** The railway/sea-class ribbon mesh — governed by the SAME ROADS flag. */
+  get otherRibbon(): THREE.Mesh | null {
+    return this.otherRibbonMesh;
   }
 
   /**
@@ -180,7 +194,11 @@ export class CityNetworkLayer {
       this.materials.push(material);
       const mesh = new THREE.Mesh(otherRibbon, material);
       mesh.renderOrder = 10;
+      mesh.visible = this.roadsVisible; // SAME visibility source as road ribbons
+      this.otherRibbonMesh = mesh;
       this.group.add(mesh);
+    } else {
+      this.otherRibbonMesh = null;
     }
 
     // —— 2. city highlight discs (all cities, one instanced mesh) ——
@@ -292,9 +310,9 @@ export class CityNetworkLayer {
     }
     const selected = this.connections.find((entry) => entry.id === this.selectedConnectionId);
     if (selected === undefined) return;
-    // A ROAD connection's emphasis is road display — never show it while the
-    // roads layer hides roads (railway/sea selections are unaffected).
-    if (selected.kind === 'road' && !this.roadsVisible) return;
+    // The emphasis rides above the route — a route display. Never show it
+    // while the roads layer hides transport lines (any kind).
+    if (!this.roadsVisible) return;
     const geometry = this.buildRibbonGeometry(this.lastModel, this.lastHeights, [selected], 0.5);
     if (geometry === null) return;
     this.selectionGeometry = geometry;
@@ -381,6 +399,7 @@ export class CityNetworkLayer {
     this.geometries.length = 0;
     this.materials.length = 0;
     this.roadRibbonMesh = null;
+    this.otherRibbonMesh = null;
     this.selectionGeometry?.dispose();
     this.selectionMaterial?.dispose();
     this.selectionMesh = null;

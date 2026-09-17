@@ -46,6 +46,51 @@
     "productionScale": 1.2,
     "exportShare": 0.5,
     "importMarkup": 1.25,
+    "priceTiers": {
+      "supply": { "low": 0.85, "medium": 1.0, "high": 1.25 },
+      "demand": { "low": 0.85, "medium": 1.0, "high": 1.15 }
+    },
+    "domesticBaseline": {
+      "cityTermScale": 0.25,
+      "cityTermMaxCities": 6,
+      "biomeWeight": 0.8,
+      "terrainWeight": 0.2,
+      "resources": {
+        "food": {
+          "base": 18,
+          "biomes": { "grassland": 1.0, "jungle": 0.7, "drylands": 0.55, "forest": 0.5, "tundra": 0.2, "desert": 0.1 },
+          "terrain": { "lowland": 1.0, "valley": 0.9, "plains": 0.85, "hills": 0.45, "plateau": 0.4, "mountain": 0.2, "highMountain": 0.1 }
+        },
+        "wood": {
+          "base": 8,
+          "biomes": { "forest": 1.0, "jungle": 0.85, "tundra": 0.45, "grassland": 0.3, "drylands": 0.15, "desert": 0.05 },
+          "terrain": { "valley": 0.8, "lowland": 0.7, "hills": 0.6, "plains": 0.5, "mountain": 0.5, "plateau": 0.4, "highMountain": 0.3 }
+        },
+        "oil": {
+          "base": 6,
+          "biomes": { "desert": 1.0, "drylands": 0.65, "tundra": 0.45, "grassland": 0.35, "forest": 0.15, "jungle": 0.15 },
+          "terrain": { "plateau": 0.7, "lowland": 0.6, "hills": 0.6, "valley": 0.5, "plains": 0.5, "mountain": 0.4, "highMountain": 0.2 }
+        },
+        "iron": {
+          "base": 6,
+          "terrain": { "hills": 1.0, "mountain": 0.9, "highMountain": 0.75, "plateau": 0.55, "plains": 0.35, "valley": 0.3, "lowland": 0.25 }
+        },
+        "coal": {
+          "base": 6,
+          "terrain": { "hills": 1.0, "mountain": 0.85, "plateau": 0.75, "highMountain": 0.6, "plains": 0.45, "lowland": 0.35, "valley": 0.35 }
+        },
+        "copper": {
+          "base": 4,
+          "terrain": { "mountain": 1.0, "highMountain": 0.9, "hills": 0.7, "plateau": 0.5, "plains": 0.25, "valley": 0.25, "lowland": 0.2 }
+        },
+        "gold": {
+          "base": 1.5,
+          "cityFactor": 0,
+          "biomeNeutral": 0,
+          "terrain": { "highMountain": 1.0, "mountain": 0.85, "hills": 0.35, "plateau": 0.15 }
+        }
+      }
+    },
     "resources": [
       { "id": "oil", "name": "نفت", "price": 2.0 },
       { "id": "wood", "name": "چوب", "price": 0.8 },

@@ -1090,6 +1090,31 @@ export class Game {
     this.events.emit('economy.resourceTradeChanged', { countryId, resourceId, kind: 'export', active });
   }
 
+  /**
+   * Pins (or unpins, supplierId null → automatic market choice) the country
+   * the player buys THIS resource from. The pin is honored only while the
+   * chosen seller has spare surplus; otherwise the market falls back to the
+   * largest seller. Recomputes so suppliers/costs update immediately.
+   */
+  economySetSupplier(countryId: string, resourceId: string, supplierId: string | null): void {
+    this.assertInitialized();
+    const record = this.state.economy.resources[countryId];
+    if (record === undefined || !this.isKnownStrategicResource(resourceId)) {
+      this.log.warn(`economySetSupplier: unknown country/resource "${countryId}/${resourceId}"`);
+      return;
+    }
+    if (supplierId !== null) {
+      if (supplierId === countryId || this.state.economy.resources[supplierId] === undefined) {
+        this.log.warn(`economySetSupplier: invalid supplier "${supplierId}" for "${countryId}/${resourceId}"`);
+        return;
+      }
+    }
+    record.preferredSuppliers ??= {}; // old-save records healed on first write
+    record.preferredSuppliers[resourceId] = supplierId;
+    recomputeResourceEconomies(this.state, this.mapModel, this.data.economyData.strategicResources);
+    this.events.emit('economy.supplierChanged', { countryId, resourceId, supplierId });
+  }
+
   private isKnownStrategicResource(resourceId: string): boolean {
     return this.data.economyData.strategicResources.resources.some((resource) => resource.id === resourceId);
   }

@@ -37,6 +37,12 @@ import {
   type CountryResourceState,
   type ResourceStatus
 } from './resourceTypes';
+import { countryBaselineProduction } from './domesticBaseline';
+import {
+  demandFactorFromNeeds,
+  tiersFromSpares,
+  type TradeTier
+} from './market';
 
 // Record shapes live in the LEAF types module (state imports them without
 // reaching this logic — keeps GameState → economySlice → resourceTypes
@@ -273,10 +279,13 @@ export function resourceDisplayStatusOf(
 /**
  * THE single recompute path for the whole strategic resource economy.
  * Recomputes production/consumption for every strategic country from the
- * live map + state, resolves the world market deterministically (importers
- * in canonical country order, largest exporter surplus first, tie → order)
- * and writes state.economy.resources. Policies are PRESERVED across passes;
- * trade amounts auto-cap as surpluses shrink or vanish.
+ * live map + state (production = attributed city deposits + the GEOGRAPHY
+ * baseline — spec §3), resolves the world market deterministically (the
+ * PLAYER-pinned supplier wins when it has spare — else largest remaining
+ * spare, tie → order) and writes state.economy.resources. Policies and the
+ * preferred suppliers are PRESERVED across passes; trade amounts auto-cap
+ * as surpluses shrink or vanish. Import cost / export income use the TIER
+ * price factors (cheap sellers, eager buyers — spec §4/§6/§7).
  */
 export function recomputeResourceEconomies(
   state: GameState,
@@ -297,11 +306,19 @@ export function recomputeResourceEconomies(
   });
 
   // —— pass 1: production + consumption from live data ——
+  // Production = city deposits + the geography-driven domestic baseline
+  // (spec §3: no country sits irrationally at zero for nearly everything).
   const productionCache = new Map<string, Record<string, number>>();
   const computed = new Map<string, { production: Record<string, number>; consumption: Record<string, number> }>();
   for (const countryId of order) {
+    const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
+    const baseline = countryBaselineProduction(mapModel, countryId, config.domesticBaseline);
+    const production: Record<string, number> = { ...deposits };
+    for (const [resourceId, amount] of Object.entries(baseline)) {
+      production[resourceId] = roundTo((production[resourceId] ?? 0) + amount, 2);
+    }
     computed.set(countryId, {
-      production: countryResourceProduction(mapModel, countryId, config, productionCache),
+      production,
       consumption: countryResourceConsumption(state, countryId, config)
     });
   }
@@ -311,10 +328,15 @@ export function recomputeResourceEconomies(
   const importsOf = new Map<string, Record<string, number>>();
   const exportsOf = new Map<string, Record<string, number>>();
   const suppliersOf = new Map<string, Record<string, string | null>>();
+  // Per-resource seller price tiers (from the CURRENT pass's spares) and the
+  // market's average willingness to pay — the ledger's tier pricing inputs.
+  const sellerTiersOf = new Map<string, Record<string, TradeTier>>();
+  const demandFactorOf = new Map<string, number>();
   for (const resourceId of strategicResourceIds(config)) {
     // Exports first: policy ON → offer the configured share of the surplus.
     const exports: Record<string, number> = {};
     const netSurplus: Record<string, number> = {};
+    const needs: Record<string, number> = {};
     for (const countryId of order) {
       const { production, consumption } = computed.get(countryId)!;
       const surplus = Math.max(0, (production[resourceId] ?? 0) - (consumption[resourceId] ?? 0));
@@ -322,8 +344,16 @@ export function recomputeResourceEconomies(
       const offered = policy ? surplus * config.exportShare : 0;
       exports[countryId] = roundTo(offered, 2);
       netSurplus[countryId] = roundTo(surplus - offered, 2); // offered units leave the market pool
+      const need = roundTo((consumption[resourceId] ?? 0) - (production[resourceId] ?? 0), 2);
+      if (need > EPSILON) needs[countryId] = need;
     }
-    // Imports: requested deficit, capped by what the world can spare.
+    // Tiers BEFORE any import buys: the surplus field the sellers really
+    // offer from (net of their own export commitments — spec §4's basis).
+    sellerTiersOf.set(resourceId, tiersFromSpares(netSurplus));
+    demandFactorOf.set(resourceId, demandFactorFromNeeds(needs, config.priceTiers.demand));
+    // Imports: requested deficit, capped by what the seller can spare.
+    // The PLAYER-pinned supplier (preferredSuppliers) wins when it has
+    // spare — otherwise the market picks the largest remaining spare.
     const suppliers: Record<string, string | null> = {};
     for (const countryId of order) {
       const { production, consumption } = computed.get(countryId)!;
@@ -333,15 +363,22 @@ export function recomputeResourceEconomies(
         suppliers[countryId] = null;
         continue;
       }
-      // Supplier = other country with the largest remaining spare surplus.
+      const preferred = state.economy.resources[countryId]?.preferredSuppliers?.[resourceId] ?? null;
       let bestId: string | null = null;
       let bestSpare = 0;
-      for (const otherId of order) {
-        if (otherId === countryId) continue;
-        const spare = netSurplus[otherId] ?? 0;
-        if (spare > bestSpare + EPSILON || (Math.abs(spare - bestSpare) <= EPSILON && spare > EPSILON && (bestId === null || otherId < bestId))) {
-          bestSpare = spare;
-          bestId = otherId;
+      if (preferred !== null && preferred !== countryId && (netSurplus[preferred] ?? 0) > EPSILON) {
+        bestId = preferred;
+        bestSpare = netSurplus[preferred] ?? 0;
+      }
+      if (bestId === null) {
+        // Automatic market choice: other country with the largest spare.
+        for (const otherId of order) {
+          if (otherId === countryId) continue;
+          const spare = netSurplus[otherId] ?? 0;
+          if (spare > bestSpare + EPSILON || (Math.abs(spare - bestSpare) <= EPSILON && spare > EPSILON && (bestId === null || otherId < bestId))) {
+            bestSpare = spare;
+            bestId = otherId;
+          }
         }
       }
       const bought = Math.min(deficit, Math.max(0, bestSpare));
@@ -354,16 +391,32 @@ export function recomputeResourceEconomies(
     }
   }
 
-  // —— pass 3: write records (policies preserved) ——
+  // —— pass 3: write records (policies + preferred suppliers preserved) ——
+  // Import cost uses the SUPPLIER's price tier (cheap sellers charge less);
+  // export income uses the market's average DEMAND tier (eager buyers pay
+  // more) — spec §7's simple market reaction, internal money only.
+  const records = new Map<string, CountryResourceState>();
   for (const countryId of order) {
     const previous = state.economy.resources[countryId] ?? emptyCountryResourceState();
+    records.set(countryId, previous);
+  }
+  for (const countryId of order) {
+    const previous = records.get(countryId)!;
     const { production, consumption } = computed.get(countryId)!;
     let importCost = 0;
     let exportIncome = 0;
     for (const resourceId of strategicResourceIds(config)) {
       const price = priceOf.get(resourceId) ?? 0;
-      importCost += (importsOf.get(countryId)?.[resourceId] ?? 0) * price * config.importMarkup;
-      exportIncome += (exportsOf.get(countryId)?.[resourceId] ?? 0) * price;
+      const imports = importsOf.get(countryId)?.[resourceId] ?? 0;
+      const supplierId = suppliersOf.get(countryId)?.[resourceId] ?? null;
+      if (imports > 0 && supplierId !== null) {
+        const tier = sellerTiersOf.get(resourceId)?.[supplierId] ?? 'medium';
+        importCost += imports * price * config.importMarkup * config.priceTiers.supply[tier];
+      }
+      const exports = exportsOf.get(countryId)?.[resourceId] ?? 0;
+      if (exports > 0) {
+        exportIncome += exports * price * (demandFactorOf.get(resourceId) ?? 1);
+      }
     }
     state.economy.resources[countryId] = {
       production,
@@ -373,6 +426,7 @@ export function recomputeResourceEconomies(
       importPolicy: { ...previous.importPolicy },
       exportPolicy: { ...previous.exportPolicy },
       suppliers: suppliersOf.get(countryId) ?? {},
+      preferredSuppliers: { ...(previous.preferredSuppliers ?? {}) },
       importCost: roundTo(importCost, 2),
       exportIncome: roundTo(exportIncome, 2)
     };

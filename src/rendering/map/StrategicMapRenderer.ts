@@ -58,6 +58,10 @@ export class StrategicMapRenderer {
   private readonly gridLayer: GridLayer;
   private readonly surfaceLayer: SurfaceLayer;
   private readonly fillLayers = new Map<MapLayerId, CellFillLayer>();
+  /** Transport-line groups that ALSO follow the master ROADS flag (the
+   *  railway capital spine and sea routes must never bypass it). */
+  private readonly railwaysGroup: THREE.Group;
+  private readonly seaRoutesGroup: THREE.Group;
   private readonly lazyLayers = new Map<
     MapLayerId,
     { ensureBuilt(model: StrategicMapModel): void; dispose(): void }
@@ -139,6 +143,8 @@ export class StrategicMapRenderer {
     const roadsLayer = createRoadsLayer(theme, lineGrid);
     const railwaysLayer = createRailwaysLayer(theme, lineGrid);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
+    this.railwaysGroup = railwaysLayer.group;
+    this.seaRoutesGroup = seaRoutesLayer.group;
     const portsLayer = new SiteLayer(['port'], 'circle', theme);
     const industryLayer = new SiteLayer(['farm', 'factory'], 'square', theme);
     const resourcesLayer = new SiteLayer(['mine', 'oil', 'lumber'], 'diamond', theme);
@@ -332,15 +338,24 @@ export class StrategicMapRenderer {
 
     // 2c. City Areas network: lazy + signature-guarded rebuild on show;
     //     visibility follows the layer flag like every other layer. The
-    //     ROADS flag is forwarded: the network's ROAD ribbons ARE the roads
-    //     the player sees (they cover the thin roads-layer lines), so Roads
-    //     OFF must hide them too — visibility only, data never touched.
+    //     ROADS flag is forwarded as the SINGLE transport-visibility source:
+    //     the network's ribbons (road AND railway/sea — the capital-to-
+    //     capital spine included) are the transport lines the player sees,
+    //     so Roads OFF must hide them ALL — visibility only, data untouched.
     this.cityNetworkLayer.sync(
       this.model,
       state.cityAreas.network,
       map.layerVisibility.cityAreas !== false,
       map.layerVisibility.roads !== false
     );
+
+    // 2d. The master ROADS gate (ONE visibility source for every transport
+    //     line network — spec): railways and sea routes may have their own
+    //     toggles, but they can never show while ROADS is OFF. Roads ON
+    //     restores them exactly per their own flags.
+    const roadsOn = map.layerVisibility.roads !== false;
+    this.railwaysGroup.visible = roadsOn && map.layerVisibility.railways !== false;
+    this.seaRoutesGroup.visible = roadsOn && map.layerVisibility.ports !== false;
 
     // 3. Selection (country highlight, city ring, border emphasis, grid-cell
     //    fill/outline, city-connection emphasis) + the persistent player-country

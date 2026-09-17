@@ -29,6 +29,11 @@ export interface CountryResourceState {
   exportPolicy: Record<string, boolean>;
   /** resourceId → the supplier country the market routes the import through. */
   suppliers: Record<string, string | null>;
+  /**
+   * resourceId → the supplier country the PLAYER pinned for imports
+   * (null/absent = automatic market choice). Preserved across recomputes.
+   */
+  preferredSuppliers: Record<string, string | null>;
   /** Last computed monthly import cost (M$) — enters the ledger as spending. */
   importCost: number;
   /** Last computed monthly export income (M$) — enters the ledger as revenue. */
@@ -48,6 +53,7 @@ export function emptyCountryResourceState(
     importPolicy: { ...importPolicy },
     exportPolicy: { ...exportPolicy },
     suppliers: {},
+    preferredSuppliers: {},
     importCost: 0,
     exportIncome: 0
   };

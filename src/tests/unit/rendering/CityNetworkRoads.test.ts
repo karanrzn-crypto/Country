@@ -100,4 +100,71 @@ describe('CityNetworkLayer respects the Roads layer flag', () => {
     expect(emphasisRestored.length).toBe(1);
     layer.setSelectedConnection(null);
   });
+
+  // ———— THE remaining defect (user report): the capital-to-capital RAILWAY
+  // spine (and sea links) rendered through the SAME layer but bypassed the
+  // Roads toggle — only the road-class mesh followed it. ONE visibility
+  // source now governs EVERY transport ribbon class. ————
+  it('the premise holds — the network contains capital-to-capital railway routes', () => {
+    const connections = cityConnectionsOf(network);
+    const railwayConnections = connections.filter((connection) => connection.kind === 'railway');
+    expect(railwayConnections.length).toBeGreaterThan(0);
+    // The railway spine connects CAPITALS of the countries by construction
+    // (MapFeatures: MST over the capitals).
+    const capitalPairs = railwayConnections.filter((connection) => {
+      const a = mapModel.cities[connection.cityA];
+      const b = mapModel.cities[connection.cityB];
+      return a?.isCapital === true && b?.isCapital === true;
+    });
+    expect(capitalPairs.length).toBeGreaterThan(0);
+  });
+
+  it('roads OFF hides EVERY transport ribbon — capital spine included; ON restores the SAME meshes', () => {
+    layer.sync(mapModel, network, true, true);
+    const roadMesh = layer.roadRibbon;
+    const otherMesh = layer.otherRibbon; // railway + sea ribbons
+    expect(roadMesh).not.toBeNull();
+    expect(otherMesh).not.toBeNull();
+    expect(roadMesh!.visible).toBe(true);
+    expect(otherMesh!.visible).toBe(true);
+
+    // ROADS OFF → BOTH meshes hide (nothing road-like remains on the map).
+    layer.sync(mapModel, network, true, false);
+    expect(layer.group.visible).toBe(true); // the City Areas view itself stays
+    expect(roadMesh!.visible).toBe(false);
+    expect(otherMesh!.visible).toBe(false);
+
+    // ROADS ON → the SAME meshes return (visibility only — never a rebuild).
+    layer.sync(mapModel, network, true, true);
+    expect(layer.roadRibbon).toBe(roadMesh);
+    expect(layer.otherRibbon).toBe(otherMesh);
+    expect(roadMesh!.visible).toBe(true);
+    expect(otherMesh!.visible).toBe(true);
+  });
+
+  it('a selected RAILWAY (capital) connection also never stays highlighted while roads are hidden', () => {
+    const railwayConnection = cityConnectionsOf(network).find(
+      (connection) => connection.kind === 'railway'
+    );
+    expect(railwayConnection).toBeDefined();
+    layer.setSelectedConnection(railwayConnection!.id);
+    layer.sync(mapModel, network, true, true);
+    const emphasisWhenOn = layer.group.children.filter(
+      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
+    );
+    expect(emphasisWhenOn.length).toBe(1);
+
+    layer.sync(mapModel, network, true, false);
+    const emphasisWhenOff = layer.group.children.filter(
+      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
+    );
+    expect(emphasisWhenOff.length).toBe(0);
+
+    layer.sync(mapModel, network, true, true);
+    const emphasisRestored = layer.group.children.filter(
+      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
+    );
+    expect(emphasisRestored.length).toBe(1);
+    layer.setSelectedConnection(null);
+  });
 });

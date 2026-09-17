@@ -193,6 +193,12 @@ export interface GameEventMap {
     readonly kind: 'import' | 'export';
     readonly active: boolean;
   };
+  /** Import supplier changed (pin a seller country; null = automatic). */
+  'economy.supplierChanged': {
+    readonly countryId: string;
+    readonly resourceId: string;
+    readonly supplierId: string | null;
+  };
 }
 
 export type GameEventName = keyof GameEventMap;

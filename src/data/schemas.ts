@@ -45,6 +45,17 @@ export const EQUIPMENT_SCHEMA: FieldSchema = {
   }
 };
 
+/** { low, medium, high } price multipliers — all positive. */
+const tierFactorsSchema: FieldSchema = {
+  type: 'object',
+  allowUnknown: false,
+  fields: {
+    low: positiveNumber,
+    medium: positiveNumber,
+    high: positiveNumber
+  }
+};
+
 export const ECONOMY_SCHEMA: FieldSchema = {
   type: 'object',
   allowUnknown: false,
@@ -64,6 +75,39 @@ export const ECONOMY_SCHEMA: FieldSchema = {
         productionScale: positiveNumber,
         exportShare: { type: 'number', min: 0, max: 1 },
         importMarkup: positiveNumber,
+        priceTiers: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            supply: tierFactorsSchema,
+            demand: tierFactorsSchema
+          }
+        },
+        domesticBaseline: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            cityTermScale: { type: 'number', min: 0, max: 10 },
+            cityTermMaxCities: { type: 'number', min: 0, max: 1000, integer: true },
+            biomeWeight: { type: 'number', min: 0, max: 1 },
+            terrainWeight: { type: 'number', min: 0, max: 1 },
+            resources: {
+              type: 'record',
+              values: {
+                type: 'object',
+                allowUnknown: false,
+                fields: {
+                  base: positiveNumber,
+                  biomes: { type: 'optional', inner: { type: 'record', values: { type: 'number', min: 0, max: 1 } } },
+                  biomeNeutral: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } },
+                  terrain: { type: 'optional', inner: { type: 'record', values: { type: 'number', min: 0, max: 1 } } },
+                  terrainNeutral: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } },
+                  cityFactor: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } }
+                }
+              }
+            }
+          }
+        },
         resources: {
           type: 'array',
           minLength: 1,

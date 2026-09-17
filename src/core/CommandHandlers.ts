@@ -48,6 +48,7 @@ export interface CoreGameApi {
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
   economySetImportPolicy(countryId: string, resourceId: string, active: boolean): void;
   economySetExportPolicy(countryId: string, resourceId: string, active: boolean): void;
+  economySetSupplier(countryId: string, resourceId: string, supplierId: string | null): void;
   readonly ui: UIManager | null;
   readonly bus: EventBus;
   readonly log: Logger;
@@ -103,4 +104,5 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   );
   bus.register('economy.setImportPolicy', (cmd) => game.economySetImportPolicy(cmd.countryId, cmd.resourceId, cmd.active));
   bus.register('economy.setExportPolicy', (cmd) => game.economySetExportPolicy(cmd.countryId, cmd.resourceId, cmd.active));
+  bus.register('economy.setSupplier', (cmd) => game.economySetSupplier(cmd.countryId, cmd.resourceId, cmd.supplierId));
 }

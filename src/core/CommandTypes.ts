@@ -80,4 +80,5 @@ export type GameCommand =
   | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }
   // —— strategic resource economy (import/export policies) ——
   | { readonly type: 'economy.setImportPolicy'; readonly countryId: string; readonly resourceId: string; readonly active: boolean }
-  | { readonly type: 'economy.setExportPolicy'; readonly countryId: string; readonly resourceId: string; readonly active: boolean };
+  | { readonly type: 'economy.setExportPolicy'; readonly countryId: string; readonly resourceId: string; readonly active: boolean }
+  | { readonly type: 'economy.setSupplier'; readonly countryId: string; readonly resourceId: string; readonly supplierId: string | null };

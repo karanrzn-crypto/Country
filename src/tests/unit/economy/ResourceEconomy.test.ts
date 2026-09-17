@@ -27,6 +27,7 @@ import {
   emptyCountryResourceState
 } from '../../../economy/resources';
 import { processMonthEconomy } from '../../../economy/EconomySimulation';
+import { sellerPriceTiersOf } from '../../../economy/market';
 import type { StrategicMapModel } from '../../../world/map/MapTypes';
 
 describe('strategic resource economy', () => {
@@ -410,4 +411,174 @@ describe('strategic resource economy', () => {
       }
     }
   });
+
+  // ————————— Domestic baseline production (spec §3) —————————
+  it('every country produces SOME of most resources from its own geography', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      const zeroCount = config.resources.filter((resource) => (record.production[resource.id] ?? 0) <= 0).length;
+      // «هیچ کشوری برای تقریباً همه چیز تولید صفر نداشته باشد» — at most one
+      // genuinely rare resource (gold in flat lands) may sit at zero.
+      expect(zeroCount).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('baseline production is geography-driven — vectors differ, never hand-made', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    // The production recorded in state is the DEPOSIT production + the
+    // geography baseline — baseline only ADDS, never replaces.
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      const deposits = countryResourceProduction(mapModel, countryId, config);
+      for (const [resourceId, depositAmount] of Object.entries(deposits)) {
+        expect(record.production[resourceId] ?? 0).toBeGreaterThanOrEqual(depositAmount - 1e-6);
+      }
+    }
+    // Different geography → different vectors (wood/food/oil spread widely).
+    const wood = mapModel.countryOrder.map(
+      (countryId) => context.state.economy.resources[countryId]!.production['wood'] ?? 0
+    );
+    expect(new Set(wood).size).toBeGreaterThan(1);
+  });
+
+  // ————————— Supplier choice + tier pricing (spec §4/§5/§7) —————————
+  it('the player can pick the seller; the market honors the pin while it has spare', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    // Find a country + short resource with at least TWO sellers on the market.
+    const spareOf = (resourceId: string, excludeCountryId: string): string[] =>
+      mapModel.countryOrder.filter((otherId) => {
+        if (otherId === excludeCountryId) return false;
+        const other = context.state.economy.resources[otherId]!;
+        return (other.production[resourceId] ?? 0) - (other.consumption[resourceId] ?? 0) > 0;
+      });
+    let buyerId: string | null = null;
+    let resourceShort: string | null = null;
+    outer: for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        if (
+          resourceStatusOf(record, resource.id) === 'shortage' &&
+          spareOf(resource.id, countryId).length >= 2
+        ) {
+          buyerId = countryId;
+          resourceShort = resource.id;
+          break outer;
+        }
+      }
+    }
+    if (buyerId === null || resourceShort === null) return; // map lacks such a market — nothing to prove here
+
+    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId: resourceShort, active: true });
+    game.commandBus.flush();
+    const sellers = spareOf(resourceShort, buyerId);
+    const pinned = sellers[sellers.length - 1]; // a specific (not auto-largest) seller
+    game.commandBus.send({ type: 'economy.setSupplier', countryId: buyerId, resourceId: resourceShort, supplierId: pinned });
+    game.commandBus.flush();
+
+    const record = context.state.economy.resources[buyerId]!;
+    expect(record.preferredSuppliers[resourceShort]).toBe(pinned);
+    expect(record.suppliers[resourceShort]).toBe(pinned);
+    expect(record.imports[resourceShort] ?? 0).toBeGreaterThan(0);
+
+    // Unpin → automatic market choice again.
+    game.commandBus.send({ type: 'economy.setSupplier', countryId: buyerId, resourceId: resourceShort, supplierId: null });
+    game.commandBus.flush();
+    const unpinned = context.state.economy.resources[buyerId]!;
+    expect(unpinned.preferredSuppliers[resourceShort] ?? null).toBeNull();
+    // Auto still buys from the LARGEST spare seller.
+    let largest: string | null = null;
+    let largestSpare = 0;
+    for (const sellerId of sellers) {
+      const seller = context.state.economy.resources[sellerId]!;
+      const spare = (seller.production[resourceShort] ?? 0) - (seller.consumption[resourceShort] ?? 0);
+      if (spare > largestSpare) {
+        largestSpare = spare;
+        largest = sellerId;
+      }
+    }
+    expect(unpinned.suppliers[resourceShort]).toBe(largest);
+  });
+
+  it('tier pricing: a bigger seller is cheaper — the ledger reflects the tier (§4/§7)', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    const buyerId = mapModel.countryOrder[0];
+    // Any resource this country imports right now (or can import) works.
+    let resourceId: string | null = null;
+    for (const resource of config.resources) {
+      const deficit = (record0Consumption(context, buyerId, resource.id)) - (record0Production(context, buyerId, resource.id));
+      const hasSellers = mapModel.countryOrder.some((otherId) => {
+        if (otherId === buyerId) return false;
+        const other = context.state.economy.resources[otherId]!;
+        return (other.production[resource.id] ?? 0) - (other.consumption[resource.id] ?? 0) > 0;
+      });
+      if (deficit > 0 && hasSellers) {
+        resourceId = resource.id;
+        break;
+      }
+    }
+    if (resourceId === null) return; // nothing importable on this map — nothing to prove here
+    const resource = config.resources.find((candidate) => candidate.id === resourceId)!;
+
+    // Isolate: import ONLY this resource (importCost is a per-country SUM).
+    for (const other of config.resources) {
+      if (other.id !== resourceId) {
+        game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId: other.id, active: false });
+      }
+    }
+    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId, active: true });
+    game.commandBus.flush();
+    const record = context.state.economy.resources[buyerId]!;
+    const imports = record.imports[resourceId] ?? 0;
+    const supplierId = record.suppliers[resourceId];
+    expect(imports).toBeGreaterThan(0);
+    expect(supplierId).not.toBeNull();
+
+    // The unit cost = price × markup × tierFactor(supplier tier) — exactly.
+    const tiers = sellerPriceTiersOf(context.state.economy.resources, mapModel.countryOrder.filter((id) => id !== buyerId), resourceId);
+    const tier = tiers[supplierId!] ?? 'medium';
+    const expectedUnitCost = resource.price * config.importMarkup * config.priceTiers.supply[tier];
+    expect(record.importCost).toBeGreaterThan(0);
+    expect(record.importCost / imports).toBeCloseTo(expectedUnitCost, 1);
+
+    // Export income carries the market's willingness to pay (demand tiers).
+    let exporterId: string | null = null;
+    let exportResource: string | null = null;
+    outer: for (const countryId of mapModel.countryOrder) {
+      const candidate = context.state.economy.resources[countryId]!;
+      for (const candidateResource of config.resources) {
+        if (
+          (candidate.production[candidateResource.id] ?? 0) - (candidate.consumption[candidateResource.id] ?? 0) > 0 &&
+          mapModel.countryOrder.some((otherId) => {
+            const other = context.state.economy.resources[otherId]!;
+            return (other.consumption[candidateResource.id] ?? 0) - (other.production[candidateResource.id] ?? 0) > 0;
+          })
+        ) {
+          exporterId = countryId;
+          exportResource = candidateResource.id;
+          break outer;
+        }
+      }
+    }
+    if (exporterId === null || exportResource === null) return;
+    game.commandBus.send({ type: 'economy.setExportPolicy', countryId: exporterId, resourceId: exportResource, active: true });
+    game.commandBus.flush();
+    const exporter = context.state.economy.resources[exporterId]!;
+    const sold = exporter.exports[exportResource] ?? 0;
+    expect(sold).toBeGreaterThan(0);
+    const exportPrice = config.resources.find((candidate) => candidate.id === exportResource)!.price;
+    // The unit income is price × (average demand factor) — a REAL market
+    // reaction (≥ 0.5 of the base price whatever the mix, sanity-bounded).
+    expect(exporter.exportIncome / sold).toBeGreaterThan(0);
+    expect(exporter.exportIncome / sold / exportPrice).toBeGreaterThan(0.5);
+    expect(exporter.exportIncome / sold / exportPrice).toBeLessThan(1.5);
+  });
 });
+
+function record0Production(context: { state: import('../../../state/GameState').GameState }, countryId: string, resourceId: string): number {
+  return context.state.economy.resources[countryId]?.production[resourceId] ?? 0;
+}
+
+function record0Consumption(context: { state: import('../../../state/GameState').GameState }, countryId: string, resourceId: string): number {
+  return context.state.economy.resources[countryId]?.consumption[resourceId] ?? 0;
+}
