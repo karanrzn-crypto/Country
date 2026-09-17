@@ -416,6 +416,54 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 12,
+    to: 13,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v12→v13: save payload is not an object');
+      }
+      // The 100% budget pool + the 4-level tax replaced the three tax rates
+      // and the independent GDP-share levers (spec §1/§4/§9):
+      //  - `shares` derives from the OLD spending mix (the military fraction
+      //    of total spending carries the saved posture over),
+      //  - `tax` maps from the old combined rate burden (defaults → medium),
+      //  - `taxRates` is deleted (the validator rejects unknown fields),
+      //  - spendingShares stay (they become the derived money plumbing).
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { government?: { countries?: Record<string, Record<string, unknown>> } };
+      };
+      const countries = clone.state?.government?.countries;
+      if (countries !== undefined) {
+        for (const record of Object.values(countries)) {
+          const budget = record?.['budget'] as Record<string, unknown> | undefined;
+          if (budget === undefined || typeof budget !== 'object') continue;
+          // Records rebuilt mid-chain (v6→v7) already carry the new shape —
+          // only migrate records that still carry the legacy `taxRates`.
+          const rates = budget['taxRates'];
+          if (rates === undefined || rates === null || typeof rates !== 'object') continue;
+          const spending = (budget['spendingShares'] ?? {}) as Record<string, number>;
+          let total = 0;
+          let military = 0;
+          for (const [category, share] of Object.entries(spending)) {
+            if (typeof share !== 'number' || !Number.isFinite(share) || share < 0) continue;
+            total += share;
+            if (category === 'military') military = share;
+          }
+          const militaryFraction = total > 1e-9 ? Math.min(1, Math.max(0, military / total)) : 0.15;
+          budget['shares'] = { economic: 1 - militaryFraction, military: militaryFraction };
+          const typedRates = rates as Record<string, number>;
+          const burden =
+            (typeof typedRates.income === 'number' ? typedRates.income : 0) +
+            (typeof typedRates.corporate === 'number' ? typedRates.corporate : 0) +
+            (typeof typedRates.trade === 'number' ? typedRates.trade : 0);
+          budget['tax'] = burden <= 0.36 ? 'low' : burden <= 0.55 ? 'medium' : burden <= 0.75 ? 'high' : 'max';
+          delete budget['taxRates'];
+        }
+      }
+      return clone;
+    }
   }
 ];
 

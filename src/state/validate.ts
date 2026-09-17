@@ -161,14 +161,14 @@ const governmentCountrySchema: FieldSchema = {
     budget: {
       type: 'object',
       fields: {
-        taxRates: {
+        shares: {
           type: 'object',
           fields: {
-            income: { type: 'number', min: 0, max: 1 },
-            corporate: { type: 'number', min: 0, max: 1 },
-            trade: { type: 'number', min: 0, max: 1 }
+            economic: { type: 'number', min: 0, max: 1 },
+            military: { type: 'number', min: 0, max: 1 }
           }
         },
+        tax: { type: 'enum', values: ['low', 'medium', 'high', 'max'] },
         spendingShares: {
           type: 'object',
           fields: {

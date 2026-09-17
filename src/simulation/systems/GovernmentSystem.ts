@@ -29,6 +29,7 @@ import type { SimulationSystemDef } from '../SimulationEngine';
 import { absoluteMonthIndex } from '../../time/Calendar';
 import { recomputeResourceEconomies } from '../../economy/resources';
 import { processMonthEconomy } from '../../economy/EconomySimulation';
+import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
 import { expireOverdueEvents, firePendingEvent, newEventInstanceId, rollEvents } from '../../government/EventEngine';
 import { accrueCampaignEffort, applyElectionOutcome, campaignPhaseActive, computeElectionOutcome, startCampaign } from '../../government/Elections';
@@ -91,6 +92,13 @@ export class GovernmentSystem implements SimulationSystemDef {
     // Bills the country's trade flows resolved by THIS month's world pass
     // (the global trade network ran once, above, before any ledger).
     processMonthEconomy(state, countryId, rng);
+
+    // —— 1.5 budget & tax effects (REAL state, spec §2/§3/§4) ——
+    // Economic budget grows urban development (construction speed); military
+    // budget produces equipment and expands the army. The pool is 100%, so
+    // moving the split visibly trades these two effects against each other.
+    growUrbanDevelopment(state, countryId);
+    produceMilitary(state, countryId);
 
     // —— 2. public opinion → presidential approval ——
     updateOpinionTopics(state, countryId);

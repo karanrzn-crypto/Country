@@ -5,16 +5,16 @@ import {
   createGovernmentCountryState,
   governmentRecordIsComplete,
   politicalPowerDistribution,
-  setTaxRate,
-  setSpendingShare,
+  setBudgetShare,
+  setTaxLevel,
   setMinistryFunding,
-  DEFAULT_TAX_RATES,
-  DEFAULT_SPENDING_SHARES
+  deriveSpendingShares,
+  DEFAULT_BUDGET_SHARES
 } from '../../../state/slices/governmentSlice';
 import type { PartyTemplate, MinistryTemplate } from '../../../state/slices/governmentSlice';
 import { Random } from '../../../utils/Random';
 import { stableStringify } from '../../../utils/hash';
-import { MAX_TAX_RATE, SPENDING_CATEGORIES, TAX_CATEGORIES } from '../../../government/types';
+import { BUDGET_POOLS, GOVERNMENT_SIZE_OF_GDP, SPENDING_CATEGORIES, TAX_LEVEL_IDS } from '../../../government/types';
 
 const PARTY_TEMPLATES: readonly PartyTemplate[] = [
   { id: 'centrist_union', name: 'Civic Union', ideology: 'centrist', baseSupport: 1.0 },
@@ -77,13 +77,16 @@ describe('GovernmentSlice (Phase 2 state)', () => {
     }
   });
 
-  it('budget defaults cover every category and run a near-balanced budget', () => {
-    expect(TAX_CATEGORIES.every((category) => DEFAULT_TAX_RATES[category] !== undefined)).toBe(true);
-    expect(SPENDING_CATEGORIES.every((category) => DEFAULT_SPENDING_SHARES[category] !== undefined)).toBe(true);
-    const total = SPENDING_CATEGORIES.reduce((sum, category) => sum + DEFAULT_SPENDING_SHARES[category], 0);
-    // Revenue model ≈ 12 % of GDP at default rates — spending must be close.
-    expect(total).toBeGreaterThan(0.09);
-    expect(total).toBeLessThan(0.16);
+  it('budget defaults: an even 50/50 pool, MEDIUM tax, derived spending money', () => {
+    expect(BUDGET_POOLS.every((pool) => DEFAULT_BUDGET_SHARES[pool] !== undefined)).toBe(true);
+    expect(DEFAULT_BUDGET_SHARES.economic + DEFAULT_BUDGET_SHARES.military).toBeCloseTo(1, 12);
+    const derived = deriveSpendingShares(DEFAULT_BUDGET_SHARES);
+    expect(SPENDING_CATEGORIES.every((category) => derived[category] !== undefined)).toBe(true);
+    const total = SPENDING_CATEGORIES.reduce((sum, category) => sum + derived[category], 0);
+    // The derived money plumbing preserves the government size (~12 % of GDP).
+    expect(total).toBeCloseTo(GOVERNMENT_SIZE_OF_GDP, 9);
+    // Half the pot is military money, half the economic categories.
+    expect(derived.military).toBeCloseTo(GOVERNMENT_SIZE_OF_GDP / 2, 9);
   });
 
   it('mutators clamp into their documented domains and reject unknown ids', () => {
@@ -91,12 +94,17 @@ describe('GovernmentSlice (Phase 2 state)', () => {
     const countryId = game.strategicMap.countryOrder[0];
     const slice = game.gameState.government;
 
-    expect(setTaxRate(slice, countryId, 'income', 0.9)).toBe(MAX_TAX_RATE);
-    expect(setTaxRate(slice, countryId, 'income', -1)).toBe(0);
-    expect(setTaxRate(slice, 'unknown', 'income', 0.2)).toBe(0);
+    // Pool shares clamp into [0, 1]; the other pool absorbs the remainder.
+    expect(setBudgetShare(slice, countryId, 'economic', 1.4).economic).toBe(1);
+    expect(slice.countries[countryId].budget.shares.military).toBe(0);
+    expect(setBudgetShare(slice, countryId, 'economic', -1).economic).toBe(0);
+    expect(slice.countries[countryId].budget.shares.military).toBe(1);
+    expect(setBudgetShare(slice, 'unknown', 'economic', 0.2).economic).toBe(0.5); // default posture, no crash
 
-    expect(setSpendingShare(slice, countryId, 'military', 0.9)).toBe(0.5);
-    expect(setSpendingShare(slice, countryId, 'welfare', -0.5)).toBe(0);
+    // Tax levels accept exactly the four ids.
+    for (const level of TAX_LEVEL_IDS) {
+      expect(setTaxLevel(slice, countryId, level)).toBe(level);
+    }
 
     expect(setMinistryFunding(slice, countryId, 'finance', 1.7)).toBe(1);
     expect(setMinistryFunding(slice, countryId, 'finance', -2)).toBe(0);
@@ -123,29 +131,59 @@ describe('GovernmentSlice (Phase 2 state)', () => {
   });
 });
 
-describe('Economic Budget lever + political power distribution (spec §4/§5)', () => {
-  it('setEconomicBudget scales the non-military shares proportionally and leaves military alone', () => {
+describe('Budget pool + tax levels (spec §1/§4/§10)', () => {
+  it('the pool split is ZERO-SUM in both directions: raising one pool lowers the other by the same amount', () => {
     const game = createTestGame({ seed: 71 });
     const countryId = Object.keys(game.gameState.government.countries)[0];
     const budget = game.gameState.government.countries[countryId].budget;
-    const militaryBefore = budget.spendingShares.military;
-    const nonMilitaryBefore = (Object.keys(budget.spendingShares) as (keyof typeof budget.spendingShares)[])
-      .filter((category) => category !== 'military')
-      .reduce((sum, category) => sum + budget.spendingShares[category], 0);
 
-    game.governmentSetEconomicBudget(countryId, nonMilitaryBefore * 2);
+    game.governmentSetBudgetShare(countryId, 'economic', 0.6);
     game.commandBus.flush();
-    const militaryAfter = budget.spendingShares.military;
-    const nonMilitaryAfter = (Object.keys(budget.spendingShares) as (keyof typeof budget.spendingShares)[])
-      .filter((category) => category !== 'military')
-      .reduce((sum, category) => sum + budget.spendingShares[category], 0);
+    expect(budget.shares.economic).toBeCloseTo(0.6, 9);
+    expect(budget.shares.military).toBeCloseTo(0.4, 9);
 
-    expect(militaryAfter).toBeCloseTo(militaryBefore, 6); // military untouched
-    expect(nonMilitaryAfter).toBeCloseTo(nonMilitaryBefore * 2, 3); // doubled in total
-    // Every internal share stays inside its documented domain.
-    for (const share of Object.values(budget.spendingShares)) {
-      expect(share).toBeGreaterThanOrEqual(0);
-      expect(share).toBeLessThanOrEqual(0.5);
+    game.governmentSetBudgetShare(countryId, 'military', 0.7);
+    game.commandBus.flush();
+    expect(budget.shares.military).toBeCloseTo(0.7, 9);
+    expect(budget.shares.economic).toBeCloseTo(0.3, 9);
+    game.dispose();
+  });
+
+  it('the sum stays EXACTLY 100% through arbitrary command sequences', () => {
+    const game = createTestGame({ seed: 74 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    const budget = game.gameState.government.countries[countryId].budget;
+    const rng = new Random(5);
+    for (let step = 0; step < 40; step += 1) {
+      const pool = rng.chance(0.5) ? 'economic' : 'military';
+      game.governmentSetBudgetShare(countryId, pool, rng.next());
+      game.commandBus.flush();
+      const sum = budget.shares.economic + budget.shares.military;
+      expect(sum).toBeCloseTo(1, 9);
+    }
+    game.dispose();
+  });
+
+  it('moving the pool re-derives the internal spending money (total size constant)', () => {
+    const game = createTestGame({ seed: 75 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    const budget = game.gameState.government.countries[countryId].budget;
+    const totalOf = (): number => SPENDING_CATEGORIES.reduce((sum, category) => sum + budget.spendingShares[category], 0);
+
+    game.governmentSetBudgetShare(countryId, 'military', 0.8);
+    game.commandBus.flush();
+    expect(budget.spendingShares.military).toBeCloseTo(0.8 * GOVERNMENT_SIZE_OF_GDP, 9);
+    expect(totalOf()).toBeCloseTo(GOVERNMENT_SIZE_OF_GDP, 9);
+    game.dispose();
+  });
+
+  it('setTaxLevel switches between exactly the four levels', () => {
+    const game = createTestGame({ seed: 76 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    for (const level of TAX_LEVEL_IDS) {
+      game.governmentSetTaxLevel(countryId, level);
+      game.commandBus.flush();
+      expect(game.gameState.government.countries[countryId].budget.tax).toBe(level);
     }
     game.dispose();
   });

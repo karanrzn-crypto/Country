@@ -177,12 +177,19 @@ export interface GameEventMap {
   };
   'government.eventResolved': { readonly countryId: string; readonly instanceId: string; readonly choiceId: string };
   'government.decisionEnacted': { readonly countryId: string; readonly decisionId: string };
-  'government.budgetChanged': {
-    readonly countryId: string;
-    readonly kind: 'tax' | 'spending';
-    readonly category: string;
-    readonly value: number;
-  };
+  'government.budgetChanged':
+    | {
+        readonly countryId: string;
+        readonly kind: 'budget';
+        readonly pool: 'economic' | 'military';
+        readonly economic: number;
+        readonly military: number;
+      }
+    | {
+        readonly countryId: string;
+        readonly kind: 'tax';
+        readonly level: 'low' | 'medium' | 'high' | 'max';
+      };
   'government.ministryFundingChanged': { readonly countryId: string; readonly ministryId: string; readonly value: number };
   'government.campaignStarted': { readonly countryId: string; readonly electionMonth: number };
   'government.electionHeld': { readonly countryId: string; readonly winnerId: string; readonly incumbentReelected: boolean };

@@ -97,8 +97,45 @@ export interface MinistryState {
 
 // ————————————————————————————————————————————————————————————————— budget ——
 
-export const TAX_CATEGORIES = ['income', 'corporate', 'trade'] as const;
-export type TaxCategory = (typeof TAX_CATEGORIES)[number];
+/**
+ * THE 100% budget pool (spec §1/§10): the government budget splits between
+ * exactly these categories and Σ shares MUST equal 1 at all times. The slice
+ * mutator (setBudgetShare) is the ONLY writer — it assigns the picked pool
+ * and distributes the remainder over the others, so an inconsistent state is
+ * unrepresentable. Adding a third pool (e.g. 'research') later = adding one
+ * id here; the same mutator keeps the sum invariant without a rewrite.
+ */
+export const BUDGET_POOLS = ['economic', 'military'] as const;
+export type BudgetPool = (typeof BUDGET_POOLS)[number];
+
+/** The FOUR tax levels (spec §4/§5) — one selected level, no rate sliders. */
+export const TAX_LEVEL_IDS = ['low', 'medium', 'high', 'max'] as const;
+export type TaxLevel = (typeof TAX_LEVEL_IDS)[number];
+
+/**
+ * What ONE tax level DOES (spec §4/§5) — data-driven, read by the systems:
+ *  - rate          : the single effective tax rate on the composite base
+ *                    (revenue rises monotonically LOW → MAX).
+ *  - satisfaction  : the 'taxes' public-opinion sentiment (positive buff for
+ *                    LOW, none for MEDIUM, negative for HIGH, strongly
+ *                    negative for MAX).
+ *  - economyGrowth : monthly sector-productivity growth bonus/penalty (the
+ *                    economic-pressure side of the buff).
+ * Tuned playable: LOW never starves the treasury alone, MAX hurts opinion
+ * and growth without hard-locking the country.
+ */
+export interface TaxLevelSpec {
+  readonly rate: number;
+  readonly satisfaction: number;
+  readonly economyGrowth: number;
+}
+
+export const TAX_LEVEL_SPECS: Readonly<Record<TaxLevel, TaxLevelSpec>> = {
+  low: { rate: 0.12, satisfaction: 0.45, economyGrowth: 0.0012 },
+  medium: { rate: 0.22, satisfaction: 0, economyGrowth: 0 },
+  high: { rate: 0.32, satisfaction: -0.35, economyGrowth: -0.001 },
+  max: { rate: 0.45, satisfaction: -0.65, economyGrowth: -0.0022 }
+};
 
 export const SPENDING_CATEGORIES = [
   'military',
@@ -112,13 +149,19 @@ export const SPENDING_CATEGORIES = [
 export type SpendingCategory = (typeof SPENDING_CATEGORIES)[number];
 
 export interface BudgetState {
-  /** Tax rates as fractions of the taxable base (0..MAX_TAX_RATE). */
-  taxRates: Record<TaxCategory, number>;
   /**
-   * Spending categories as ANNUAL shares of GDP (each 0..1; their sum is the
-   * government size — not required to be 1). Spending per month = Σ share ×
-   * GDP / 12. Shares are policy levers the president moves; the simulation
-   * derives the actual $ amounts.
+   * THE 100% pool split (spec §1). `economic` + `military` = 1 exactly — the
+   * slice mutator guarantees it; nothing else may write these numbers.
+   */
+  shares: Record<BudgetPool, number>;
+  /** The ONE selected tax level (spec §4). */
+  tax: TaxLevel;
+  /**
+   * INTERNAL money plumbing: annual spending as shares of GDP per category,
+   * DERIVED from `shares` by the slice mutator (military money = military
+   * share × GOVERNMENT_SIZE_OF_GDP; the economic pot distributes over the
+   * rest by fixed weights). Never a player-facing lever; kept so ministries,
+   * productivity, opinion and the ledger keep their category detail.
    */
   spendingShares: Record<SpendingCategory, number>;
 }
@@ -288,7 +331,13 @@ export interface GovernmentSlice {
 
 // —————————————————————————————————————————————————————————————— helpers ——
 
-export const MAX_TAX_RATE = 0.75;
+/**
+ * Total government spending as an ANNUAL share of GDP (the size of the state).
+ * The budget pool split divides THIS pot between economic and military money
+ * (spec: the pool is an allocation, not a GDP lever — the total size stays
+ * constant while the split moves real money between the two halves).
+ */
+export const GOVERNMENT_SIZE_OF_GDP = 0.12;
 export const TERM_LENGTH_MONTHS = 48;
 export const CAMPAIGN_MONTHS = 6;
 export const PARLIAMENT_SEATS = 200;

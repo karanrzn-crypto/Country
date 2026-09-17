@@ -3,8 +3,8 @@ import type { SystemContext } from '../core/GameContext';
 import type { UIElement } from './adapter/UIDomAdapter';
 import type { ScreenManager } from './ScreenManager';
 import type { GameCommand } from '../core/CommandTypes';
-import type { EffectDef, GovernmentCountryState, OpinionTopic, TaxCategory } from '../government/types';
-import { OPINION_TOPICS, TAX_CATEGORIES } from '../government/types';
+import type { BudgetPool, EffectDef, GovernmentCountryState, OpinionTopic, TaxLevel } from '../government/types';
+import { OPINION_TOPICS, TAX_LEVEL_IDS } from '../government/types';
 import { decisionBlockReason } from '../government/DecisionEngine';
 import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
@@ -79,12 +79,25 @@ const SECTOR_LABELS: Readonly<Record<string, string>> = {
   trade: 'بازرگانی'
 };
 
-/** Budget stepper rows (spec §4 — EXACTLY three parts): Tax keeps its three
- *  rate categories; spending collapses to ONE economic + ONE military lever. */
-const TAX_LABELS: Readonly<Record<TaxCategory, string>> = {
-  income: 'مالیات بر درآمد',
-  corporate: 'مالیات شرکتی',
-  trade: 'عوارض تجاری'
+/** Budget pool labels (spec §1/§6 — the TWO halves of the ONE 100% pool). */
+const BUDGET_POOL_LABELS: Readonly<Record<BudgetPool, string>> = {
+  economic: 'بودجهٔ اقتصادی',
+  military: 'بودجهٔ نظامی'
+};
+
+/** The FOUR tax levels (spec §4/§7) — Persian names + the short effect text. */
+const TAX_LEVEL_LABELS: Readonly<Record<TaxLevel, string>> = {
+  low: 'کم',
+  medium: 'متوسط',
+  high: 'زیاد',
+  max: 'حداکثر'
+};
+
+const TAX_LEVEL_EFFECTS: Readonly<Record<TaxLevel, string>> = {
+  low: 'اثر مثبت — رضایت مردم و رونق اقتصادی',
+  medium: 'متعادل',
+  high: 'اثر منفی — نارضایتی و فشار اقتصادی',
+  max: 'اثر منفی قوی — فشار سنگین بر مردم و اقتصاد'
 };
 
 /** Effect-target metric ids → Persian labels (unknown ids pass through). */
@@ -297,26 +310,23 @@ export class PresidentDashboard {
 
   private buildBudget(container: UIElement): UIElement {
     const section = this.section(container, 'pd-budget');
-    // EXACTLY three parts (spec §4): Tax · Economic Budget · Military
-    // Budget. No debt, no treasury breakdown, no category spending list —
-    // the economic lever distributes over the existing internal categories
-    // so the simulation keeps working unchanged.
+    // BUDGET (spec §1/§6): the ONE 100% pool — two rows, −/+ steppers, the
+    // two shares ALWAYS sum to 100% (the mutator moves the remainder to the
+    // other pool). No GDP wording, no money, no other budget categories.
+    const budgetTitle = this.create('div', 'pd-subtitle');
+    budgetTitle.setText('بودجه — تقسیم ۱۰۰٪ بین اقتصاد و ارتش');
+    section.appendChild(budgetTitle);
+    section.appendChild(this.buildShareRow('economic'));
+    section.appendChild(this.buildShareRow('military'));
+
+    // TAX (spec §4/§7): FOUR levels only. The selected level is marked and
+    // each option carries its one-line effect — no formulas, no categories.
     const taxTitle = this.create('div', 'pd-subtitle');
-    taxTitle.setText('مالیات');
+    taxTitle.setText('مالیات — سطح مالیات');
     section.appendChild(taxTitle);
-    for (const category of TAX_CATEGORIES) {
-      section.appendChild(this.buildStepperRow(TAX_LABELS[category], 'tax', category, 0.01));
-    }
-
-    const economicTitle = this.create('div', 'pd-subtitle');
-    economicTitle.setText('بودجهٔ اقتصادی — سهم سالانه از تولید ناخالص');
-    section.appendChild(economicTitle);
-    section.appendChild(this.buildEconomicStepperRow());
-
-    const militaryTitle = this.create('div', 'pd-subtitle');
-    militaryTitle.setText('بودجهٔ نظامی — سهم سالانه از تولید ناخالص');
-    section.appendChild(militaryTitle);
-    section.appendChild(this.buildMilitaryStepperRow());
+    const taxLevels = this.create('div', 'pd-tax-levels');
+    section.appendChild(taxLevels);
+    this.track(taxLevels, 'taxLevels');
     return section;
   }
 
@@ -381,12 +391,13 @@ export class PresidentDashboard {
     return section;
   }
 
-  /** A labeled row with −/+ steppers wired to a budget command. `category`
-   *  is a tax id for 'tax' rows; 'spending' rows are the Military lever. */
-  private buildStepperRow(label: string, kind: 'tax' | 'spending', category: string, step: number): UIElement {
+  /** One budget-pool row (spec §6): label · live % · −/+ steppers. The
+   *  command sets THIS pool's share; the core moves the other pool so the
+   *  two always sum to exactly 100%. */
+  private buildShareRow(pool: BudgetPool): UIElement {
     const row = this.create('div', 'pd-stepper');
     const rowLabel = this.create('span', 'pd-stepper-label');
-    rowLabel.setText(label);
+    rowLabel.setText(BUDGET_POOL_LABELS[pool]);
     const value = this.create('span', 'pd-stepper-value');
     row.appendChild(rowLabel);
     row.appendChild(value);
@@ -396,53 +407,10 @@ export class PresidentDashboard {
     plus.setText('+');
     row.appendChild(minus);
     row.appendChild(plus);
-    this.rows.set(`budget.${kind}.${category}`, value);
-
+    this.rows.set(`budget.${pool}`, value);
     const countryId = this.context?.state.player.countryId ?? '';
-    minus.onClick(() => this.stepBudget(countryId, kind, category, -step));
-    plus.onClick(() => this.stepBudget(countryId, kind, category, +step));
-    return row;
-  }
-
-  /** The ONE Economic Budget lever (spec §4) — sends setEconomicBudget. */
-  private buildEconomicStepperRow(): UIElement {
-    const row = this.create('div', 'pd-stepper');
-    const rowLabel = this.create('span', 'pd-stepper-label');
-    rowLabel.setText('بودجهٔ اقتصادی');
-    const value = this.create('span', 'pd-stepper-value');
-    row.appendChild(rowLabel);
-    row.appendChild(value);
-    const minus = this.create('button', 'pd-step-btn');
-    minus.setText('−');
-    const plus = this.create('button', 'pd-step-btn');
-    plus.setText('+');
-    row.appendChild(minus);
-    row.appendChild(plus);
-    this.rows.set('budget.economic', value);
-    const countryId = this.context?.state.player.countryId ?? '';
-    minus.onClick(() => this.stepEconomicBudget(countryId, -0.005));
-    plus.onClick(() => this.stepEconomicBudget(countryId, +0.005));
-    return row;
-  }
-
-  /** The Military Budget lever (spec §4) — the military spending share. */
-  private buildMilitaryStepperRow(): UIElement {
-    const row = this.create('div', 'pd-stepper');
-    const rowLabel = this.create('span', 'pd-stepper-label');
-    rowLabel.setText('بودجهٔ نظامی');
-    const value = this.create('span', 'pd-stepper-value');
-    row.appendChild(rowLabel);
-    row.appendChild(value);
-    const minus = this.create('button', 'pd-step-btn');
-    minus.setText('−');
-    const plus = this.create('button', 'pd-step-btn');
-    plus.setText('+');
-    row.appendChild(minus);
-    row.appendChild(plus);
-    this.rows.set('budget.military', value);
-    const countryId = this.context?.state.player.countryId ?? '';
-    minus.onClick(() => this.stepMilitaryBudget(countryId, -0.005));
-    plus.onClick(() => this.stepMilitaryBudget(countryId, +0.005));
+    minus.onClick(() => this.stepBudgetShare(countryId, pool, -0.05));
+    plus.onClick(() => this.stepBudgetShare(countryId, pool, +0.05));
     return row;
   }
 
@@ -676,17 +644,34 @@ export class PresidentDashboard {
   private refreshBudget(countryId: string): void {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
-    // Tax — the three rates.
-    for (const category of TAX_CATEGORIES) {
-      this.rows.get(`budget.tax.${category}`)?.setText(percent(government.budget.taxRates[category]));
-    }
-    // The economic lever = the SUM of the non-military shares (the value
-    // the setEconomicBudget command distributes over them).
-    const economic = (Object.keys(government.budget.spendingShares) as (keyof typeof government.budget.spendingShares)[])
-      .filter((category) => category !== 'military')
-      .reduce((sum, category) => sum + government.budget.spendingShares[category], 0);
-    this.rows.get('budget.economic')?.setText(percent(economic));
-    this.rows.get('budget.military')?.setText(percent(government.budget.spendingShares.military));
+    // The TWO halves of the ONE 100% pool (spec §6) — live from state.
+    this.rows.get('budget.economic')?.setText(percent(government.budget.shares.economic));
+    this.rows.get('budget.military')?.setText(percent(government.budget.shares.military));
+    // The FOUR tax levels with the selected one marked (spec §7).
+    this.rebuildTaxLevels(countryId, government.budget.tax);
+  }
+
+  /** The tax-level chooser (spec §4/§7): one marked option per level, each
+   *  with its short one-line effect. Rebuilt when the level changes. */
+  private rebuildTaxLevels(countryId: string, current: TaxLevel): void {
+    const signature = `tax:${current}:${countryId}`;
+    if (signature === this.dynamicSignatures.get('taxLevels')) return;
+    this.rebuild('taxLevels', this.parents.get('taxLevels'), () => {
+      const rows: UIElement[] = [];
+      for (const level of TAX_LEVEL_IDS) {
+        const row = this.create('button', level === current ? 'pd-tax-level on' : 'pd-tax-level');
+        const name = this.create('span', 'pd-tax-name');
+        name.setText(TAX_LEVEL_LABELS[level]);
+        const effect = this.create('span', 'pd-tax-effect');
+        effect.setText(TAX_LEVEL_EFFECTS[level]);
+        row.appendChild(name);
+        row.appendChild(effect);
+        row.onClick(() => this.send({ type: 'government.setTaxLevel', countryId, level }));
+        rows.push(row);
+      }
+      return rows;
+    });
+    this.dynamicSignatures.set('taxLevels', signature);
   }
 
   private refreshPolitics(countryId: string): void {
@@ -895,6 +880,10 @@ export class PresidentDashboard {
   private track(container: UIElement, id: string): void {
     this.parents.set(id, container);
     this.dynamic.set(id, []);
+    // A fresh container invalidates any signature left from a PREVIOUS
+    // build of this screen — otherwise a signature-guarded list (tax
+    // levels, power pie) would skip its first rebuild after reopening.
+    this.dynamicSignatures.delete(id);
   }
 
   /** Removes stale rows of one list, builds fresh ones via `buildRows`. */
@@ -921,38 +910,12 @@ export class PresidentDashboard {
     this.commands.send(command);
   }
 
-  /** Tax rate stepper — the Tax part of the Budget page (spec §4). */
-  private stepBudget(countryId: string, kind: 'tax' | 'spending', category: string, delta: number): void {
+  /** Budget-pool stepper (spec §6) — ±5 percentage points of the 100% pool.
+   *  The core moves the OTHER pool by the same amount (zero-sum). */
+  private stepBudgetShare(countryId: string, pool: BudgetPool, delta: number): void {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
-    if (kind === 'tax') {
-      const key = category as TaxCategory;
-      this.send({ type: 'government.setTaxRate', countryId, category: key, value: government.budget.taxRates[key] + delta });
-    } else {
-      this.send({ type: 'government.setSpending', countryId, category: 'military', value: government.budget.spendingShares.military + delta });
-    }
-  }
-
-  /** The ONE economic lever (spec §4) — core distributes it proportionally. */
-  private stepEconomicBudget(countryId: string, delta: number): void {
-    const government = this.context?.state.government.countries[countryId];
-    if (government === undefined) return;
-    const current = Object.entries(government.budget.spendingShares)
-      .filter(([category]) => category !== 'military')
-      .reduce((sum, [, share]) => sum + share, 0);
-    this.send({ type: 'government.setEconomicBudget', countryId, value: current + delta });
-  }
-
-  /** The military lever (spec §4) — the military spending share. */
-  private stepMilitaryBudget(countryId: string, delta: number): void {
-    const government = this.context?.state.government.countries[countryId];
-    if (government === undefined) return;
-    this.send({
-      type: 'government.setSpending',
-      countryId,
-      category: 'military',
-      value: government.budget.spendingShares.military + delta
-    });
+    this.send({ type: 'government.setBudgetShare', countryId, pool, value: government.budget.shares[pool] + delta });
   }
 
   private addRow(container: UIElement, key: string, label: string): void {

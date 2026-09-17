@@ -32,7 +32,18 @@ export const RELATION_MAX = 100;
 export type RelationBand = 'hostile' | 'wary' | 'neutral' | 'cordial' | 'friendly';
 
 export type CountryEconomyState = CountryProfileJson['economy'];
-export type CountryMilitaryState = CountryProfileJson['military'];
+/**
+ * Runtime military record — the static profile's shape but MUTABLE: the
+ * budget-driven military production (government/budgetEffects) evolves
+ * equipment and army size over the campaign, and future phases may too.
+ */
+export interface CountryMilitaryState {
+  manpower: number;
+  armySize: number;
+  equipment: number;
+  aircraft: number;
+  navy: number;
+}
 export type CountryFlagState = FlagDataJson;
 
 export interface CountryState {

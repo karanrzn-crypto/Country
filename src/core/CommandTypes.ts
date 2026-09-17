@@ -56,28 +56,20 @@ export type GameCommand =
   | { readonly type: 'map.focusCountry'; readonly countryId: string }
   | { readonly type: 'map.setViewport'; readonly width: number; readonly height: number }
   // —— Phase 2 — presidency & governance ——
+  /** The ONE 100% budget pool (spec §1): set one pool's share, the other
+   *  pool absorbs the remainder (economic + military = 100% always). */
   | {
-      readonly type: 'government.setTaxRate';
+      readonly type: 'government.setBudgetShare';
       readonly countryId: string;
-      readonly category: 'income' | 'corporate' | 'trade';
+      readonly pool: 'economic' | 'military';
       readonly value: number;
     }
+  /** The ONE tax level (spec §4): LOW / MEDIUM / HIGH / MAX. */
   | {
-      readonly type: 'government.setSpending';
+      readonly type: 'government.setTaxLevel';
       readonly countryId: string;
-      readonly category:
-        | 'military'
-        | 'healthcare'
-        | 'education'
-        | 'infrastructure'
-        | 'welfare'
-        | 'government'
-        | 'other';
-      readonly value: number;
+      readonly level: 'low' | 'medium' | 'high' | 'max';
     }
-  /** The ONE 'Economic Budget' lever (spec §4): scales every non-military
-   *  spending category proportionally so their sum equals `value`. */
-  | { readonly type: 'government.setEconomicBudget'; readonly countryId: string; readonly value: number }
   | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
   | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string };

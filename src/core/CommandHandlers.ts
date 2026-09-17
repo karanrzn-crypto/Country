@@ -37,13 +37,8 @@ export interface CoreGameApi {
   mapZoomBy(factor: number, anchor?: { x: number; z: number }, screen?: { x: number; y: number }): void;
   mapFocusCountry(countryId: string): void;
   mapSetViewport(width: number, height: number): void;
-  governmentSetTaxRate(countryId: string, category: 'income' | 'corporate' | 'trade', value: number): void;
-  governmentSetSpending(
-    countryId: string,
-    category: 'military' | 'healthcare' | 'education' | 'infrastructure' | 'welfare' | 'government' | 'other',
-    value: number
-  ): void;
-  governmentSetEconomicBudget(countryId: string, value: number): void;
+  governmentSetBudgetShare(countryId: string, pool: 'economic' | 'military', value: number): void;
+  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high' | 'max'): void;
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void;
   governmentEnactDecision(countryId: string, decisionId: string): boolean;
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
@@ -91,9 +86,8 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   );
   bus.register('map.focusCountry', (cmd) => game.mapFocusCountry(cmd.countryId));
   bus.register('map.setViewport', (cmd) => game.mapSetViewport(cmd.width, cmd.height));
-  bus.register('government.setTaxRate', (cmd) => game.governmentSetTaxRate(cmd.countryId, cmd.category, cmd.value));
-  bus.register('government.setSpending', (cmd) => game.governmentSetSpending(cmd.countryId, cmd.category, cmd.value));
-  bus.register('government.setEconomicBudget', (cmd) => game.governmentSetEconomicBudget(cmd.countryId, cmd.value));
+  bus.register('government.setBudgetShare', (cmd) => game.governmentSetBudgetShare(cmd.countryId, cmd.pool, cmd.value));
+  bus.register('government.setTaxLevel', (cmd) => game.governmentSetTaxLevel(cmd.countryId, cmd.level));
   bus.register('government.setMinistryFunding', (cmd) =>
     game.governmentSetMinistryFunding(cmd.countryId, cmd.ministryId, cmd.value)
   );

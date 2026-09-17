@@ -8,8 +8,9 @@
  *   population → workforce → sector jobs (hiring toward capacity)
  *   capacity  ← city-area connectivity × infrastructure/education spending
  *   output    = jobs × productivity (per sector) → GDP
- *   revenue   = income/corporate/trade taxes × rates × tax efficiency
- *   spending  = budget shares × GDP + debt interest
+ *   revenue   = the TAX LEVEL's rate × composite base × tax efficiency
+ *               (LOW < MEDIUM < HIGH < MAX) + productivity buff/penalty
+ *   spending  = derived budget money (the 100% pool split) + debt interest
  *   balance   → treasury (shared legacy record) & debt (auto-borrowing)
  *   unemployment, inflation, growth emerge — opinion reads them next.
  *
@@ -22,6 +23,7 @@ import type { MacroEconomyState, SectorState } from './macro';
 import { LABOR_PARTICIPATION, SECTOR_CAPACITY_WEIGHTS, SECTORS, SECTOR_PRODUCTIVITY } from './macro';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 import { readMetric, activeMulFactor } from '../government/Metrics';
+import { TAX_LEVEL_SPECS } from '../government/types';
 import type { Random } from '../utils/Random';
 import { roundTo } from '../utils/math';
 
@@ -99,6 +101,8 @@ export function processMonthEconomy(state: GameState, countryId: string, _rng: R
 
   const educationEfficiency = government.ministries.education?.efficiency ?? 0.5;
   const infrastructureShare = government.budget.spendingShares.infrastructure;
+  const taxLevel = government.budget.tax;
+  const taxSpec = TAX_LEVEL_SPECS[taxLevel];
   const generalStrike = government.politics.generalStrikeUntilMonth !== null && government.politics.generalStrikeUntilMonth >= month;
 
   // —— sector dynamics ——
@@ -111,8 +115,9 @@ export function processMonthEconomy(state: GameState, countryId: string, _rng: R
     const strikeHit = generalStrike && (sectorId === 'industry' || sectorId === 'construction' || sectorId === 'trade') ? 0.7 : 1;
     const jobTarget = Math.min(sector.capacityJobs, workforce) * strikeHit;
     sector.jobs += (jobTarget - sector.jobs) * 0.15;
-    // Productivity compounds slowly; education funding accelerates it.
-    sector.productivity *= 1 + 0.0006 + government.budget.spendingShares.education * 0.004 * educationEfficiency;
+    // Productivity compounds slowly; education funding and the TAX LEVEL's
+    // economic buff (LOW +, MEDIUM 0, HIGH/MAX −) accelerate it.
+    sector.productivity *= 1 + 0.0006 + government.budget.spendingShares.education * 0.004 * educationEfficiency + taxSpec.economyGrowth;
     const baseOutput = (sector.jobs * sector.productivity) / 1e6;
     sector.output = Math.max(0, baseOutput);
     jobsTotal += sector.jobs;
@@ -147,16 +152,18 @@ export function processMonthEconomy(state: GameState, countryId: string, _rng: R
   // ————————————————————————————————— ledger ——————————————————————————————
   const financeEfficiency = government.ministries.finance?.efficiency ?? 0.5;
   const taxEfficiency = (0.85 + financeEfficiency * 0.3) * (1 - government.politics.corruption * 0.25);
-  const rates = government.budget.taxRates;
-
-  let revenue =
-    gdp * WAGE_SHARE_OF_GDP * rates.income * taxEfficiency +
+  // ONE tax level (spec §4): a single effective rate on the composite base
+  // — wages, corporate margins, trade flows — replacing the old per-category
+  // rates. Revenue rises monotonically LOW → MAX; the buff side (opinion,
+  // productivity) lives in the level spec and PublicOpinion. (`taxSpec` is
+  // read at the top of this function, next to the sector dynamics.)
+  const taxBase =
+    gdp * WAGE_SHARE_OF_GDP +
     (macro.sectors.industry.output + macro.sectors.mining.output + macro.sectors.energy.output + macro.sectors.construction.output) *
-      CORPORATE_MARGIN *
-      rates.corporate *
-      taxEfficiency +
-    (macro.trade.exports + macro.trade.imports) * TARIFF_FRACTION * rates.trade * taxEfficiency +
-    gdp * 0.004;
+      CORPORATE_MARGIN +
+    (macro.trade.exports + macro.trade.imports) * TARIFF_FRACTION;
+
+  let revenue = taxBase * taxSpec.rate * taxEfficiency + gdp * 0.004;
 
   const spendingBase = government.budget.spendingShares;
   let spending = 0;

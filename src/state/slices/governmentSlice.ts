@@ -14,11 +14,13 @@ import type { Random } from '../../utils/Random';
 import { generatePersonName } from '../../world/map/MapNames';
 import {
   clamp01,
-  MAX_TAX_RATE,
+  BUDGET_POOLS,
+  GOVERNMENT_SIZE_OF_GDP,
   PARLIAMENT_SEATS,
   SPENDING_CATEGORIES,
-  TAX_CATEGORIES,
+  TAX_LEVEL_IDS,
   TERM_LENGTH_MONTHS,
+  type BudgetPool,
   type BudgetState,
   type DecisionsState,
   type ElectionState,
@@ -31,7 +33,7 @@ import {
   type PresidentState,
   type PublicOpinionState,
   type SpendingCategory,
-  type TaxCategory
+  type TaxLevel
 } from '../../government/types';
 import { OPINION_TOPICS } from '../../government/types';
 import { SECTORS } from '../../economy/macro';
@@ -55,27 +57,26 @@ export interface MinistryTemplate {
   readonly focus: string;
 }
 
-/** Initial values for budget policy (same for every country at start). */
-export const DEFAULT_TAX_RATES: Readonly<Record<TaxCategory, number>> = {
-  income: 0.22,
-  corporate: 0.19,
-  trade: 0.08
-};
-
 /**
- * Initial values for budget policy (same for every country at start).
- * Calibrated against the revenue model (≈ 12 % of GDP at default tax
- * rates): the defaults run a TINY structural deficit so a new player
- * starts stable but must actually govern the budget.
+ * Relative weights of the non-military spending categories inside the
+ * ECONOMIC half of the budget pool. The economic money pot
+ * (economic share × GOVERNMENT_SIZE_OF_GDP) distributes over them by these
+ * weights; the military pot goes to `military` outright. Same mix the
+ * pre-pool defaults used, so a 50/50 campaign keeps the old balance.
  */
-export const DEFAULT_SPENDING_SHARES: Readonly<Record<SpendingCategory, number>> = {
-  military: 0.018,
+export const ECONOMIC_CATEGORY_WEIGHTS: Readonly<Record<Exclude<SpendingCategory, 'military'>, number>> = {
   healthcare: 0.02,
   education: 0.018,
   infrastructure: 0.016,
   welfare: 0.02,
   government: 0.024,
   other: 0.004
+};
+
+/** Default budget posture (spec §1): an even 50/50 split, MEDIUM tax. */
+export const DEFAULT_BUDGET_SHARES: Readonly<Record<BudgetPool, number>> = {
+  economic: 0.5,
+  military: 0.5
 };
 
 /** Deterministic per-country support split of the party templates. */
@@ -168,8 +169,9 @@ export function createGovernmentCountryState(
   };
 
   const budget: BudgetState = {
-    taxRates: { ...DEFAULT_TAX_RATES },
-    spendingShares: { ...DEFAULT_SPENDING_SHARES }
+    shares: { ...DEFAULT_BUDGET_SHARES },
+    tax: 'medium',
+    spendingShares: deriveSpendingShares(DEFAULT_BUDGET_SHARES)
   };
 
   const decisions: DecisionsState = { active: [], cooldowns: {}, history: [] };
@@ -215,70 +217,103 @@ export function buildGovernmentSlice(
 
 // ————————————————————————————————————————————————————————————— mutators ——
 
-/** Sets a tax rate (clamped to [0, MAX_TAX_RATE]). Returns the clamped value. */
-export function setTaxRate(slice: GovernmentSlice, countryId: string, category: TaxCategory, value: number): number {
-  const government = slice.countries[countryId];
-  if (government === undefined) return 0;
-  const clamped = Math.max(0, Math.min(MAX_TAX_RATE, value));
-  government.budget.taxRates[category] = clamped;
-  return clamped;
+/**
+ * Derives the INTERNAL spendingShares (money plumbing) from the 100% pool
+ * split: military money = military share × GOVERNMENT_SIZE_OF_GDP; the
+ * economic pot distributes over the other categories by their fixed weights
+ * (equal split in the degenerate zero-weight case). The TOTAL government
+ * size stays constant — only the split moves money between the halves.
+ */
+export function deriveSpendingShares(
+  shares: Readonly<Record<BudgetPool, number>>
+): Record<SpendingCategory, number> {
+  const result = {} as Record<SpendingCategory, number>;
+  for (const category of SPENDING_CATEGORIES) result[category] = 0;
+  result.military = Math.max(0, Math.min(1, shares.military ?? 0)) * GOVERNMENT_SIZE_OF_GDP;
+  const economicPot = Math.max(0, Math.min(1, shares.economic ?? 0)) * GOVERNMENT_SIZE_OF_GDP;
+  const weightTotal = Object.values(ECONOMIC_CATEGORY_WEIGHTS).reduce((sum, weight) => sum + weight, 0);
+  if (weightTotal <= 1e-9) {
+    const categories = Object.keys(ECONOMIC_CATEGORY_WEIGHTS) as Exclude<SpendingCategory, 'military'>[];
+    for (const category of categories) result[category] = economicPot / categories.length;
+  } else {
+    for (const [category, weight] of Object.entries(ECONOMIC_CATEGORY_WEIGHTS)) {
+      result[category as Exclude<SpendingCategory, 'military'>] = (economicPot * weight) / weightTotal;
+    }
+  }
+  return result;
 }
-
-/** Sets a spending share (clamped to [0, 0.5] of GDP). Returns the clamped value. */
-export function setSpendingShare(slice: GovernmentSlice, countryId: string, category: SpendingCategory, value: number): number {
-  const government = slice.countries[countryId];
-  if (government === undefined) return 0;
-  const clamped = Math.max(0, Math.min(0.5, value));
-  government.budget.spendingShares[category] = clamped;
-  return clamped;
-}
-
-/** The spending categories the ONE 'Economic Budget' lever distributes over
- *  (spec §4: the Budget UI exposes only Tax / Economic / Military; these
- *  internal shares stay so the existing simulation dependencies — ministries,
- *  productivity, opinion — keep working unchanged). */
-export const ECONOMIC_SPENDING_CATEGORIES: readonly SpendingCategory[] =
-  SPENDING_CATEGORIES.filter((category) => category !== 'military');
-
-/** Hard cap of the economic budget lever (each internal share ≤ 0.5). */
-export const MAX_ECONOMIC_BUDGET = 1.5;
 
 /**
- * Sets the ONE 'Economic Budget' lever (share of GDP spent on everything
- * except the military). The value is distributed PROPORTIONALLY over the
- * existing non-military spending categories (equal split when they are all
- * zero), each still clamped to its [0, 0.5] domain — so the simulation and
- * the persisted state keep their full category detail while the UI and the
- * command surface stay simple (spec §4). Returns the applied total.
+ * Normalizes the pool shares so Σ is EXACTLY 1: the LAST pool absorbs any
+ * floating-point remainder (with two pools this pins military = 1 − economic
+ * bit-exactly). Pure arithmetic — no clamping here; callers clamp first.
  */
-export function setEconomicSpendingShare(slice: GovernmentSlice, countryId: string, value: number): number {
-  const government = slice.countries[countryId];
-  if (government === undefined) return 0;
-  const target = Math.max(0, Math.min(MAX_ECONOMIC_BUDGET, value));
-  const current = ECONOMIC_SPENDING_CATEGORIES.reduce(
-    (sum, category) => sum + government.budget.spendingShares[category],
-    0
-  );
-  if (current <= 1e-9) {
-    // Degenerate all-zero state → distribute the target equally.
-    const each = Math.min(0.5, target / ECONOMIC_SPENDING_CATEGORIES.length);
-    for (const category of ECONOMIC_SPENDING_CATEGORIES) {
-      government.budget.spendingShares[category] = each;
-    }
-    return roundTo2(each * ECONOMIC_SPENDING_CATEGORIES.length);
+export function normalizeBudgetShares(shares: Record<BudgetPool, number>): void {
+  const last = BUDGET_POOLS[BUDGET_POOLS.length - 1];
+  let rest = 0;
+  for (let index = 0; index < BUDGET_POOLS.length - 1; index += 1) {
+    rest += shares[BUDGET_POOLS[index]];
   }
-  const factor = target / current;
-  let applied = 0;
-  for (const category of ECONOMIC_SPENDING_CATEGORIES) {
-    const share = Math.min(0.5, government.budget.spendingShares[category] * factor);
-    government.budget.spendingShares[category] = share;
-    applied += share;
-  }
-  return roundTo2(applied);
+  shares[last] = 1 - rest;
 }
 
-function roundTo2(value: number): number {
-  return Math.round(value * 10000) / 10000;
+/**
+ * THE budget mutator (spec §1/§10): sets ONE pool's share of the 100% pool
+ * and distributes the remainder over the OTHER pools proportionally (with
+ * two pools that means military = 1 − economic exactly, in BOTH directions).
+ * Re-derives the internal spending money so the whole simulation follows.
+ * Returns the applied split.
+ */
+export function setBudgetShare(
+  slice: GovernmentSlice,
+  countryId: string,
+  pool: BudgetPool,
+  value: number
+): Record<BudgetPool, number> {
+  const government = slice.countries[countryId];
+  if (government === undefined) return { ...DEFAULT_BUDGET_SHARES };
+  const target = Number.isFinite(value) ? clamp01(value) : 0;
+  const shares = government.budget.shares;
+  const others = BUDGET_POOLS.filter((candidate) => candidate !== pool);
+  const otherSum = others.reduce((sum, candidate) => sum + Math.max(0, shares[candidate]), 0);
+  shares[pool] = target;
+  const remainder = 1 - target;
+  if (otherSum <= 1e-9) {
+    for (const candidate of others) shares[candidate] = remainder / others.length;
+  } else {
+    for (const candidate of others) shares[candidate] = remainder * (Math.max(0, shares[candidate]) / otherSum);
+  }
+  normalizeBudgetShares(shares);
+  government.budget.spendingShares = deriveSpendingShares(shares);
+  return { ...shares };
+}
+
+/** Sets the tax level (spec §4). Returns the applied level. */
+export function setTaxLevel(slice: GovernmentSlice, countryId: string, level: TaxLevel): TaxLevel {
+  const government = slice.countries[countryId];
+  if (government === undefined) return 'medium';
+  government.budget.tax = level;
+  return government.budget.tax;
+}
+
+/**
+ * Repairs a loaded/migrated budget record into a valid pool state: clamps
+ * and normalizes the shares, re-derives the money plumbing, and coerces an
+ * unknown tax level back to MEDIUM. Idempotent; used by the load heal.
+ */
+export function repairBudgetRecord(record: GovernmentCountryState): void {
+  const shares = record.budget.shares;
+  if (shares !== undefined && typeof shares === 'object') {
+    for (const pool of BUDGET_POOLS) {
+      const value = shares[pool];
+      shares[pool] = typeof value === 'number' && Number.isFinite(value) ? clamp01(value) : 0;
+    }
+    normalizeBudgetShares(shares);
+  } else {
+    record.budget.shares = { ...DEFAULT_BUDGET_SHARES };
+  }
+  record.budget.spendingShares = deriveSpendingShares(record.budget.shares);
+  if (!TAX_LEVEL_IDS.includes(record.budget.tax)) record.budget.tax = 'medium';
 }
 
 /** Sets a ministry funding level (clamped to [0, 1]). Returns the clamped value. */
@@ -293,7 +328,8 @@ export function setMinistryFunding(slice: GovernmentSlice, countryId: string, mi
 /** Structural completeness check used by tests and the save validator. */
 export function governmentRecordIsComplete(record: GovernmentCountryState): boolean {
   return (
-    TAX_CATEGORIES.every((category) => record.budget.taxRates[category] !== undefined) &&
+    BUDGET_POOLS.every((pool) => record.budget.shares[pool] !== undefined) &&
+    TAX_LEVEL_IDS.includes(record.budget.tax) &&
     SPENDING_CATEGORIES.every((category) => record.budget.spendingShares[category] !== undefined) &&
     OPINION_TOPICS.every((topic) => record.opinion.topics[topic] !== undefined) &&
     Object.keys(record.ministries).length > 0 &&

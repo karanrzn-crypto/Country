@@ -3,6 +3,7 @@ import { createTestGame } from '../../helpers/testGame';
 import { readMetric, applyEffectBundle, applyInstantEffect, evaluateConditions, militaryPowerOf } from '../../../government/Metrics';
 import { updateOpinionTopics, driftApproval, approvalTargetOf } from '../../../government/PublicOpinion';
 import { createMacroEconomy, processMonthEconomy } from '../../../economy/EconomySimulation';
+import { deriveSpendingShares } from '../../../state/slices/governmentSlice';
 import { Random } from '../../../utils/Random';
 
 describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => {
@@ -52,15 +53,17 @@ describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => 
     game.dispose();
   });
 
-  it('military power responds to the military spending share and corruption', () => {
+  it('military power responds to the military budget share and corruption', () => {
     const game = createTestGame({ seed: 94 });
     const countryId = game.strategicMap.countryOrder[0];
     const state = game.gameState;
     const government = state.government.countries[countryId];
-    government.budget.spendingShares.military = 0.018;
+    government.budget.shares.military = 0.15;
+    government.budget.spendingShares = deriveSpendingShares(government.budget.shares);
     government.politics.corruption = 0.2;
     const low = militaryPowerOf(state, countryId);
-    government.budget.spendingShares.military = 0.08;
+    government.budget.shares.military = 0.8;
+    government.budget.spendingShares = deriveSpendingShares(government.budget.shares);
     const high = militaryPowerOf(state, countryId);
     expect(high).toBeGreaterThan(low);
     government.politics.corruption = 0.8;
@@ -73,11 +76,11 @@ describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => 
     const countryId = game.strategicMap.countryOrder[0];
     const state = game.gameState;
     const government = state.government.countries[countryId];
-    // Disaster economy + crushing taxes.
+    // Disaster economy + MAX tax.
     state.economy.macro[countryId].unemployment = 0.25;
     state.economy.macro[countryId].inflation = 0.2;
     state.economy.macro[countryId].gdpGrowth = -0.05;
-    government.budget.taxRates.income = 0.7;
+    government.budget.tax = 'max';
     updateOpinionTopics(state, countryId);
     expect(government.opinion.topics.economy).toBeLessThan(0);
     expect(government.opinion.topics.taxes).toBeLessThan(0);
@@ -90,13 +93,13 @@ describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => 
     game.dispose();
   });
 
-  it('macro economy: higher income tax yields higher monthly revenue (same state)', () => {
+  it('macro economy: a higher tax level yields higher monthly revenue (same state)', () => {
     const lowTaxGame = createTestGame({ seed: 96 });
     const highTaxGame = createTestGame({ seed: 96 });
     const lowCountry = lowTaxGame.strategicMap.countryOrder[0];
     const highCountry = highTaxGame.strategicMap.countryOrder[0];
-    lowTaxGame.gameState.government.countries[lowCountry].budget.taxRates.income = 0.1;
-    highTaxGame.gameState.government.countries[highCountry].budget.taxRates.income = 0.4;
+    lowTaxGame.gameState.government.countries[lowCountry].budget.tax = 'low';
+    highTaxGame.gameState.government.countries[highCountry].budget.tax = 'max';
 
     processMonthEconomy(lowTaxGame.gameState, lowCountry, new Random(1));
     processMonthEconomy(highTaxGame.gameState, highCountry, new Random(1));
@@ -112,9 +115,9 @@ describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => 
     const game = createTestGame({ seed: 97 });
     const countryId = game.strategicMap.countryOrder[0];
     const state = game.gameState;
-    // Crush revenue to force a deep deficit: zero all taxes, huge spending.
+    // Crush revenue to force a deep deficit: LOW tax, huge spending.
     const government = state.government.countries[countryId];
-    government.budget.taxRates = { income: 0, corporate: 0, trade: 0 };
+    government.budget.tax = 'low';
     government.budget.spendingShares = {
       military: 0.3, healthcare: 0.3, education: 0.3, infrastructure: 0.3, welfare: 0.3, government: 0.3, other: 0.3
     };
@@ -132,7 +135,7 @@ describe('Metrics + PublicOpinion + monthly economy (Phase 2 causality)', () => 
     const state = game.gameState;
     state.economy.macro[countryId].debt = 5000;
     const government = state.government.countries[countryId];
-    government.budget.taxRates = { income: 0.5, corporate: 0.5, trade: 0.5 };
+    government.budget.tax = 'max';
     government.budget.spendingShares = {
       military: 0.001, healthcare: 0.001, education: 0.001, infrastructure: 0.001, welfare: 0.001, government: 0.001, other: 0.001
     };

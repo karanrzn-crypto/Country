@@ -21,9 +21,11 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v10 → v11: Urban+Roads layer merge; supplier lists
  * - v11 → v12: GLOBAL trade network — policies/pins removed, supplier
  *   amounts, unfilledShortage
+ * - v12 → v13: 100% budget pool (economic/military shares) + 4-level tax —
+ *   legacy taxRates stripped, shares derived from the saved spending mix
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v12)', () => {
+describe('save migrations (v1 → … → v13)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -203,7 +205,7 @@ describe('save migrations (v1 → … → v12)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(12);
+    expect(version).toBe(SAVE_VERSION);
     const economy = (data as typeof v10).state.economy as Record<string, unknown>;
     expect(economy.resources).toEqual({
       country_0: { production: { oil: 4 }, suppliers: {}, unfilledShortage: {} }
@@ -226,7 +228,7 @@ describe('save migrations (v1 → … → v12)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(12);
+    expect(version).toBe(SAVE_VERSION);
     const migrated = data as typeof v10;
     // Visibility: the merged toggle carries the AND of the two old flags
     // (an explicit hide wins); the old keys are gone.
@@ -266,7 +268,7 @@ describe('save migrations (v1 → … → v12)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v11, 11, SAVE_VERSION);
-    expect(version).toBe(12);
+    expect(version).toBe(SAVE_VERSION);
     const record = (data as typeof v11).state.economy!.resources!.country_0 as Record<string, unknown>;
     // The policy system is GONE (the world market decides for everyone).
     expect('importPolicy' in record).toBe(false);
@@ -278,6 +280,53 @@ describe('save migrations (v1 → … → v12)', () => {
     // Money and flows pass through untouched.
     expect(record.importCost).toBe(5);
     expect(record.production).toEqual({ oil: 4 });
+  });
+
+  it('v12→v13: taxRates become the 100% pool split + a tax level (posture carried over)', () => {
+    const v12 = {
+      state: {
+        government: {
+          countries: {
+            country_0: {
+              president: { name: 'A' },
+              politics: {},
+              elections: {},
+              ministries: {},
+              budget: {
+                taxRates: { income: 0.22, corporate: 0.19, trade: 0.08 },
+                spendingShares: {
+                  military: 0.018, healthcare: 0.02, education: 0.018,
+                  infrastructure: 0.016, welfare: 0.02, government: 0.024, other: 0.004
+                }
+              },
+              decisions: {},
+              events: {},
+              opinion: {},
+              lastSimMonth: 3
+            }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v12, 12, SAVE_VERSION);
+    expect(version).toBe(13);
+    const record = (data as typeof v12).state.government!.countries!.country_0 as Record<string, unknown>;
+    const budget = record.budget as Record<string, unknown>;
+    // The legacy rate record is GONE; the pool split + level are present.
+    expect('taxRates' in budget).toBe(false);
+    // Default burden 0.49 → MEDIUM; military 0.018/0.12 → 15% → economic 85%.
+    expect(budget.tax).toBe('medium');
+    const shares = budget.shares as Record<string, number>;
+    expect(shares.economic).toBeCloseTo(0.85, 12);
+    expect(shares.military).toBeCloseTo(0.15, 12);
+    expect(shares.economic + shares.military).toBeCloseTo(1, 12);
+    // Everything else untouched.
+    expect(record.lastSimMonth).toBe(3);
+    expect(budget.spendingShares).toEqual({
+      military: 0.018, healthcare: 0.02, education: 0.018,
+      infrastructure: 0.016, welfare: 0.02, government: 0.024, other: 0.004
+    });
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

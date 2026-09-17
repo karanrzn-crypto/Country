@@ -60,7 +60,7 @@ import type { SaveStorage } from '../save/SaveStorage';
 import type { SaveData } from '../save/SaveTypes';
 import { registerCoreCommandHandlers } from './CommandHandlers';
 import { absoluteMonthIndex } from '../time/Calendar';
-import { setTaxRate, setSpendingShare, setEconomicSpendingShare, setMinistryFunding } from '../state/slices/governmentSlice';
+import { setBudgetShare, setTaxLevel, setMinistryFunding } from '../state/slices/governmentSlice';
 import { decisionBlockReason, enactDecision } from '../government/DecisionEngine';
 import { resolvePendingEvent } from '../government/EventEngine';
 import { registerDebugCommandHandlers } from '../debug/DebugCommands';
@@ -1034,31 +1034,22 @@ export class Game {
     return absoluteMonthIndex(this.time.date, this.time.startDate);
   }
 
-  governmentSetTaxRate(countryId: string, category: 'income' | 'corporate' | 'trade', value: number): void {
-    this.assertInitialized();
-    const applied = setTaxRate(this.state.government, countryId, category, value);
-    this.events.emit('government.budgetChanged', { countryId, kind: 'tax', category, value: applied });
-  }
-
-  governmentSetSpending(
-    countryId: string,
-    category: 'military' | 'healthcare' | 'education' | 'infrastructure' | 'welfare' | 'government' | 'other',
-    value: number
-  ): void {
-    this.assertInitialized();
-    const applied = setSpendingShare(this.state.government, countryId, category, value);
-    this.events.emit('government.budgetChanged', { countryId, kind: 'spending', category, value: applied });
-  }
-
   /**
-   * THE one 'Economic Budget' lever (spec §4): scales every non-military
-   * spending category proportionally so their sum approaches `value`. One
-   * event keeps every listener in sync with the applied total.
+   * THE 100% budget pool mutator (spec §1): sets one pool's share; the other
+   * pool absorbs the remainder — economic + military is ALWAYS exactly 100%.
+   * One event keeps every listener in sync with the applied split.
    */
-  governmentSetEconomicBudget(countryId: string, value: number): void {
+  governmentSetBudgetShare(countryId: string, pool: 'economic' | 'military', value: number): void {
     this.assertInitialized();
-    const applied = setEconomicSpendingShare(this.state.government, countryId, value);
-    this.events.emit('government.budgetChanged', { countryId, kind: 'spending', category: 'economic', value: applied });
+    const applied = setBudgetShare(this.state.government, countryId, pool, value);
+    this.events.emit('government.budgetChanged', { countryId, kind: 'budget', pool, economic: applied.economic, military: applied.military });
+  }
+
+  /** The ONE tax level (spec §4): LOW / MEDIUM / HIGH / MAX. */
+  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high' | 'max'): void {
+    this.assertInitialized();
+    const applied = setTaxLevel(this.state.government, countryId, level);
+    this.events.emit('government.budgetChanged', { countryId, kind: 'tax', level: applied });
   }
 
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void {

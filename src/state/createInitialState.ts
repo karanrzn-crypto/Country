@@ -14,6 +14,7 @@ import { buildWorldSlice } from './slices/worldSlice';
 import { createDefaultMapSlice } from './slices/mapSlice';
 import { buildCountrySlice } from './slices/countrySlice';
 import { buildGovernmentSlice } from './slices/governmentSlice';
+import { repairBudgetRecord } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
 import { createMacroEconomy } from '../economy/EconomySimulation';
 import { recomputeResourceEconomies } from '../economy/resources';
@@ -203,6 +204,11 @@ export function healPhase2State(
     const mapCountry = mapModel.countries[countryId];
     if (state.government.countries[countryId] === undefined) {
       state.government.countries[countryId] = buildGovernmentSlice([countryId], { [countryId]: mapCountry.name }, partyTemplates, ministryTemplates, rng).countries[countryId];
+    } else {
+      // The 100% budget pool must stay consistent after any load path —
+      // repair normalizes the shares, re-derives the money plumbing and
+      // coerces an unknown tax level (idempotent for healthy records).
+      repairBudgetRecord(state.government.countries[countryId]);
     }
     if (state.economy.macro[countryId] === undefined) {
       state.economy.macro[countryId] = createMacroEconomy(state.countries.countries[countryId]?.population ?? 1_500_000);

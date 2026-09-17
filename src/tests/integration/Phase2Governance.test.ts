@@ -120,18 +120,20 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     const game = createTestGame({ seed: 206 });
     const countryId = game.strategicMap.countryOrder[0];
     game.commandBus.send({ type: 'player.confirmCountry', countryId });
-    game.commandBus.send({ type: 'government.setTaxRate', countryId, category: 'income', value: 0.5 });
-    game.commandBus.send({ type: 'government.setSpending', countryId, category: 'military', value: 0.05 });
+    game.commandBus.send({ type: 'government.setBudgetShare', countryId, pool: 'economic', value: 0.6 });
+    game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'high' });
     game.commandBus.send({ type: 'government.setMinistryFunding', countryId, ministryId: 'defense', value: 0.8 });
     game.commandBus.flush();
     const government = game.gameState.government.countries[countryId];
-    expect(government.budget.taxRates.income).toBeCloseTo(0.5, 9);
-    expect(government.budget.spendingShares.military).toBeCloseTo(0.05, 9);
+    expect(government.budget.shares.economic).toBeCloseTo(0.6, 9);
+    expect(government.budget.shares.military).toBeCloseTo(0.4, 9);
+    expect(government.budget.tax).toBe('high');
     expect(government.ministries.defense.funding).toBeCloseTo(0.8, 9);
-    // Out-of-range values clamp instead of corrupting state.
-    game.commandBus.send({ type: 'government.setTaxRate', countryId, category: 'income', value: 9 });
+    // Out-of-range values clamp instead of corrupting state (pool sum stays 1).
+    game.commandBus.send({ type: 'government.setBudgetShare', countryId, pool: 'economic', value: 9 });
     game.commandBus.flush();
-    expect(government.budget.taxRates.income).toBe(0.75);
+    expect(government.budget.shares.economic).toBe(1);
+    expect(government.budget.shares.military).toBe(0);
     game.dispose();
   });
 

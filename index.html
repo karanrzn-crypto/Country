@@ -249,6 +249,18 @@
         color: #e8edf5; background: #1a2333; padding: 0;
       }
       .pd-step-btn:hover { background: #243149; border-color: #4a5f88; }
+      /* Tax levels (spec §7): four selectable cards, the chosen one marked. */
+      .pd-tax-levels { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+      .pd-tax-level {
+        display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+        font: inherit; text-align: right; cursor: pointer; padding: 7px 10px;
+        background: #1b2438; border: 1px solid #2c3a57; border-radius: 6px; color: #cfd8e6;
+      }
+      .pd-tax-level:hover { background: #243149; border-color: #4a5f88; }
+      .pd-tax-level.on { border-color: #4f8ef7; background: #20304d; color: #e8edf5; }
+      .pd-tax-name { font-weight: 700; }
+      .pd-tax-effect { font-size: 12px; color: #8fa1bd; }
+      .pd-tax-level.on .pd-tax-effect { color: #a8c4f0; }
       .pd-parties, .pd-decision-list, .pd-event-list, .pd-election-results,
       .pd-resources, .pd-trades {
         display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
