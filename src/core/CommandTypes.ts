@@ -77,4 +77,7 @@ export type GameCommand =
     }
   | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
-  | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string };
+  | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }
+  // —— strategic resource economy (import/export policies) ——
+  | { readonly type: 'economy.setImportPolicy'; readonly countryId: string; readonly resourceId: string; readonly active: boolean }
+  | { readonly type: 'economy.setExportPolicy'; readonly countryId: string; readonly resourceId: string; readonly active: boolean };

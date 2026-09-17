@@ -36,11 +36,33 @@
       "inputs": { "steel": 1, "oil": 1 },
       "outputs": { "electronics": 2 },
       "cyclesPerDay": 1,
-      "workforce": 300
-    }
+      "workforce": 300 }
   ],
   "startingStockpiles": {
     "resources": { "food": 50, "steel": 40, "oil": 30, "electronics": 10 },
     "equipment": { "rifle": 200, "at_rifle": 20, "tank_gun": 10, "tank_armor_kit": 10, "ifv_gun": 12, "heli_gun": 4, "artillery_battery": 4 }
+  },
+  "strategicResources": {
+    "productionScale": 1.2,
+    "exportShare": 0.5,
+    "importMarkup": 1.25,
+    "resources": [
+      { "id": "oil", "name": "نفت", "price": 2.0 },
+      { "id": "wood", "name": "چوب", "price": 0.8 },
+      { "id": "iron", "name": "آهن", "price": 1.6 },
+      { "id": "food", "name": "غذا", "price": 0.6 },
+      { "id": "coal", "name": "زغال‌سنگ", "price": 1.0 },
+      { "id": "copper", "name": "مس", "price": 1.8 },
+      { "id": "gold", "name": "طلا", "price": 4.0 }
+    ],
+    "consumption": {
+      "food": { "perMillionPopulation": 9 },
+      "wood": { "perBillionOutput": { "construction": 1.1 }, "perMillionPopulation": 0.8 },
+      "iron": { "perBillionOutput": { "industry": 0.9 }, "perMilitaryUnit": 0.6 },
+      "coal": { "perBillionOutput": { "industry": 0.9, "energy": 1.2 } },
+      "copper": { "perBillionOutput": { "technology": 1.6 } },
+      "oil": { "perBillionOutput": { "energy": 1.0, "trade": 0.3 }, "perMilitaryUnit": 0.9 },
+      "gold": {}
+    }
   }
 }

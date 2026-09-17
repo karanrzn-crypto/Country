@@ -57,6 +57,35 @@ export const ECONOMY_SCHEMA: FieldSchema = {
         fields: { id: idField, name: nameField, weight: positiveNumber }
       }
     },
+    strategicResources: {
+      type: 'object',
+      allowUnknown: false,
+      fields: {
+        productionScale: positiveNumber,
+        exportShare: { type: 'number', min: 0, max: 1 },
+        importMarkup: positiveNumber,
+        resources: {
+          type: 'array',
+          minLength: 1,
+          items: {
+            type: 'object',
+            fields: { id: idField, name: nameField, price: { type: 'number', min: 0 } }
+          }
+        },
+        consumption: {
+          type: 'record',
+          values: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              perMillionPopulation: { type: 'optional', inner: { type: 'number', min: 0 } },
+              perBillionOutput: { type: 'optional', inner: { type: 'record', values: positiveNumber } },
+              perMilitaryUnit: { type: 'optional', inner: { type: 'number', min: 0 } }
+            }
+          }
+        }
+      }
+    },
     factoryTypes: {
       type: 'array',
       minLength: 1,
@@ -290,6 +319,16 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             max: { type: 'number', min: 0.1, max: 20 }
           }
         },
+        roadColors: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            highway: colorField,
+            secondary: colorField,
+            dirt: colorField
+          }
+        },
+        roadOpacity: { type: 'number', min: 0, max: 1 },
         railwayStroke: colorField,
         railwayOpacity: { type: 'number', min: 0, max: 1 },
         seaRouteStroke: colorField,
@@ -303,6 +342,7 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             factory: colorField,
             mine: colorField,
             oil: colorField,
+            lumber: colorField,
             airbase: colorField,
             base: colorField
           }

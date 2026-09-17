@@ -8,6 +8,8 @@ import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
 import { describeGridCell, describeProvince } from '../world/map/MapGeography';
 import { selectionSummary } from '../state/slices/mapSlice';
+import { cityResourceProduction } from '../economy/resources';
+import type { StrategicResourcesConfig } from '../economy/types';
 import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
 import type { CityConnection } from '../world/cityareas/CityConnections';
 import {
@@ -58,9 +60,15 @@ const SITE_KIND_LABELS: Readonly<Record<string, string>> = {
   factory: 'کارخانه',
   mine: 'معدن',
   oil: 'چاه نفت',
+  lumber: 'جنگل‌داری',
   base: 'پایگاه نظامی',
   airbase: 'پایگاه هوایی'
 };
+
+/** Persian display name of a resource id (data-driven — unknown ids pass through). */
+function resourceLabel(config: StrategicResourcesConfig, resourceId: string): string {
+  return config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
+}
 
 const BUILDING_KIND_LABELS: Readonly<Record<string, string>> = {
   residential: 'مسکونی',
@@ -389,7 +397,7 @@ export class MapUI {
         addRow('جمعیت', formatCompact(info.population));
         addRow('زمین', TERRAIN_LABELS[info.terrainType] ?? info.terrainType);
         addRow('مساحت', `${info.areaCells} سلول`);
-        addChips('منابع', [...info.resourceIds]);
+        addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(context.data.economyData.strategicResources, id)));
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow(
           'زیرساخت',
@@ -420,7 +428,7 @@ export class MapUI {
           'شهرها',
           info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
         );
-        addChips('منابع', [...info.resourceIds]);
+        addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(context.data.economyData.strategicResources, id)));
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow('زیرساخت', `${info.roadIds.length} جاده · ${info.railwayIds.length} راه‌آهن`);
         addRow('ارزش راهبردی', String(info.strategicValue));
@@ -455,7 +463,20 @@ export class MapUI {
             return `${other?.name ?? otherId} (${connectionLengthKm(connection)} کیلومتر)`;
           })
         );
-        addChips('منابع', [...city.resourceIds]);
+        addChips(
+          'منابع شهر',
+          (() => {
+            const config = context.data.economyData.strategicResources;
+            const production = cityResourceProduction(model, city.id, config);
+            const ids = new Set<string>([...city.resourceIds, ...Object.keys(production)]);
+            return [...ids].sort().map((id) => {
+              const amount = production[id];
+              return amount !== undefined
+                ? `${resourceLabel(config, id)} ${Math.round(amount).toLocaleString('en-US')}`
+                : resourceLabel(config, id);
+            });
+          })()
+        );
         addRow(
           'زیرساخت',
           `جاده ${yesNo(city.infrastructure.roadIds.length > 0)} · راه‌آهن ${yesNo(city.infrastructure.railwayIds.length > 0)} · ` +

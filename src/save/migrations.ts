@@ -293,6 +293,27 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 9,
+    to: 10,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v9→v10: save payload is not an object');
+      }
+      // Strategic resource economy (economy.resources) added to the economy
+      // slice. Old saves predate it — inject the empty record; the session
+      // heal (healPhase2State) recomputes everything from the live map, so
+      // the empty record is only a schema-valid placeholder.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: Record<string, unknown> };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined && economy.resources === undefined) {
+        economy.resources = {};
+      }
+      return clone;
+    }
   }
 ];
 

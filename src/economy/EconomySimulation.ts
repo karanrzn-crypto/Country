@@ -22,6 +22,9 @@ import type { MacroEconomyState, SectorState } from './macro';
 import { LABOR_PARTICIPATION, SECTOR_CAPACITY_WEIGHTS, SECTORS, SECTOR_PRODUCTIVITY } from './macro';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 import { readMetric, activeMulFactor } from '../government/Metrics';
+import { recomputeResourceEconomies } from './resources';
+import type { StrategicResourcesConfig } from './types';
+import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { Random } from '../utils/Random';
 import { roundTo } from '../utils/math';
 
@@ -74,9 +77,18 @@ export function createMacroEconomy(population: number): MacroEconomyState {
 
 /**
  * Processes ONE campaign month for one country. Deterministic given state
- * + rng. Returns the ledger for events/UI/tests.
+ * + rng. When the map model + resource config are provided (always in the
+ * live simulation), the strategic resource economy is recomputed FIRST and
+ * its trade flows (export income / import cost) enter the ledger.
+ * Returns the ledger for events/UI/tests.
  */
-export function processMonthEconomy(state: GameState, countryId: string, _rng: Random): MonthlyLedger {
+export function processMonthEconomy(
+  state: GameState,
+  countryId: string,
+  _rng: Random,
+  mapModel?: StrategicMapModel,
+  resourceConfig?: StrategicResourcesConfig
+): MonthlyLedger {
   const macro = state.economy.macro[countryId];
   const government = state.government.countries[countryId];
   const country = state.countries.countries[countryId];
@@ -144,7 +156,7 @@ export function processMonthEconomy(state: GameState, countryId: string, _rng: R
   const taxEfficiency = (0.85 + financeEfficiency * 0.3) * (1 - government.politics.corruption * 0.25);
   const rates = government.budget.taxRates;
 
-  const revenue =
+  let revenue =
     gdp * WAGE_SHARE_OF_GDP * rates.income * taxEfficiency +
     (macro.sectors.industry.output + macro.sectors.mining.output + macro.sectors.energy.output + macro.sectors.construction.output) *
       CORPORATE_MARGIN *
@@ -157,6 +169,22 @@ export function processMonthEconomy(state: GameState, countryId: string, _rng: R
   let spending = 0;
   for (const share of Object.values(spendingBase)) spending += share * gdp;
   spending += macro.debt * DEBT_INTEREST_RATE; // annual interest
+
+  // —— strategic resource trade: recompute from live data, then bill ——
+  // Trade amounts are MONTHLY flows; the ledger below is ANNUAL (÷12 later),
+  // so the monthly trade money enters as ×12 to survive the division exactly.
+  let resourceExportIncome = 0;
+  let resourceImportCost = 0;
+  if (mapModel !== undefined && resourceConfig !== undefined) {
+    recomputeResourceEconomies(state, mapModel, resourceConfig);
+    const resources = state.economy.resources[countryId];
+    if (resources !== undefined) {
+      resourceExportIncome = resources.exportIncome;
+      resourceImportCost = resources.importCost;
+      revenue += resourceExportIncome * 12;
+      spending += resourceImportCost * 12;
+    }
+  }
 
   // Revenue and spending are ANNUAL amounts at current levels; the monthly
   // flow is 1/12 of them (calendar-exact months are handled by the caller).

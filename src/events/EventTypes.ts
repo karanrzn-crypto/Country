@@ -186,6 +186,13 @@ export interface GameEventMap {
   'government.ministryFundingChanged': { readonly countryId: string; readonly ministryId: string; readonly value: number };
   'government.campaignStarted': { readonly countryId: string; readonly electionMonth: number };
   'government.electionHeld': { readonly countryId: string; readonly winnerId: string; readonly incumbentReelected: boolean };
+  /** Strategic resource trade policy changed (import/export toggle). */
+  'economy.resourceTradeChanged': {
+    readonly countryId: string;
+    readonly resourceId: string;
+    readonly kind: 'import' | 'export';
+    readonly active: boolean;
+  };
 }
 
 export type GameEventName = keyof GameEventMap;

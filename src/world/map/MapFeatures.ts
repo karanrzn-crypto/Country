@@ -491,15 +491,19 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
     const resourceCandidates = [...country.cellIds]
       .filter((cellIndex) => !lakeCellSet.has(cellIndex))
       .sort((a, b) => elevation[b] - elevation[a] || a - b);
+    const usedResourceCells = new Set<number>();
     const chosenCells = spreadCells(resourceCandidates, targetResourceCount, centroids);
     for (const cellIndex of chosenCells) {
+      usedResourceCells.add(cellIndex);
       const terrainClass = terrain[cellIndex];
       const biomeClass = biomes[cellIndex];
       let kind: MapSite['kind'] | null = null;
       let resourceId: string | null = null;
       if (terrainClass === 'mountain') {
         kind = 'mine';
-        resourceId = rng.next() < 0.7 ? 'iron' : 'gold';
+        // Mountain ores: iron dominates, copper and gold are rarer (deterministic pick).
+        const pick = rng.next();
+        resourceId = pick < 0.55 ? 'iron' : pick < 0.8 ? 'copper' : 'gold';
       } else if (terrainClass === 'hills') {
         kind = 'mine';
         resourceId = 'coal';
@@ -516,6 +520,22 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       pushSite(kind, country.id, position, cellIndex, resourceId, null);
     }
 
+    // Oil derricks: a DEDICATED desert/drylands pass — the elevation-first
+    // spread above skews to mountains, so without this pass oil can vanish
+    // from whole maps. Sites never share a cell with the main pass.
+    const desertCells = country.cellIds.filter(
+      (cellIndex) =>
+        (biomes[cellIndex] === 'desert' || biomes[cellIndex] === 'drylands') &&
+        !lakeCellSet.has(cellIndex) &&
+        !usedResourceCells.has(cellIndex)
+    );
+    const oilCount = Math.max(0, Math.min(3, Math.ceil(desertCells.length / 5)));
+    for (const cellIndex of spreadCells(desertCells, oilCount, centroids)) {
+      const position = centroids[cellIndex];
+      if (!pointInRing(position, country.ring.points)) continue;
+      pushSite('oil', country.id, position, cellIndex, 'oil', null);
+    }
+
     // Farms: grassland cells, spread for readability.
     const grassCells = country.cellIds.filter(
       (cellIndex) => biomes[cellIndex] === 'grassland' && !lakeCellSet.has(cellIndex)
@@ -525,6 +545,17 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       const position = centroids[cellIndex];
       if (!pointInRing(position, country.ring.points)) continue;
       pushSite('farm', country.id, position, cellIndex, null, null);
+    }
+
+    // Lumber camps: forest cells → wood production sites (same pattern as farms).
+    const forestCells = country.cellIds.filter(
+      (cellIndex) => biomes[cellIndex] === 'forest' && !lakeCellSet.has(cellIndex)
+    );
+    const lumberCount = Math.max(0, Math.min(3, Math.ceil(forestCells.length / 10)));
+    for (const cellIndex of spreadCells(forestCells, lumberCount, centroids)) {
+      const position = centroids[cellIndex];
+      if (!pointInRing(position, country.ring.points)) continue;
+      pushSite('lumber', country.id, position, cellIndex, 'wood', null);
     }
 
     // Factories: the largest non-capital cities.

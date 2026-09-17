@@ -64,7 +64,9 @@ export class GovernmentSystem implements SimulationSystemDef {
     const { state, events, rng, ids, data } = context;
 
     // —— 1. economy (treasury, GDP, sectors, debt, inflation, jobs) ——
-    processMonthEconomy(state, countryId, rng);
+    // The map model + resource config drive the strategic resource economy
+    // (production from city deposits → consumption → world market → ledger).
+    processMonthEconomy(state, countryId, rng, context.map, data.economyData.strategicResources);
 
     // —— 2. public opinion → presidential approval ——
     updateOpinionTopics(state, countryId);

@@ -32,9 +32,7 @@ export type MapLayerId =
   | 'cities'
   | 'capitals'
   // infrastructure
-  // ('roads' was removed as a user-facing layer — the road LINES remain in
-  //  the map model and inside the City Areas network, but there is no
-  //  standalone Roads toggle any more.)
+  | 'roads'
   | 'railways'
   | 'airports'
   | 'ports'
@@ -71,6 +69,7 @@ export const MAP_LAYERS: readonly MapLayerDef[] = [
   { id: 'provinceBorders', label: 'استان‌ها', group: 'geography', defaultVisible: true },
   { id: 'cityAreas', label: 'مناطق شهری', group: 'geography', defaultVisible: true },
   { id: 'countryBorders', label: 'مرز کشورها', group: 'base', defaultVisible: true },
+  { id: 'roads', label: 'جاده‌ها', group: 'infrastructure', defaultVisible: true },
   { id: 'railways', label: 'راه‌آهن‌ها', group: 'infrastructure', defaultVisible: false },
   { id: 'airports', label: 'فرودگاه‌ها', group: 'infrastructure', defaultVisible: false },
   { id: 'ports', label: 'بنادر', group: 'infrastructure', defaultVisible: false },

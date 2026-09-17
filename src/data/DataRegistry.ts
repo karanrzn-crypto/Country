@@ -5,7 +5,7 @@ import type { FieldSchema } from '../utils/validation';
 import { EQUIPMENT_SCHEMA, ECONOMY_SCHEMA, INPUT_BINDINGS_SCHEMA, PLAYER_MODE_SCHEMA, UNIT_TYPE_SCHEMA, AI_STRATEGY_SCHEMA, WORLD_SCHEMA, MAP_THEME_SCHEMA, COUNTRY_PROFILE_SCHEMA, PARTY_TEMPLATE_SCHEMA, MINISTRY_TEMPLATE_SCHEMA, DECISION_DEF_SCHEMA, EVENT_DEF_SCHEMA } from './schemas';
 import type { WorldDataJson, CountryProfileJson } from './types';
 import type { UnitTypeDef, EquipmentDef } from '../military/types';
-import type { FactoryTypeDef, ResourceDef } from '../economy/types';
+import type { FactoryTypeDef, ResourceDef, StrategicResourcesConfig } from '../economy/types';
 import type { AIStrategyDef } from '../ai/types';
 import type { PlayerModeDef } from '../player/types';
 import type { InputBindings } from '../input/InputTypes';
@@ -34,6 +34,8 @@ export interface EconomyDataBundle {
     readonly resources: Readonly<Record<string, number>>;
     readonly equipment: Readonly<Record<string, number>>;
   };
+  /** HoI4-inspired country resource economy (production/consumption/trade). */
+  readonly strategicResources: StrategicResourcesConfig;
 }
 
 /**

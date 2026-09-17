@@ -497,14 +497,15 @@ export interface DepositBuildInput {
 
 /**
  * Located resource deposits: every mine/oil site becomes a deposit of its
- * resource; every farm becomes a FOOD deposit. Quantity is deterministic
- * (hash-based 1..100). Deposits are geography — never location-less.
+ * resource; every farm becomes a FOOD deposit; every lumber camp becomes a
+ * WOOD deposit. Quantity is deterministic (hash-based 1..100). Deposits are
+ * geography — never location-less.
  */
 export function buildDeposits(input: DepositBuildInput): MapResourceDeposit[] {
   const deposits: MapResourceDeposit[] = [];
   for (const site of input.sites) {
     let resourceId: string | null = null;
-    if (site.kind === 'mine' || site.kind === 'oil') resourceId = site.resourceId;
+    if (site.kind === 'mine' || site.kind === 'oil' || site.kind === 'lumber') resourceId = site.resourceId;
     else if (site.kind === 'farm') resourceId = 'food';
     if (resourceId === null) continue;
     const provinceId = input.provinceOfCell[site.cellIndex];

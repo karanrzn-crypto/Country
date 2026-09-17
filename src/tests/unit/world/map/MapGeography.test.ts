@@ -198,7 +198,7 @@ describe('Part 3 — provinces', () => {
     // Deposits exist and are never location-less.
     expect(features.deposits.length).toBeGreaterThan(0);
     for (const deposit of features.deposits) {
-      expect(['oil', 'food', 'iron', 'coal', 'gold']).toContain(deposit.resourceId);
+      expect(['oil', 'food', 'iron', 'coal', 'copper', 'gold', 'wood']).toContain(deposit.resourceId);
     }
   });
 

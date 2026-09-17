@@ -5,6 +5,7 @@
 
 import type { FactoryRecord } from '../../economy/types';
 import type { MacroEconomyState } from '../../economy/macro';
+import type { CountryResourceState } from '../../economy/resources';
 
 export interface EconomySlice {
   /** faction/country id → treasury amount. */
@@ -16,11 +17,18 @@ export interface EconomySlice {
   /** region id → supply satisfaction ratio 0..1 (SupplySystem writes). */
   supply: Record<string, number>;
   /**
-   * Phase 2 — national accounts per STRATEGIC country id (country_0…):
+   * Phase 2 — national accounts per strategic country id (country_0…):
    * GDP, sectors, inflation, unemployment, debt, trade. The legacy demo
    * world has no macro record.
    */
   macro: Record<string, MacroEconomyState>;
+  /**
+   * Strategic resource economy per strategic country id — production from
+   * attributed city deposits, consumption from live state, world-market
+   * imports/exports and the player's trade policies. Written ONLY by
+   * recomputeResourceEconomies (never hand-edited).
+   */
+  resources: Record<string, CountryResourceState>;
 }
 
 export function addStockpile(

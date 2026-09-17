@@ -99,13 +99,13 @@ describe('MapUI country-select screen', () => {
 
   it('layer toggles exist for every registered layer with labels', () => {
     const toggles = findAll(adapter.rootElement, 'map-layer-toggle');
-    // Registry order — 26 layers after the Roads removal.
-    expect(toggles.length).toBe(26);
+    // Registry order — 27 layers (Roads restored as a visibility toggle).
+    expect(toggles.length).toBe(27);
     const texts = toggles.map((button) => button.text);
     expect(texts).toContain('زیست‌بوم‌ها');
     expect(texts).toContain('توپوگرافی');
     expect(texts).not.toContain('Roads');
-    expect(texts).not.toContain('جاده‌ها');
+    expect(texts).toContain('جاده‌ها');
     expect(texts).toContain('رودخانه‌ها');
     expect(texts).toContain('دریاچه‌ها / آب');
     expect(texts).toContain('شبکهٔ جغرافیایی');

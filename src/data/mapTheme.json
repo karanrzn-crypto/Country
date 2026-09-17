@@ -176,6 +176,12 @@
       "perCell": 0.09,
       "max": 2.4
     },
+    "roadColors": {
+      "highway": "#8a3f22",
+      "secondary": "#a06a3f",
+      "dirt": "#8f7a55"
+    },
+    "roadOpacity": 0.9,
     "railwayStroke": "#46355a",
     "railwayOpacity": 0.9,
     "seaRouteStroke": "#9fc4e0",
@@ -186,6 +192,7 @@
       "factory": "#6b3f2a",
       "mine": "#4f4038",
       "oil": "#262626",
+      "lumber": "#2f6b3f",
       "airbase": "#3a4a6b",
       "base": "#4a3b2a"
     },

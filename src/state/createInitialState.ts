@@ -16,9 +16,11 @@ import { buildCountrySlice } from './slices/countrySlice';
 import { buildGovernmentSlice } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
 import { createMacroEconomy } from '../economy/EconomySimulation';
+import { recomputeResourceEconomies } from '../economy/resources';
 import type { MacroEconomyState } from '../economy/macro';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { GameState } from './GameState';
+import type { EconomySlice } from './slices/economySlice';
 import { validateGameStateOrThrow } from './validate';
 
 /**
@@ -61,7 +63,8 @@ export function createInitialState(
       ])
     ),
     supply: Object.fromEntries(Object.keys(world.regions).map((regionId) => [regionId, 1])),
-    macro: {} as Record<string, MacroEconomyState>
+    macro: {} as Record<string, MacroEconomyState>,
+    resources: {} as EconomySlice['resources']
   };
 
   // —— military ——
@@ -169,6 +172,9 @@ export function createInitialState(
       rng
     );
     state.cityAreas = createCityAreasSlice(mapModel, config.map.columns);
+    // Strategic resource economy: computed from the live map + state
+    // (deposit attribution, consumption drivers, world market).
+    recomputeResourceEconomies(state, mapModel, data.economyData.strategicResources);
   }
 
   validateGameStateOrThrow(state);
@@ -219,4 +225,20 @@ export function healPhase2State(
   }
 
   syncCityAreasSlice(state.cityAreas, mapModel, columns);
+
+  // Resource economy: recomputed from the LIVE map + state on every load —
+  // old saves (missing or stale records) and changed maps self-heal here.
+  if (state.economy.resources === undefined) state.economy.resources = {};
+  for (const countryId of mapModel.countryOrder) {
+    if (state.economy.resources[countryId] === undefined) {
+      state.economy.resources[countryId] = {
+        production: {}, consumption: {}, imports: {}, exports: {},
+        importPolicy: {}, exportPolicy: {}, suppliers: {}, importCost: 0, exportIncome: 0
+      };
+    }
+  }
+  for (const countryId of Object.keys(state.economy.resources)) {
+    if (!liveIds.has(countryId)) delete state.economy.resources[countryId];
+  }
+  recomputeResourceEconomies(state, mapModel, data.economyData.strategicResources);
 }

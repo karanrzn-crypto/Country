@@ -4,6 +4,7 @@ import type { EventBus } from '../events/EventBus';
 import type { PresidentDashboard, SectionId } from './PresidentDashboard';
 import { activeWarsInvolving } from '../state/slices/warSlice';
 import type { GovernmentCountryState } from '../government/types';
+import { resourceStatusOf } from '../economy/resources';
 
 /**
  * PresidentStatusPanel — the permanent QUICK OVERVIEW of the head of state.
@@ -103,7 +104,7 @@ export class PresidentStatusPanel {
     this.root.appendChild(this.identity);
 
     // —— fixed sections (top → bottom) ——
-    this.addSection('economy', 'اقتصاد', ['خزانه', 'تولید ناخالص', 'رشد', 'تورم', 'بیکاری', 'تراز ماهانه']);
+    this.addSection('economy', 'اقتصاد', ['خزانه', 'تولید ناخالص', 'رشد', 'تورم', 'بیکاری', 'تراز ماهانه', 'منابع']);
     this.addSection('military', 'نظامی', ['قدرت', 'یگان‌های فعال', 'سربازان', 'در نبرد', 'در حال حرکت', 'جنگ‌ها']);
     this.addSection('politics', 'سیاست', [
       'محبوبیت',
@@ -144,6 +145,9 @@ export class PresidentStatusPanel {
       events.on('player.countryConfirmed', () => this.refresh()),
       events.on('sim.economyTreasuryChanged', ({ factionId }) => {
         if (factionId === context.state.player.countryId) this.refresh();
+      }),
+      events.on('economy.resourceTradeChanged', ({ countryId }) => {
+        if (countryId === context.state.player.countryId) this.refresh();
       }),
       events.on('combat.engagementStarted', () => this.refresh())
     );
@@ -266,6 +270,25 @@ export class PresidentStatusPanel {
       economy.rows.get('بیکاری')?.setText('—');
       economy.rows.get('تراز ماهانه')?.setText('—');
     }
+    economy.rows.get('منابع')?.setText(this.resourceSummary(context, countryId));
+  }
+
+  /** Compact shortage/surplus summary of the strategic resources. */
+  private resourceSummary(context: SystemContext, countryId: string): string {
+    const record = context.state.economy.resources[countryId];
+    if (record === undefined) return '—';
+    const config = context.data.economyData.strategicResources;
+    const shortages: string[] = [];
+    const surpluses: string[] = [];
+    for (const resource of config.resources) {
+      const status = resourceStatusOf(record, resource.id);
+      if (status === 'shortage') shortages.push(resource.name);
+      else if (status === 'surplus' || status === 'exported') surpluses.push(resource.name);
+    }
+    const parts: string[] = [];
+    if (shortages.length > 0) parts.push(`کمبود: ${shortages.join('، ')}`);
+    if (surpluses.length > 0) parts.push(`مازاد: ${surpluses.join('، ')}`);
+    return parts.length > 0 ? parts.join(' · ') : 'همه متعادل';
   }
 
   private refreshMilitary(context: SystemContext, countryId: string): void {
@@ -430,6 +453,14 @@ export class PresidentStatusPanel {
     }
     if (macro !== undefined && macro.inflation > 0.12 && alerts.length < MAX_ALERTS) {
       alerts.push('⚠ بحران تورم');
+    }
+    // 6. Resource shortage — the first uncovered strategic resource.
+    const resources = context.state.economy.resources[countryId];
+    if (resources !== undefined && alerts.length < MAX_ALERTS) {
+      const shortage = context.data.economyData.strategicResources.resources.find(
+        (resource) => resourceStatusOf(resources, resource.id) === 'shortage'
+      );
+      if (shortage !== undefined) alerts.push(`⚠ کمبود ${shortage.name}`);
     }
 
     const signature = alerts.join('|');

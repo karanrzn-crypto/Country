@@ -357,13 +357,14 @@ export type MapSiteKind =
   | 'factory'
   | 'mine'
   | 'oil'
+  | 'lumber'
   | 'airbase'
   | 'base';
 
 export interface MapSite {
   readonly id: string;
   readonly kind: MapSiteKind;
-  /** Resource id for extractive sites (iron/coal/gold/oil), else null. */
+  /** Resource id for extractive/production sites (iron/coal/copper/gold/oil/wood), else null. */
   readonly resourceId: string | null;
   readonly countryId: CountryId;
   readonly cityId: CityId | null;

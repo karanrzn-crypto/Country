@@ -171,13 +171,13 @@ describe('map features generation', () => {
   it('sites: every site inside its own country, kinds valid, every country supplied', () => {
     expect(features.sites.length).toBeGreaterThan(0);
     for (const site of features.sites) {
-      expect(['port', 'farm', 'factory', 'mine', 'oil', 'airbase', 'base']).toContain(site.kind);
+      expect(['port', 'farm', 'factory', 'mine', 'oil', 'lumber', 'airbase', 'base']).toContain(site.kind);
       const country = model.countries[site.countryId];
       expect(country).toBeDefined();
       expect(pointInRing(site.position, country.ring.points)).toBe(true);
       if (site.kind === 'mine' || site.kind === 'oil') {
         expect(site.resourceId).not.toBeNull();
-        expect(['iron', 'coal', 'gold', 'oil']).toContain(site.resourceId);
+        expect(['iron', 'coal', 'copper', 'gold', 'oil']).toContain(site.resourceId);
       }
     }
     // Military infrastructure for every country; extractive resources too.

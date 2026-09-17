@@ -15,6 +15,7 @@ import {
   createPopulationFillLayer,
   createEconomyFillLayer,
   createStrategicFillLayer,
+  createRoadsLayer,
   createRailwaysLayer,
   createSeaRoutesLayer,
   RiverLayer,
@@ -128,11 +129,12 @@ export class StrategicMapRenderer {
     const lakeLayer = new LakeLayer(this.columns, theme);
     const gridLayer = new GridLayer(this.columns, context.config.map.rows, theme);
     this.gridLayer = gridLayer;
+    const roadsLayer = createRoadsLayer(theme);
     const railwaysLayer = createRailwaysLayer(theme);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
     const portsLayer = new SiteLayer(['port'], 'circle', theme);
     const industryLayer = new SiteLayer(['farm', 'factory'], 'square', theme);
-    const resourcesLayer = new SiteLayer(['mine', 'oil'], 'diamond', theme);
+    const resourcesLayer = new SiteLayer(['mine', 'oil', 'lumber'], 'diamond', theme);
     const militaryLayer = new SiteLayer(['base', 'airbase'], 'pentagon', theme);
     const airportBuildings = new BuildingsLayer(['airport'], theme);
     const cityBuildings = new BuildingsLayer(
@@ -162,6 +164,7 @@ export class StrategicMapRenderer {
       ['rivers', riverLayer],
       ['lakes', lakeLayer],
       ['grid', gridLayer],
+      ['roads', roadsLayer],
       ['railways', railwaysLayer],
       ['airports', airportBuildings],
       ['buildings', cityBuildings],
@@ -238,6 +241,7 @@ export class StrategicMapRenderer {
       // when the network shape changes.
       cityAreas: this.cityNetworkLayer.group,
       countryBorders: this.borderLayer.countryGroup,
+      roads: roadsLayer.group,
       railways: railwaysLayer.group,
       airports: airportBuildings.group,
       ports: portsLayer.group,

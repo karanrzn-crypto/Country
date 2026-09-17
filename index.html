@@ -249,9 +249,33 @@
         color: #e8edf5; background: #1a2333; padding: 0;
       }
       .pd-step-btn:hover { background: #243149; border-color: #4a5f88; }
-      .pd-parties, .pd-ministries, .pd-decision-list, .pd-event-list, .pd-election-results {
+      .pd-parties, .pd-ministries, .pd-decision-list, .pd-event-list, .pd-election-results,
+      .pd-resources {
         display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
       }
+      .pd-resource { border: 1px solid #22304a; border-radius: 5px; padding: 6px 9px; }
+      .pd-resource.st-shortage { border-color: #6a3226; background: rgba(90, 34, 20, 0.18); }
+      .pd-resource.st-surplus { border-color: #2f5233; }
+      .pd-resource.st-exported { border-color: #5a5222; background: rgba(70, 64, 18, 0.14); }
+      .pd-resource.st-imported { border-color: #2a4a6a; background: rgba(20, 44, 70, 0.16); }
+      .pd-resource-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+      .pd-resource-name { color: #e8edf5; font-weight: 700; }
+      .pd-resource-status { font-size: 11px; color: #9aa6ba; }
+      .pd-resource-status.st-shortage { color: #ff8f7a; font-weight: 700; }
+      .pd-resource-status.st-surplus { color: #9fd89f; font-weight: 700; }
+      .pd-resource-status.st-balanced { color: #cfd8e6; }
+      .pd-resource-status.st-imported { color: #8fc6ef; }
+      .pd-resource-status.st-exported { color: #ffe08a; }
+      .pd-resource-detail { color: #cfd8e6; font-size: 12px; margin-top: 2px; }
+      .pd-resource-trade { color: #9aa6ba; font-size: 11px; margin-top: 2px; }
+      .pd-resource-actions { display: flex; gap: 6px; margin-top: 4px; }
+      .pd-resource-btn {
+        font: inherit; font-size: 11px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 3px; padding: 2px 10px;
+        color: #e8edf5; background: #1a2333;
+      }
+      .pd-resource-btn:hover { background: #243149; border-color: #4a5f88; }
+      .pd-resource-btn.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
       .pd-party, .pd-result-row { color: #cfd8e6; }
       .pd-party.in-gov { color: #b8e6b8; font-weight: 700; }
       .pd-ministry-row { display: flex; align-items: center; gap: 8px; }

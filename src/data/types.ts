@@ -225,12 +225,15 @@ export interface MapLayerColorsData {
    * World units — cells are ~10 units wide.
    */
   readonly riverWidth: { readonly source: number; readonly perCell: number; readonly max: number };
+  /** Road line colors per class (highway/secondary/dirt) + opacity — Roads layer. */
+  readonly roadColors: Readonly<Record<'highway' | 'secondary' | 'dirt', string>>;
+  readonly roadOpacity: number;
   readonly railwayStroke: string;
   readonly railwayOpacity: number;
   readonly seaRouteStroke: string;
   readonly seaRouteOpacity: number;
   readonly siteColors: Readonly<
-    Record<'port' | 'farm' | 'factory' | 'mine' | 'oil' | 'airbase' | 'base', string>
+    Record<'port' | 'farm' | 'factory' | 'mine' | 'oil' | 'lumber' | 'airbase' | 'base', string>
   >;
   readonly siteOpacity: number;
   /** Geographic-grid line color + opacity (country-local cell mesh). */

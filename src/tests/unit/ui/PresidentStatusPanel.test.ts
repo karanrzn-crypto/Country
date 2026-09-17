@@ -255,6 +255,10 @@ describe('PresidentStatusPanel (quick overview)', () => {
     context.state.economy.treasury[countryId] = 1_000;
     government.politics.protests = 'none';
     if (macro !== undefined) macro.unemployment = 0.05;
+    // The resource economy must be genuinely calm too — clear consumption so
+    // no strategic resource counts as short (production stays ≥ consumption).
+    const resources = context.state.economy.resources[countryId];
+    if (resources !== undefined) resources.consumption = {};
     panel.refresh();
     expect(findAll(adapter.rootElement, 'psp-calm').length).toBe(1);
     context.state.economy.treasury[countryId] = 10_000;

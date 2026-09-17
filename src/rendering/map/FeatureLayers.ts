@@ -254,6 +254,27 @@ export class LineFeatureLayer {
   }
 }
 
+/**
+ * Roads: every land transport line (highway/secondary/dirt) vertex-colored
+ * by class. A visibility toggle only flips the group's `visible` flag —
+ * the built mesh and the underlying map data are NEVER rebuilt or dropped,
+ * so OFF = hide, ON = exactly the same roads again.
+ */
+export function createRoadsLayer(theme: MapTheme): LineFeatureLayer {
+  const colors: Record<string, RGB> = {};
+  for (const [kind, hex] of Object.entries(theme.layerColors.roadColors)) {
+    colors[kind] = rgb(hex);
+  }
+  return new LineFeatureLayer(
+    (model) =>
+      model.features.lines
+        .filter((line) => line.kind !== 'railway' && line.kind !== 'seaRoute')
+        .map((line) => ({ color: colors[line.kind] ?? colors.secondary, polyline: line.polyline })),
+    theme.layerColors.roadOpacity,
+    0.85
+  );
+}
+
 /** Railways: single theme color. */
 export function createRailwaysLayer(theme: MapTheme): LineFeatureLayer {
   const color = rgb(theme.layerColors.railwayStroke);

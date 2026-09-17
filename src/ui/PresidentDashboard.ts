@@ -7,6 +7,7 @@ import type { EffectDef, GovernmentCountryState, OpinionTopic, SpendingCategory,
 import { OPINION_TOPICS, SPENDING_CATEGORIES, TAX_CATEGORIES } from '../government/types';
 import { decisionBlockReason } from '../government/DecisionEngine';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
+import { resourceStatusOf, resourceBalanceOf, type ResourceStatus } from '../economy/resources';
 
 /**
  * President Dashboard (Phase 2) — the head-of-state command center.
@@ -137,6 +138,15 @@ const PROTEST_LABELS: Readonly<Record<string, string>> = {
   massive: 'گسترده'
 };
 
+/** Resource status → Persian label + CSS status class (color-coded). */
+const RESOURCE_STATUS: Readonly<Record<ResourceStatus, { label: string; css: string }>> = {
+  surplus: { label: 'مازاد — قابل صادرات', css: 'st-surplus' },
+  balanced: { label: 'متعادل', css: 'st-balanced' },
+  shortage: { label: 'کمبود — نیاز به واردات', css: 'st-shortage' },
+  imported: { label: 'وارداتی', css: 'st-imported' },
+  exported: { label: 'صادراتی', css: 'st-exported' }
+};
+
 export class PresidentDashboard {
   private context: SystemContext | null = null;
   private readonly tabButtons = new Map<SectionId, UIElement>();
@@ -252,13 +262,19 @@ export class PresidentDashboard {
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    this.addRows(section, ['تولید ناخالص (سالانه)', 'رشد', 'تورم', 'بیکاری', 'بدهی', 'خزانه', 'درآمد ماهانه', 'هزینهٔ ماهانه', 'تراز ماهانه', 'تراز تجاری', 'جمعیت', 'نیروی کار'], 'economy.');
+    this.addRows(section, ['تولید ناخالص (سالانه)', 'رشد', 'تورم', 'بیکاری', 'بدهی', 'خزانه', 'درآمد ماهانه', 'هزینهٔ ماهانه', 'تراز ماهانه', 'تراز تجاری', 'تجارت منابع', 'جمعیت', 'نیروی کار'], 'economy.');
     const sectorTitle = this.create('div', 'pd-subtitle');
     sectorTitle.setText('بخش‌ها — تولید · شغل · بهره‌وری');
     section.appendChild(sectorTitle);
     for (const sectorId of SECTOR_ORDER) {
       this.addRow(section, `sector.${sectorId}`, SECTOR_LABELS[sectorId] ?? sectorId);
     }
+    const resourcesTitle = this.create('div', 'pd-subtitle');
+    resourcesTitle.setText('منابع راهبردی — تولید · مصرف · تراز · واردات/صادرات');
+    section.appendChild(resourcesTitle);
+    const resourcesList = this.create('div', 'pd-resources');
+    section.appendChild(resourcesList);
+    this.track(resourcesList, 'resources');
     return section;
   }
 
@@ -387,9 +403,10 @@ export class PresidentDashboard {
   }
 
   private refreshEconomy(countryId: string): void {
-    const macro = this.context?.state.economy.macro[countryId];
-    if (macro === undefined) return;
-    const treasury = this.context?.state.economy.treasury[countryId] ?? 0;
+    const context = this.context;
+    const macro = context?.state.economy.macro[countryId];
+    if (context === undefined || context === null || macro === undefined) return;
+    const treasury = context.state.economy.treasury[countryId] ?? 0;
     this.rows.get('economy.تولید ناخالص (سالانه)')?.setText(money(macro.gdp));
     this.rows.get('economy.رشد')?.setText(percentSigned(macro.gdpGrowth));
     this.rows.get('economy.تورم')?.setText(percentSigned(macro.inflation));
@@ -400,13 +417,106 @@ export class PresidentDashboard {
     this.rows.get('economy.هزینهٔ ماهانه')?.setText(money(macro.lastSpending));
     this.rows.get('economy.تراز ماهانه')?.setText(moneySigned(macro.lastBalance));
     this.rows.get('economy.تراز تجاری')?.setText(moneySigned(macro.trade.balance));
-    this.rows.get('economy.جمعیت')?.setText(number(this.context?.state.countries.countries[countryId]?.population ?? 0));
-    this.rows.get('economy.نیروی کار')?.setText(number(Math.round((this.context?.state.countries.countries[countryId]?.population ?? 0) * 0.52)));
+    const resources = context.state.economy.resources[countryId];
+    this.rows.get('economy.تجارت منابع')?.setText(
+      resources === undefined
+        ? '—'
+        : `هزینهٔ واردات ${money(resources.importCost)} · درآمد صادرات ${money(resources.exportIncome)} (ماهانه)`
+    );
+    this.rows.get('economy.جمعیت')?.setText(number(context.state.countries.countries[countryId]?.population ?? 0));
+    this.rows.get('economy.نیروی کار')?.setText(number(Math.round((context.state.countries.countries[countryId]?.population ?? 0) * 0.52)));
     for (const [sectorId, sector] of Object.entries(macro.sectors)) {
       this.rows.get(`sector.${sectorId}`)?.setText(
         `${money(sector.output)} · ${number(Math.round(sector.jobs))} شغل · ${number(Math.round(sector.productivity))} دلار/سال`
       );
     }
+    this.rebuildResources(countryId);
+  }
+
+  /** The strategic resource cards: production/use/balance + status + trade actions. */
+  private rebuildResources(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const record = context.state.economy.resources[countryId];
+    this.rebuild('resources', this.parents.get('resources'), () => {
+      const rows: UIElement[] = [];
+      if (record === undefined) return rows;
+      for (const resource of config.resources) {
+        const resourceId = resource.id;
+        const production = record.production[resourceId] ?? 0;
+        const consumption = record.consumption[resourceId] ?? 0;
+        const imports = record.imports[resourceId] ?? 0;
+        const exports = record.exports[resourceId] ?? 0;
+        const status = resourceStatusOf(record, resourceId);
+        const balance = resourceBalanceOf(record, resourceId);
+        const statusInfo = RESOURCE_STATUS[status];
+
+        const card = this.create('div', `pd-resource ${statusInfo.css}`);
+        const head = this.create('div', 'pd-resource-head');
+        const name = this.create('span', 'pd-resource-name');
+        name.setText(resource.name);
+        const badge = this.create('span', `pd-resource-status ${statusInfo.css}`);
+        badge.setText(statusInfo.label);
+        head.appendChild(name);
+        head.appendChild(badge);
+        card.appendChild(head);
+
+        const detail = this.create('div', 'pd-resource-detail');
+        detail.setText(
+          `تولید ${units(production)} · مصرف ${units(consumption)} · تراز ${unitsSigned(balance)}`
+        );
+        card.appendChild(detail);
+
+        // —— trade line + action (import when short, export when surplus) ——
+        const importing = record.importPolicy[resourceId] === true;
+        const exporting = record.exportPolicy[resourceId] === true;
+        if (imports > 0 || importing) {
+          const supplierId = record.suppliers[resourceId] ?? null;
+          const supplierName = supplierId !== null
+            ? (context.state.countries.countries[supplierId]?.name ?? supplierId)
+            : null;
+          const line = this.create('div', 'pd-resource-trade');
+          line.setText(
+            imports > 0
+              ? `واردات ${units(imports)} در ماه${supplierName !== null ? ` از ${supplierName}` : ''} — هزینه ${money(imports * resource.price * config.importMarkup)}`
+              : 'درخواست واردات ثبت شده — عرضه‌کننده‌ای با مازاد پیدا نشد'
+          );
+          card.appendChild(line);
+        }
+        if (exports > 0 || exporting) {
+          const line = this.create('div', 'pd-resource-trade');
+          line.setText(`صادرات ${units(exports)} در ماه — درآمد ${money(exports * resource.price)}`);
+          card.appendChild(line);
+        }
+
+        const actions = this.create('div', 'pd-resource-actions');
+        let hasAction = false;
+        const canImport = status === 'shortage' || importing;
+        const canExport = (status === 'surplus' || status === 'exported') || exporting;
+        if (canImport) {
+          hasAction = true;
+          const button = this.create('button', importing ? 'pd-resource-btn on' : 'pd-resource-btn');
+          button.setText(importing ? 'توقف واردات' : 'واردات');
+          button.onClick(() =>
+            this.send({ type: 'economy.setImportPolicy', countryId, resourceId, active: !importing })
+          );
+          actions.appendChild(button);
+        }
+        if (canExport) {
+          hasAction = true;
+          const button = this.create('button', exporting ? 'pd-resource-btn on' : 'pd-resource-btn');
+          button.setText(exporting ? 'توقف صادرات' : 'صادرات');
+          button.onClick(() =>
+            this.send({ type: 'economy.setExportPolicy', countryId, resourceId, active: !exporting })
+          );
+          actions.appendChild(button);
+        }
+        if (hasAction) card.appendChild(actions);
+        rows.push(card);
+      }
+      return rows;
+    });
   }
 
   private refreshBudget(countryId: string): void {
@@ -667,6 +777,16 @@ function money(value: number): string {
 
 function moneySigned(value: number): string {
   return `${value >= 0 ? '+' : '−'}${money(Math.abs(value))}`;
+}
+
+/** Resource units (whole numbers, thousands-separated). */
+function units(value: number): string {
+  return Math.round(value).toLocaleString('en-US');
+}
+
+/** Signed resource units (+60 / −30 / 0). */
+function unitsSigned(value: number): string {
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${units(Math.abs(value))}`;
 }
 
 function sentiment(value: number): string {

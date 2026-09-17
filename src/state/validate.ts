@@ -348,7 +348,24 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
           }
         },
         supply: { type: 'record', values: { type: 'number', min: 0, max: 1 } },
-        macro: { type: 'record', values: MACRO_ECONOMY_SCHEMA }
+        macro: { type: 'record', values: MACRO_ECONOMY_SCHEMA },
+        resources: {
+          type: 'record',
+          values: {
+            type: 'object',
+            fields: {
+              production: { type: 'record', values: { type: 'number' } },
+              consumption: { type: 'record', values: { type: 'number' } },
+              imports: { type: 'record', values: { type: 'number', min: 0 } },
+              exports: { type: 'record', values: { type: 'number', min: 0 } },
+              importPolicy: { type: 'record', values: { type: 'boolean' } },
+              exportPolicy: { type: 'record', values: { type: 'boolean' } },
+              suppliers: { type: 'record', values: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] } },
+              importCost: { type: 'number', min: 0 },
+              exportIncome: { type: 'number', min: 0 }
+            }
+          }
+        }
       }
     },
     military: {
