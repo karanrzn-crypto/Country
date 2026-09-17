@@ -14,14 +14,16 @@ const theme = themeJson as unknown as MapThemeData;
 const { model } = generateStrategicMap(DEFAULT_MAP_CONFIG);
 
 /**
- * THE Roads-toggle defect (user report): the map's visible "roads" are the
- * City Areas network's ROAD ribbons (they ride above and follow the same
- * polylines as the thin dedicated roads layer), so toggling that layer alone
- * changed nothing on screen. The fix: the renderer forwards the roads flag
- * into the network view — OFF hides the ROAD ribbons, ON restores the SAME
- * mesh. Visibility only: never a rebuild, never a data change.
+ * THE layer contract (spec §1/§2): Urban Areas + Roads is ONE toggle, and
+ * Railways are FULLY INDEPENDENT of it.
+ *  - urbanRoads OFF hides the ROAD ribbons (and the urban discs/rings) while
+ *    the RAILWAY ribbons keep following THEIR own flag;
+ *  - railways OFF hides the railway ribbons (the capital-to-capital spine)
+ *    without touching the road side;
+ *  - every flip is visibility-only: the SAME meshes come back — never a
+ *    rebuild, never a data change.
  */
-describe('CityNetworkLayer respects the Roads layer flag', () => {
+describe('CityNetworkLayer: merged Urban+Roads toggle, independent Railways', () => {
   let layer: CityNetworkLayer;
   let network: CityAreaNetwork;
   let mapModel: StrategicMapModel;
@@ -43,68 +45,6 @@ describe('CityNetworkLayer respects the Roads layer flag', () => {
     expect(connections.some((connection) => connection.kind === 'road')).toBe(true);
   });
 
-  it('roads ON → road ribbons visible; roads OFF → hidden, city view stays', () => {
-    // First sync builds the layer lazily (cityAreas ON, roads ON).
-    layer.sync(mapModel, network, true, true);
-    expect(layer.group.visible).toBe(true);
-    const roadMesh = layer.roadRibbon;
-    expect(roadMesh).not.toBeNull();
-    expect(roadMesh!.visible).toBe(true);
-
-    // ROADS OFF: the road ribbons hide, the City Areas view itself stays ON
-    // (discs/rings/junctions are not road display).
-    layer.sync(mapModel, network, true, false);
-    expect(layer.group.visible).toBe(true);
-    expect(roadMesh!.visible).toBe(false);
-
-    // ROADS ON: the SAME mesh comes back — no rebuild, no data change.
-    layer.sync(mapModel, network, true, true);
-    expect(layer.roadRibbon).toBe(roadMesh);
-    expect(roadMesh!.visible).toBe(true);
-  });
-
-  it('toggling never touches the network data (hide ≠ delete)', () => {
-    const connectionsBefore = cityConnectionsOf(network);
-    const snapshot = connectionsBefore.map((connection) => connection.id).sort();
-    layer.sync(mapModel, network, true, false);
-    layer.sync(mapModel, network, true, true);
-    const connectionsAfter = cityConnectionsOf(network);
-    expect(connectionsAfter.length).toBe(connectionsBefore.length);
-    expect(connectionsAfter.map((connection) => connection.id).sort()).toEqual(snapshot);
-  });
-
-  it('a selected ROAD connection never stays highlighted while roads are hidden', () => {
-    const roadConnection = cityConnectionsOf(network).find(
-      (connection) => connection.kind === 'road'
-    );
-    expect(roadConnection).toBeDefined();
-    layer.setSelectedConnection(roadConnection!.id);
-    layer.sync(mapModel, network, true, true);
-    const emphasisWhenOn = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisWhenOn.length).toBe(1);
-
-    // Roads OFF → the emphasis (road display) hides with them.
-    layer.sync(mapModel, network, true, false);
-    const emphasisWhenOff = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisWhenOff.length).toBe(0);
-
-    // Roads ON → the emphasis is back.
-    layer.sync(mapModel, network, true, true);
-    const emphasisRestored = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisRestored.length).toBe(1);
-    layer.setSelectedConnection(null);
-  });
-
-  // ———— THE remaining defect (user report): the capital-to-capital RAILWAY
-  // spine (and sea links) rendered through the SAME layer but bypassed the
-  // Roads toggle — only the road-class mesh followed it. ONE visibility
-  // source now governs EVERY transport ribbon class. ————
   it('the premise holds — the network contains capital-to-capital railway routes', () => {
     const connections = cityConnectionsOf(network);
     const railwayConnections = connections.filter((connection) => connection.kind === 'railway');
@@ -119,52 +59,114 @@ describe('CityNetworkLayer respects the Roads layer flag', () => {
     expect(capitalPairs.length).toBeGreaterThan(0);
   });
 
-  it('roads OFF hides EVERY transport ribbon — capital spine included; ON restores the SAME meshes', () => {
-    layer.sync(mapModel, network, true, true);
+  it('urbanRoads OFF hides road ribbons; Railways flag keeps the rail ribbons', () => {
+    // First sync builds the layer lazily (both systems ON).
+    layer.sync(mapModel, network, true, true, true);
     const roadMesh = layer.roadRibbon;
-    const otherMesh = layer.otherRibbon; // railway + sea ribbons
+    const railMesh = layer.railRibbon;
     expect(roadMesh).not.toBeNull();
-    expect(otherMesh).not.toBeNull();
+    expect(railMesh).not.toBeNull();
     expect(roadMesh!.visible).toBe(true);
-    expect(otherMesh!.visible).toBe(true);
+    expect(railMesh!.visible).toBe(true);
 
-    // ROADS OFF → BOTH meshes hide (nothing road-like remains on the map).
-    layer.sync(mapModel, network, true, false);
-    expect(layer.group.visible).toBe(true); // the City Areas view itself stays
+    // Urban+Roads OFF → road ribbons hide, RAIL ribbons STAY (independent).
+    layer.sync(mapModel, network, false, true, true);
+    expect(layer.urbanGroup.visible).toBe(false);
+    expect(layer.railGroup.visible).toBe(true);
     expect(roadMesh!.visible).toBe(false);
-    expect(otherMesh!.visible).toBe(false);
+    expect(railMesh!.visible).toBe(true);
 
-    // ROADS ON → the SAME meshes return (visibility only — never a rebuild).
-    layer.sync(mapModel, network, true, true);
+    // Back ON → the SAME road mesh returns (visibility only).
+    layer.sync(mapModel, network, true, true, true);
     expect(layer.roadRibbon).toBe(roadMesh);
-    expect(layer.otherRibbon).toBe(otherMesh);
     expect(roadMesh!.visible).toBe(true);
-    expect(otherMesh!.visible).toBe(true);
   });
 
-  it('a selected RAILWAY (capital) connection also never stays highlighted while roads are hidden', () => {
+  it('railways OFF hides the capital spine; roads stay; no cross-influence either way', () => {
+    layer.sync(mapModel, network, true, true, true);
+    const roadMesh = layer.roadRibbon!;
+    const railMesh = layer.railRibbon!;
+
+    // Railways OFF → rail ribbons hide, road ribbons STAY.
+    layer.sync(mapModel, network, true, false, true);
+    expect(layer.railGroup.visible).toBe(false);
+    expect(layer.urbanGroup.visible).toBe(true);
+    expect(railMesh.visible).toBe(false);
+    expect(roadMesh.visible).toBe(true);
+
+    // Railways back ON → the SAME mesh returns.
+    layer.sync(mapModel, network, true, true, true);
+    expect(layer.railRibbon).toBe(railMesh);
+    expect(railMesh.visible).toBe(true);
+  });
+
+  it('BOTH systems OFF → nothing transport-like remains; data never deleted', () => {
+    const connectionsBefore = cityConnectionsOf(network);
+    const snapshot = connectionsBefore.map((connection) => connection.id).sort();
+
+    layer.sync(mapModel, network, true, true, true);
+    const roadMesh = layer.roadRibbon!;
+    const railMesh = layer.railRibbon!;
+
+    // OFF / OFF (spec's matrix) → both hidden.
+    layer.sync(mapModel, network, false, false, false);
+    expect(layer.urbanGroup.visible).toBe(false);
+    expect(layer.railGroup.visible).toBe(false);
+    expect(roadMesh.visible).toBe(false);
+    expect(railMesh.visible).toBe(false);
+
+    // ON again → the SAME meshes, and the network data is untouched.
+    layer.sync(mapModel, network, true, true, true);
+    expect(layer.roadRibbon).toBe(roadMesh);
+    expect(layer.railRibbon).toBe(railMesh);
+    const connectionsAfter = cityConnectionsOf(network);
+    expect(connectionsAfter.length).toBe(connectionsBefore.length);
+    expect(connectionsAfter.map((connection) => connection.id).sort()).toEqual(snapshot);
+  });
+
+  it('a selected ROAD connection never stays highlighted while urbanRoads is hidden', () => {
+    const roadConnection = cityConnectionsOf(network).find(
+      (connection) => connection.kind === 'road'
+    );
+    expect(roadConnection).toBeDefined();
+    layer.setSelectedConnection(roadConnection!.id);
+    layer.sync(mapModel, network, true, true, true);
+    const emphasisIn = (group: THREE.Group) =>
+      group.children.filter((child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11);
+    expect(emphasisIn(layer.urbanGroup).length).toBe(1);
+
+    // Urban+Roads OFF → the road emphasis hides.
+    layer.sync(mapModel, network, false, true, true);
+    expect(emphasisIn(layer.urbanGroup).length).toBe(0);
+
+    // ON → back.
+    layer.sync(mapModel, network, true, true, true);
+    expect(emphasisIn(layer.urbanGroup).length).toBe(1);
+    layer.setSelectedConnection(null);
+  });
+
+  it('a selected RAILWAY (capital) connection follows the RAILWAYS flag, not roads', () => {
     const railwayConnection = cityConnectionsOf(network).find(
       (connection) => connection.kind === 'railway'
     );
     expect(railwayConnection).toBeDefined();
     layer.setSelectedConnection(railwayConnection!.id);
-    layer.sync(mapModel, network, true, true);
-    const emphasisWhenOn = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisWhenOn.length).toBe(1);
+    layer.sync(mapModel, network, true, true, true);
+    const emphasisIn = (group: THREE.Group) =>
+      group.children.filter((child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11);
+    expect(emphasisIn(layer.railGroup).length).toBe(1);
 
-    layer.sync(mapModel, network, true, false);
-    const emphasisWhenOff = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisWhenOff.length).toBe(0);
+    // THE independent-systems proof: roads OFF + railways ON → the railway
+    // emphasis STAYS (the old bug: it disappeared with the roads toggle).
+    layer.sync(mapModel, network, false, true, true);
+    expect(emphasisIn(layer.railGroup).length).toBe(1);
 
-    layer.sync(mapModel, network, true, true);
-    const emphasisRestored = layer.group.children.filter(
-      (child) => (child as THREE.Mesh).isMesh && child.renderOrder === 11
-    );
-    expect(emphasisRestored.length).toBe(1);
+    // Railways OFF → it hides.
+    layer.sync(mapModel, network, true, false, true);
+    expect(emphasisIn(layer.railGroup).length).toBe(0);
+
+    layer.sync(mapModel, network, true, true, true);
+    expect(emphasisIn(layer.railGroup).length).toBe(1);
     layer.setSelectedConnection(null);
   });
 });

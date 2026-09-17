@@ -324,19 +324,19 @@ describe('strategic resource economy', () => {
     }
   });
 
-  // ———————————————— Roads: OFF = hide, ON = everything back ————————————————
-  it('Roads layer: toggling OFF hides but NEVER deletes road data; ON restores', () => {
-    // Roads is a registered layer again, default visible.
-    expect('roads' in context.state.map.layerVisibility).toBe(true);
-    expect(context.state.map.layerVisibility.roads).toBe(true);
+  // ———————— Urban Areas + Roads (ONE toggle): OFF = hide, ON = everything back ————————
+  it('Urban+Roads layer: toggling OFF hides but NEVER deletes road data; ON restores', () => {
+    // The merged toggle is a registered layer, default visible.
+    expect('urbanRoads' in context.state.map.layerVisibility).toBe(true);
+    expect(context.state.map.layerVisibility.urbanRoads).toBe(true);
 
     const linesBefore = mapModel.features.lines;
     const roadLinesBefore = linesBefore.filter((line) => line.kind !== 'railway' && line.kind !== 'seaRoute');
     expect(roadLinesBefore.length).toBeGreaterThan(0);
 
     // OFF
-    game.mapSetLayerVisible('roads', false);
-    expect(context.state.map.layerVisibility.roads).toBe(false);
+    game.mapSetLayerVisible('urbanRoads', false);
+    expect(context.state.map.layerVisibility.urbanRoads).toBe(false);
     // The map data is COMPLETELY untouched by the hide.
     expect(mapModel.features.lines).toBe(linesBefore); // same array reference
     expect(mapModel.features.lines.length).toBe(linesBefore.length);
@@ -346,9 +346,56 @@ describe('strategic resource economy', () => {
     expect(JSON.stringify(mapModel.features.lines[0])).toBe(JSON.stringify(linesBefore[0]));
 
     // ON — restored, still the same data.
-    game.mapSetLayerVisible('roads', true);
-    expect(context.state.map.layerVisibility.roads).toBe(true);
+    game.mapSetLayerVisible('urbanRoads', true);
+    expect(context.state.map.layerVisibility.urbanRoads).toBe(true);
     expect(mapModel.features.lines.length).toBe(linesBefore.length);
+  });
+
+  // ———————— THE spec §3 math: a seller existing ⇒ the deficit is FULLY bought ————————
+  it('imports cover the FULL deficit whenever the market has sellers (P + I − C = 0)', () => {
+    // Everyone wants to import everything they are short of.
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        record.importPolicy[resource.id] = true;
+      }
+    }
+    recomputeResourceEconomies(context.state, mapModel, config);
+    let fullyCoveredExists = false;
+    let importedFlowExists = false;
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        const id = resource.id;
+        const deficit = (record.consumption[id] ?? 0) - (record.production[id] ?? 0);
+        if (deficit <= 1e-4) continue;
+        const imports = record.imports[id] ?? 0;
+        const suppliers = record.suppliers[id] ?? [];
+        expect(imports).toBeLessThanOrEqual(deficit + 1e-4); // never MORE than needed
+        if (imports > 1e-4) {
+          importedFlowExists = true;
+          expect(suppliers.length).toBeGreaterThan(0);
+          expect(suppliers.every((sellerId) => sellerId !== countryId)).toBe(true);
+        }
+        if (imports >= deficit - 1e-4) {
+          // THE user's exact example: 10 + 20 − 30 = 0 — never 10 + 20 − 30 = −10.
+          fullyCoveredExists = true;
+          expect(resourceBalanceOf(record, id)).toBeCloseTo(0, 2);
+          expect(resourceStatusOf(record, id)).toBe('imported');
+          expect(resourceDisplayStatusOf(record, id)).toBe('balanced');
+        }
+      }
+    }
+    expect(importedFlowExists).toBe(true); // the market actually trades
+    expect(fullyCoveredExists).toBe(true); // at least one deficit is fully covered
+    // Policies OFF again — leave a clean state for the following tests.
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        record.importPolicy[resource.id] = false;
+      }
+    }
+    recomputeResourceEconomies(context.state, mapModel, config);
   });
 
   // ———————————— Balance display + the three display statuses (spec §2/§5) ————————————
@@ -478,7 +525,7 @@ describe('strategic resource economy', () => {
 
     const record = context.state.economy.resources[buyerId]!;
     expect(record.preferredSuppliers[resourceShort]).toBe(pinned);
-    expect(record.suppliers[resourceShort]).toBe(pinned);
+    expect(record.suppliers[resourceShort]).toEqual([pinned]);
     expect(record.imports[resourceShort] ?? 0).toBeGreaterThan(0);
 
     // Unpin → automatic market choice again.
@@ -486,7 +533,7 @@ describe('strategic resource economy', () => {
     game.commandBus.flush();
     const unpinned = context.state.economy.resources[buyerId]!;
     expect(unpinned.preferredSuppliers[resourceShort] ?? null).toBeNull();
-    // Auto still buys from the LARGEST spare seller.
+    // Auto still buys from the LARGEST spare seller (first in the fill order).
     let largest: string | null = null;
     let largestSpare = 0;
     for (const sellerId of sellers) {
@@ -497,7 +544,7 @@ describe('strategic resource economy', () => {
         largest = sellerId;
       }
     }
-    expect(unpinned.suppliers[resourceShort]).toBe(largest);
+    expect(unpinned.suppliers[resourceShort]?.[0]).toBe(largest);
   });
 
   it('tier pricing: a bigger seller is cheaper — the ledger reflects the tier (§4/§7)', () => {
@@ -530,13 +577,13 @@ describe('strategic resource economy', () => {
     game.commandBus.flush();
     const record = context.state.economy.resources[buyerId]!;
     const imports = record.imports[resourceId] ?? 0;
-    const supplierId = record.suppliers[resourceId];
+    const suppliers = record.suppliers[resourceId] ?? [];
     expect(imports).toBeGreaterThan(0);
-    expect(supplierId).not.toBeNull();
+    expect(suppliers.length).toBeGreaterThan(0);
 
     // The unit cost = price × markup × tierFactor(supplier tier) — exactly.
     const tiers = sellerPriceTiersOf(context.state.economy.resources, mapModel.countryOrder.filter((id) => id !== buyerId), resourceId);
-    const tier = tiers[supplierId!] ?? 'medium';
+    const tier = tiers[suppliers[0]] ?? 'medium';
     const expectedUnitCost = resource.price * config.importMarkup * config.priceTiers.supply[tier];
     expect(record.importCost).toBeGreaterThan(0);
     expect(record.importCost / imports).toBeCloseTo(expectedUnitCost, 1);

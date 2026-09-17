@@ -109,9 +109,10 @@ describe('country selection flow', () => {
     game2.loadFromSlot('layer-slot');
     // Saved toggle wins over the default…
     expect(game2.gameState.map.layerVisibility.labels).toBe(false);
-    // …and new information layers receive their defaults (OFF for overlays).
+    // …and new information layers receive their defaults (OFF for overlays;
+    // railways default ON — the independent toggle is visible out of the box).
     expect(game2.gameState.map.layerVisibility.biomes).toBe(false);
-    expect(game2.gameState.map.layerVisibility.railways).toBe(false);
+    expect(game2.gameState.map.layerVisibility.railways).toBe(true);
     expect(game2.gameState.map.layerVisibility.rivers).toBe(true);
     game2.dispose();
   });

@@ -314,6 +314,53 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 10,
+    to: 11,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v10→v11: save payload is not an object');
+      }
+      // (1) Map layers: 'Urban Areas' + 'Roads' merged into the ONE
+      // 'urbanRoads' toggle (spec). The saved value carries over as the AND
+      // of the two old flags (an explicit hide wins), and the old keys are
+      // dropped — the load heal fills registry defaults for anything missing.
+      // (2) Resource trade: `suppliers` became a LIST per resource (the
+      // market fills a deficit from several sellers) — convert the old
+      // single-supplier strings/nulls so schema validation passes.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: {
+          map?: { layerVisibility?: Record<string, boolean> };
+          economy?: { resources?: Record<string, Record<string, unknown>> };
+        };
+      };
+      const visibility = clone.state?.map?.layerVisibility;
+      if (visibility !== undefined) {
+        const merged =
+          visibility['cityAreas'] !== false && visibility['roads'] !== false;
+        delete visibility['cityAreas'];
+        delete visibility['roads'];
+        visibility['urbanRoads'] = merged;
+      }
+      const resources = clone.state?.economy?.resources;
+      if (resources !== undefined) {
+        for (const record of Object.values(resources)) {
+          const suppliers = record?.['suppliers'];
+          if (suppliers === undefined || suppliers === null || typeof suppliers !== 'object') continue;
+          const converted: Record<string, string[]> = {};
+          for (const [resourceId, value] of Object.entries(suppliers as Record<string, unknown>)) {
+            if (typeof value === 'string') converted[resourceId] = [value];
+            else if (Array.isArray(value)) {
+              converted[resourceId] = value.filter((entry): entry is string => typeof entry === 'string');
+            }
+            // null / anything else → no entry (no active suppliers).
+          }
+          record['suppliers'] = converted;
+        }
+      }
+      return clone;
+    }
   }
 ];
 

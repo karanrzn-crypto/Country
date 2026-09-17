@@ -360,7 +360,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               exports: { type: 'record', values: { type: 'number', min: 0 } },
               importPolicy: { type: 'record', values: { type: 'boolean' } },
               exportPolicy: { type: 'record', values: { type: 'boolean' } },
-              suppliers: { type: 'record', values: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] } },
+              suppliers: { type: 'record', values: { type: 'array', items: { type: 'string' } } },
               preferredSuppliers: { type: 'record', values: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] } },
               importCost: { type: 'number', min: 0 },
               exportIncome: { type: 'number', min: 0 }

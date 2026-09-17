@@ -59,7 +59,7 @@ import type { SaveStorage } from '../save/SaveStorage';
 import type { SaveData } from '../save/SaveTypes';
 import { registerCoreCommandHandlers } from './CommandHandlers';
 import { absoluteMonthIndex } from '../time/Calendar';
-import { setTaxRate, setSpendingShare, setMinistryFunding } from '../state/slices/governmentSlice';
+import { setTaxRate, setSpendingShare, setEconomicSpendingShare, setMinistryFunding } from '../state/slices/governmentSlice';
 import { decisionBlockReason, enactDecision } from '../government/DecisionEngine';
 import { resolvePendingEvent } from '../government/EventEngine';
 import { recomputeResourceEconomies } from '../economy/resources';
@@ -807,13 +807,13 @@ export class Game {
 
   /**
    * City Areas network pick: resolves the nearest city-to-city connection
-   * to the click point while the 'cityAreas' layer is visible. Derived from
+   * to the click point while the 'urbanRoads' layer is visible. Derived from
    * the live network slice (pure function — no renderer involvement).
    * Tolerance scales with the camera so zoomed-out clicks can still hit a
    * thin route, but never steals clicks resolved by pickAt above.
    */
   private pickCityConnectionAt(point: { x: number; z: number }): string | null {
-    if (this.state.map.layerVisibility.cityAreas !== true) return null;
+    if (this.state.map.layerVisibility.urbanRoads !== true) return null;
     const connections = cityConnectionsOf(this.state.cityAreas.network);
     if (connections.length === 0) return null;
     const tolerance = Math.max(1.2, this.state.map.camera.viewHeight * 0.012);
@@ -1014,6 +1014,17 @@ export class Game {
     this.assertInitialized();
     const applied = setSpendingShare(this.state.government, countryId, category, value);
     this.events.emit('government.budgetChanged', { countryId, kind: 'spending', category, value: applied });
+  }
+
+  /**
+   * THE one 'Economic Budget' lever (spec §4): scales every non-military
+   * spending category proportionally so their sum approaches `value`. One
+   * event keeps every listener in sync with the applied total.
+   */
+  governmentSetEconomicBudget(countryId: string, value: number): void {
+    this.assertInitialized();
+    const applied = setEconomicSpendingShare(this.state.government, countryId, value);
+    this.events.emit('government.budgetChanged', { countryId, kind: 'spending', category: 'economic', value: applied });
   }
 
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void {

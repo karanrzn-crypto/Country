@@ -44,12 +44,22 @@ describe('map theme readability floors', () => {
 });
 
 describe('map layer registry', () => {
-  it('includes the cityAreas layer in a sane render position', () => {
+  it('includes the merged urbanRoads layer ABOVE the borders in render order', () => {
     const provinceIndex = MAP_LAYER_ORDER.indexOf('provinceBorders');
-    const cityAreaIndex = MAP_LAYER_ORDER.indexOf('cityAreas');
     const countryIndex = MAP_LAYER_ORDER.indexOf('countryBorders');
-    expect(cityAreaIndex).toBeGreaterThan(provinceIndex);
-    expect(cityAreaIndex).toBeLessThan(countryIndex);
+    const urbanRoadsIndex = MAP_LAYER_ORDER.indexOf('urbanRoads');
+    // The urban view + road ribbons draw ABOVE the country borders (the
+    // ribbons must never be buried under the border lines they follow).
+    expect(urbanRoadsIndex).toBeGreaterThan(provinceIndex);
+    expect(urbanRoadsIndex).toBeGreaterThan(countryIndex);
+  });
+
+  it('registers Urban+Roads and Railways as INDEPENDENT layers', () => {
+    const urban = layerDef('urbanRoads');
+    const rail = layerDef('railways');
+    expect(urban.id).not.toBe(rail.id);
+    expect(isKnownMapLayer('cityAreas')).toBe(false); // merged away
+    expect(isKnownMapLayer('roads')).toBe(false); // merged away
   });
 
   it('has a declared default visibility for every registered layer', () => {

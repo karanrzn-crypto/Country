@@ -75,6 +75,9 @@ export type GameCommand =
         | 'other';
       readonly value: number;
     }
+  /** The ONE 'Economic Budget' lever (spec §4): scales every non-military
+   *  spending category proportionally so their sum equals `value`. */
+  | { readonly type: 'government.setEconomicBudget'; readonly countryId: string; readonly value: number }
   | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
   | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }

@@ -54,7 +54,7 @@ export interface MapSlice {
   selectedBuildingId: string | null;
   /**
    * City Areas network connection (`CityConnection.id`) — selectable only
-   * while the 'cityAreas' layer is visible. References the DERIVED city
+   * while the 'urbanRoads' layer is visible. References the DERIVED city
    * network view; never copies its geometry (no parallel state).
    */
   selectedCityConnectionId: string | null;

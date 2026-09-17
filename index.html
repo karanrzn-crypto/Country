@@ -249,7 +249,7 @@
         color: #e8edf5; background: #1a2333; padding: 0;
       }
       .pd-step-btn:hover { background: #243149; border-color: #4a5f88; }
-      .pd-parties, .pd-ministries, .pd-decision-list, .pd-event-list, .pd-election-results,
+      .pd-parties, .pd-decision-list, .pd-event-list, .pd-election-results,
       .pd-resources, .pd-trades {
         display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
       }
@@ -258,10 +258,6 @@
       .pd-resource.st-surplus { border-color: #2f5233; }
       .pd-resource-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
       .pd-resource-name { color: #e8edf5; font-weight: 700; }
-      .pd-resource-status { font-size: 11px; color: #9aa6ba; }
-      .pd-resource-status.st-shortage { color: #ff8f7a; font-weight: 700; }
-      .pd-resource-status.st-surplus { color: #9fd89f; font-weight: 700; }
-      .pd-resource-status.st-balanced { color: #cfd8e6; }
       .pd-resource-detail { color: #cfd8e6; font-size: 12px; margin-top: 2px; }
       .pd-resource-statusline { font-size: 12px; margin-top: 2px; font-weight: 700; }
       .pd-resource-statusline.st-shortage { color: #ff8f7a; }
@@ -294,9 +290,19 @@
       .pd-resource-btn.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
       .pd-party, .pd-result-row { color: #cfd8e6; }
       .pd-party.in-gov { color: #b8e6b8; font-weight: 700; }
-      .pd-ministry-row { display: flex; align-items: center; gap: 8px; }
-      .pd-ministry-name { color: #cfd8e6; flex: 1 1 auto; }
-      .pd-ministry-value { color: #e8edf5; font-weight: 700; min-width: 44px; text-align: right; }
+      /* Power Distribution pie (Politics — spec §5): a conic-gradient disc
+         over the REAL party power data + a legend with the exact shares. */
+      .pd-power { display: flex; align-items: center; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
+      .pd-power-pie {
+        width: 108px; height: 108px; border-radius: 50%; flex: 0 0 auto;
+        border: 1px solid #33415c;
+      }
+      .pd-power-legend { display: flex; flex-direction: column; gap: 3px; flex: 1 1 160px; }
+      .pd-power-row { display: flex; align-items: center; gap: 7px; color: #cfd8e6; font-size: 12px; }
+      .pd-power-row.in-gov { color: #b8e6b8; }
+      .pd-power-dot { width: 10px; height: 10px; border-radius: 2px; flex: 0 0 auto; }
+      .pd-power-name { flex: 1 1 auto; }
+      .pd-power-share { font-weight: 700; color: #e8edf5; }
       .pd-decision { border: 1px solid #22304a; border-radius: 5px; padding: 6px 9px; }
       .pd-decision.ok { border-color: #3d5a3d; }
       .pd-decision.blocked { opacity: 0.62; }

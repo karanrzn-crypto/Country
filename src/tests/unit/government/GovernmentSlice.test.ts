@@ -4,10 +4,10 @@ import {
   buildGovernmentSlice,
   createGovernmentCountryState,
   governmentRecordIsComplete,
+  politicalPowerDistribution,
   setTaxRate,
   setSpendingShare,
   setMinistryFunding,
-  totalSpendingShare,
   DEFAULT_TAX_RATES,
   DEFAULT_SPENDING_SHARES
 } from '../../../state/slices/governmentSlice';
@@ -102,7 +102,6 @@ describe('GovernmentSlice (Phase 2 state)', () => {
     expect(setMinistryFunding(slice, countryId, 'finance', -2)).toBe(0);
     expect(setMinistryFunding(slice, countryId, 'nope', 0.5)).toBe(0);
 
-    expect(totalSpendingShare(slice.countries[countryId])).toBeGreaterThan(0);
     game.dispose();
   });
 
@@ -121,5 +120,78 @@ describe('GovernmentSlice (Phase 2 state)', () => {
     used.add(first.president.name);
     const second = createGovernmentCountryState('c', 'C', PARTY_TEMPLATES, MINISTRY_TEMPLATES, rng);
     expect(used.has(second.president.name)).toBe(false);
+  });
+});
+
+describe('Economic Budget lever + political power distribution (spec §4/§5)', () => {
+  it('setEconomicBudget scales the non-military shares proportionally and leaves military alone', () => {
+    const game = createTestGame({ seed: 71 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    const budget = game.gameState.government.countries[countryId].budget;
+    const militaryBefore = budget.spendingShares.military;
+    const nonMilitaryBefore = (Object.keys(budget.spendingShares) as (keyof typeof budget.spendingShares)[])
+      .filter((category) => category !== 'military')
+      .reduce((sum, category) => sum + budget.spendingShares[category], 0);
+
+    game.governmentSetEconomicBudget(countryId, nonMilitaryBefore * 2);
+    game.commandBus.flush();
+    const militaryAfter = budget.spendingShares.military;
+    const nonMilitaryAfter = (Object.keys(budget.spendingShares) as (keyof typeof budget.spendingShares)[])
+      .filter((category) => category !== 'military')
+      .reduce((sum, category) => sum + budget.spendingShares[category], 0);
+
+    expect(militaryAfter).toBeCloseTo(militaryBefore, 6); // military untouched
+    expect(nonMilitaryAfter).toBeCloseTo(nonMilitaryBefore * 2, 3); // doubled in total
+    // Every internal share stays inside its documented domain.
+    for (const share of Object.values(budget.spendingShares)) {
+      expect(share).toBeGreaterThanOrEqual(0);
+      expect(share).toBeLessThanOrEqual(0.5);
+    }
+    game.dispose();
+  });
+
+  it('power distribution is real, normalized, and puts the biggest party first', () => {
+    const game = createTestGame({ seed: 72 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    const government = game.gameState.government.countries[countryId];
+    const distribution = politicalPowerDistribution(government);
+    expect(distribution.length).toBe(Object.keys(government.politics.parties).length);
+    const total = distribution.reduce((sum, entry) => sum + entry.share, 0);
+    expect(total).toBeCloseTo(1, 6);
+    // Sorted descending; the FIRST entry is the group at the apex of power.
+    for (let i = 1; i < distribution.length; i++) {
+      expect(distribution[i - 1].share).toBeGreaterThanOrEqual(distribution[i].share);
+    }
+    const strongest = Object.values(government.politics.parties).reduce(
+      (best, party) => (party.support > best.support ? party : best),
+      Object.values(government.politics.parties)[0]
+    );
+    expect(distribution[0].partyId).toBe(strongest.id);
+    game.dispose();
+  });
+
+  it('power follows parliament seats once an election has assigned them', () => {
+    const game = createTestGame({ seed: 73 });
+    const countryId = Object.keys(game.gameState.government.countries)[0];
+    const government = game.gameState.government.countries[countryId];
+    // Simulate a completed election: REPLACE the party field entirely (two
+    // parties; seats assigned — support deliberately inverted vs seats).
+    government.politics.parliament.seats = { party_a: 120, party_b: 80 };
+    government.politics.parties = {
+      party_a: {
+        id: 'party_a', name: 'A', ideology: 'centrist',
+        support: 0.1, seatShare: 0.6, inGovernment: true
+      },
+      party_b: {
+        id: 'party_b', name: 'B', ideology: 'liberal',
+        support: 0.9, seatShare: 0.4, inGovernment: false
+      }
+    };
+    const distribution = politicalPowerDistribution(government);
+    expect(distribution.length).toBe(2);
+    expect(distribution[0].partyId).toBe('party_a'); // seats (0.6) beat support (0.1)
+    expect(distribution[0].share).toBeCloseTo(0.6, 6);
+    expect(distribution[1].share).toBeCloseTo(0.4, 6);
+    game.dispose();
   });
 });

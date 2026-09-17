@@ -3,7 +3,6 @@ import { createTestGame } from '../../helpers/testGame';
 import {
   cityConnectionsOf,
   connectionsOfCity,
-  connectionForLink,
   connectionOtherCity,
   cityConnectionExists,
   pickCityConnection,
@@ -130,17 +129,13 @@ describe('City Connections — the city-level view of the City Areas network', (
     game.dispose();
   });
 
-  it('connectionsOfCity is symmetric and connectionForLink resolves both road halves to the same route', () => {
+  it('connectionsOfCity is symmetric and merged road halves resolve to one route', () => {
     const { game } = preparedGame(315);
     const network = game.gameState.cityAreas.network;
     const connections = cityConnectionsOf(network);
     const merged = connections.find((connection) => connection.linkIds.length === 2);
     expect(merged).toBeDefined();
     const mergedConnection = merged!;
-    for (const linkId of mergedConnection.linkIds) {
-      const resolved = connectionForLink(connections, linkId);
-      expect(resolved?.id).toBe(mergedConnection.id);
-    }
     const citySide = connectionsOfCity(connections, mergedConnection.cityA);
     expect(citySide.some((connection) => connection.id === mergedConnection.id)).toBe(true);
     expect(connectionOtherCity(mergedConnection, mergedConnection.cityA)).toBe(mergedConnection.cityB);
@@ -231,7 +226,7 @@ describe('City Connections — the city-level view of the City Areas network', (
     }
 
     // Layer OFF: the same click can never select a route.
-    game.mapSetLayerVisible('cityAreas', false);
+    game.mapSetLayerVisible('urbanRoads', false);
     // Find a route point with NO city within the pick tolerance.
     let cleanPoint: MapPoint | null = null;
     for (const connection of connections) {

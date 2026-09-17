@@ -176,17 +176,6 @@ export function connectionsOfCity(
   return connections.filter((connection) => connection.cityA === cityId || connection.cityB === cityId);
 }
 
-/** The connection a network link belongs to (for link-level selection). */
-export function connectionForLink(
-  connections: readonly CityConnection[],
-  linkId: string
-): CityConnection | null {
-  for (const connection of connections) {
-    if (connection.linkIds.includes(linkId)) return connection;
-  }
-  return null;
-}
-
 /** True when the connection id exists in the list (selection validation). */
 export function cityConnectionExists(
   connections: readonly CityConnection[],

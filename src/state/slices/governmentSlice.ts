@@ -233,6 +233,54 @@ export function setSpendingShare(slice: GovernmentSlice, countryId: string, cate
   return clamped;
 }
 
+/** The spending categories the ONE 'Economic Budget' lever distributes over
+ *  (spec §4: the Budget UI exposes only Tax / Economic / Military; these
+ *  internal shares stay so the existing simulation dependencies — ministries,
+ *  productivity, opinion — keep working unchanged). */
+export const ECONOMIC_SPENDING_CATEGORIES: readonly SpendingCategory[] =
+  SPENDING_CATEGORIES.filter((category) => category !== 'military');
+
+/** Hard cap of the economic budget lever (each internal share ≤ 0.5). */
+export const MAX_ECONOMIC_BUDGET = 1.5;
+
+/**
+ * Sets the ONE 'Economic Budget' lever (share of GDP spent on everything
+ * except the military). The value is distributed PROPORTIONALLY over the
+ * existing non-military spending categories (equal split when they are all
+ * zero), each still clamped to its [0, 0.5] domain — so the simulation and
+ * the persisted state keep their full category detail while the UI and the
+ * command surface stay simple (spec §4). Returns the applied total.
+ */
+export function setEconomicSpendingShare(slice: GovernmentSlice, countryId: string, value: number): number {
+  const government = slice.countries[countryId];
+  if (government === undefined) return 0;
+  const target = Math.max(0, Math.min(MAX_ECONOMIC_BUDGET, value));
+  const current = ECONOMIC_SPENDING_CATEGORIES.reduce(
+    (sum, category) => sum + government.budget.spendingShares[category],
+    0
+  );
+  if (current <= 1e-9) {
+    // Degenerate all-zero state → distribute the target equally.
+    const each = Math.min(0.5, target / ECONOMIC_SPENDING_CATEGORIES.length);
+    for (const category of ECONOMIC_SPENDING_CATEGORIES) {
+      government.budget.spendingShares[category] = each;
+    }
+    return roundTo2(each * ECONOMIC_SPENDING_CATEGORIES.length);
+  }
+  const factor = target / current;
+  let applied = 0;
+  for (const category of ECONOMIC_SPENDING_CATEGORIES) {
+    const share = Math.min(0.5, government.budget.spendingShares[category] * factor);
+    government.budget.spendingShares[category] = share;
+    applied += share;
+  }
+  return roundTo2(applied);
+}
+
+function roundTo2(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
 /** Sets a ministry funding level (clamped to [0, 1]). Returns the clamped value. */
 export function setMinistryFunding(slice: GovernmentSlice, countryId: string, ministryId: string, value: number): number {
   const government = slice.countries[countryId];
@@ -255,10 +303,47 @@ export function governmentRecordIsComplete(record: GovernmentCountryState): bool
   );
 }
 
-/** Aggregated annual spending shares (diagnostics + dashboard). */
-export function totalSpendingShare(record: GovernmentCountryState): number {
-  return SPENDING_CATEGORIES.reduce((sum, category) => sum + record.budget.spendingShares[category], 0);
-}
-
 /** Sector ids re-export for UI conveniences (avoids import duplication). */
 export { SECTORS };
+
+// ————————————————————————————————————————————————————— power distribution ——
+
+/** One party's slice of the political power pie (Politics panel, spec §5). */
+export interface PoliticalPowerEntry {
+  readonly partyId: string;
+  readonly partyName: string;
+  /** 0..1 share of political power (Σ over parties = 1). */
+  readonly share: number;
+  /** Member of the governing coalition (visual emphasis in the UI). */
+  readonly inGovernment: boolean;
+}
+
+/**
+ * THE power-distribution data of ONE country (spec §5 — real system data,
+ * never hard-coded, and changeable by design: future political decisions
+ * shift `support` / parliament seats and THIS derivation follows).
+ *
+ * Power basis: parliament seat shares once seats are assigned (institutional
+ * power after an election); the normalized public support before it. The
+ * most-powerful party is simply the largest entry. Deterministic.
+ */
+export function politicalPowerDistribution(government: GovernmentCountryState): PoliticalPowerEntry[] {
+  const parties = Object.values(government.politics.parties);
+  if (parties.length === 0) return [];
+  const seatsAssigned = Object.keys(government.politics.parliament.seats).length > 0;
+  const weights = parties.map((party) => ({
+    partyId: party.id,
+    partyName: party.name,
+    inGovernment: party.inGovernment,
+    weight: Math.max(0, seatsAssigned ? party.seatShare : party.support)
+  }));
+  const total = weights.reduce((sum, entry) => sum + entry.weight, 0);
+  return weights
+    .map((entry) => ({
+      partyId: entry.partyId,
+      partyName: entry.partyName,
+      inGovernment: entry.inGovernment,
+      share: total > 1e-9 ? entry.weight / total : 1 / weights.length
+    }))
+    .sort((a, b) => b.share - a.share || a.partyId.localeCompare(b.partyId));
+}

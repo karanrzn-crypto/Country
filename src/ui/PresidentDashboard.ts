@@ -3,26 +3,29 @@ import type { SystemContext } from '../core/GameContext';
 import type { UIElement } from './adapter/UIDomAdapter';
 import type { ScreenManager } from './ScreenManager';
 import type { GameCommand } from '../core/CommandTypes';
-import type { EffectDef, GovernmentCountryState, OpinionTopic, SpendingCategory, TaxCategory } from '../government/types';
-import { OPINION_TOPICS, SPENDING_CATEGORIES, TAX_CATEGORIES } from '../government/types';
+import type { EffectDef, GovernmentCountryState, OpinionTopic, TaxCategory } from '../government/types';
+import { OPINION_TOPICS, TAX_CATEGORIES } from '../government/types';
 import { decisionBlockReason } from '../government/DecisionEngine';
+import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
-import { resourceDisplayStatusOf, resourceRawBalanceOf, type ResourceDisplayStatus } from '../economy/resources';
+import { resourceRawBalanceOf } from '../economy/resources';
 import { buyerDemandTiersOf, sellerPriceTiersOf, spareSurplusOf, type TradeTier } from '../economy/market';
 
 /**
  * President Dashboard (Phase 2) — the head-of-state command center.
  * All player-facing text is PERSIAN; ids stay technical.
  *
- * Sections (per spec 2.10): نمای کلی · اقتصاد · بودجه · سیاست ·
- * دولت (وزارتخانه‌ها) · تصمیم‌ها · رویدادها · افکار عمومی · انتخابات.
+ * Sections (final UI structure — spec §7): نمای کلی · اقتصاد · بودجه ·
+ * سیاست · تصمیم‌ها · رویدادها · افکار عمومی · انتخابات.
+ * (No independent Government panel — spec §6: it repeated other sections;
+ * the ministry/budget systems keep running in the simulation.)
  *
  * The UI owns NO simulation state: every value is read from GameState at
  * refresh time, every action goes out as a command (tax/spending/decision/
- * event/ministry). The skeleton is built once per open; dynamic lists
- * (decisions, events, ministries, results) are rebuilt by removing stale
- * elements. Each section keeps its OWN dynamic list so the monthly refresh
- * pass never removes another section's fresh rows.
+ * event). The skeleton is built once per open; dynamic lists (decisions,
+ * events, results) are rebuilt by removing stale elements. Each section
+ * keeps its OWN dynamic list so the monthly refresh pass never removes
+ * another section's fresh rows.
  */
 
 export type SectionId =
@@ -30,7 +33,6 @@ export type SectionId =
   | 'economy'
   | 'budget'
   | 'politics'
-  | 'government'
   | 'decisions'
   | 'events'
   | 'opinion'
@@ -41,7 +43,6 @@ const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   economy: 'اقتصاد',
   budget: 'بودجه',
   politics: 'سیاست',
-  government: 'دولت',
   decisions: 'تصمیم‌ها',
   events: 'رویدادها',
   opinion: 'افکار عمومی',
@@ -53,7 +54,6 @@ const TAB_ORDER: readonly SectionId[] = [
   'economy',
   'budget',
   'politics',
-  'government',
   'decisions',
   'events',
   'opinion',
@@ -79,21 +79,12 @@ const SECTOR_LABELS: Readonly<Record<string, string>> = {
   trade: 'بازرگانی'
 };
 
-/** Budget stepper rows: technical category ids → Persian display labels. */
+/** Budget stepper rows (spec §4 — EXACTLY three parts): Tax keeps its three
+ *  rate categories; spending collapses to ONE economic + ONE military lever. */
 const TAX_LABELS: Readonly<Record<TaxCategory, string>> = {
   income: 'مالیات بر درآمد',
   corporate: 'مالیات شرکتی',
   trade: 'عوارض تجاری'
-};
-
-const SPENDING_LABELS: Readonly<Record<SpendingCategory, string>> = {
-  military: 'نظامی',
-  healthcare: 'بهداشت',
-  education: 'آموزش',
-  infrastructure: 'زیرساخت',
-  welfare: 'رفاه',
-  government: 'ادارهٔ کشور',
-  other: 'سایر'
 };
 
 /** Effect-target metric ids → Persian labels (unknown ids pass through). */
@@ -128,14 +119,27 @@ const PROTEST_LABELS: Readonly<Record<string, string>> = {
   massive: 'گسترده'
 };
 
-/** Resource display status → Persian label + CSS status class (color-coded).
- *  Exactly THREE user-facing statuses (spec): مازاد / متعادل / کمبود —
- *  derived from the real production/consumption/imports, never hand-set. */
-const RESOURCE_STATUS: Readonly<Record<ResourceDisplayStatus, { label: string; css: string }>> = {
+/** The THREE resource status visuals (spec §8): مازاد / متعادل / کمبود —
+ *  keyed by the SIGN of the balance a line describes (final balance for the
+ *  card, raw balance for the initial line). Never hand-set. */
+const STATUS_VISUALS = {
   surplus: { label: 'مازاد', css: 'st-surplus' },
   balanced: { label: 'متعادل', css: 'st-balanced' },
   shortage: { label: 'کمبود', css: 'st-shortage' }
-};
+} as const;
+
+/** Status visual of a SIGNED balance: positive → surplus, negative → shortage. */
+function statusVisualOf(balance: number): { label: string; css: string } {
+  if (balance > 1e-4) return STATUS_VISUALS.surplus;
+  if (balance < -1e-4) return STATUS_VISUALS.shortage;
+  return STATUS_VISUALS.balanced;
+}
+
+/** Fixed, deterministic party colors for the power pie ( Politics, spec §5). */
+const POWER_PIE_COLORS = [
+  '#4f8ef7', '#f5a623', '#3ecf8e', '#ef5b6b',
+  '#a06bf5', '#2bc0c4', '#f97316', '#94a3b8'
+] as const;
 
 /** Seller price tier → Persian label (spec §8: Low/Medium/High, no dollars). */
 const PRICE_TIER_LABELS: Readonly<Record<TradeTier, string>> = {
@@ -156,6 +160,8 @@ export class PresidentDashboard {
   private readonly tabButtons = new Map<SectionId, UIElement>();
   private readonly sections = new Map<SectionId, UIElement>();
   private readonly dynamic = new Map<string, UIElement[]>();
+  /** Last-built signatures of signature-guarded lists (e.g. the power pie). */
+  private readonly dynamicSignatures = new Map<string, string>();
   private readonly rows = new Map<string, UIElement>();
   /** Section the NEXT build should show (set by openAt before screens.open). */
   private requestedSection: SectionId | null = null;
@@ -199,7 +205,6 @@ export class PresidentDashboard {
     this.refreshEconomy(countryId);
     this.refreshBudget(countryId);
     this.refreshPolitics(countryId);
-    this.refreshGovernment(countryId);
     this.refreshDecisions(countryId, month);
     this.refreshEvents(countryId);
     this.refreshOpinion(countryId);
@@ -239,7 +244,6 @@ export class PresidentDashboard {
     this.sections.set('economy', this.buildEconomy(body));
     this.sections.set('budget', this.buildBudget(body));
     this.sections.set('politics', this.buildPolitics(body));
-    this.sections.set('government', this.buildGovernment(body));
     this.sections.set('decisions', this.buildDecisions(body));
     this.sections.set('events', this.buildEvents(body));
     this.sections.set('opinion', this.buildOpinion(body));
@@ -266,15 +270,12 @@ export class PresidentDashboard {
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    // Financial summary — EXACTLY four rows (spec): خزانه · درآمد · هزینه ·
-    // رشد اقتصاد. GDP/inflation/unemployment/debt/trade stay in the
-    // GameState (never deleted) — they are just not shown on THIS page.
-    this.addRows(section, ['💰 خزانه', '📈 درآمد', '💸 هزینه', '📊 رشد اقتصاد'], 'economy.');
-    // Resources — the RESOURCE-CENTRIC core of the page (spec §2/§9):
-    // production · consumption · surplus/shortage per resource + its
-    // import/export action. NO sectors, NO jobs, NO productivity, NO money
-    // per resource — the sector data stays in the simulation, the page
-    // answers only: چه دارم؟ چه کم دارم؟ چه اضافه دارم؟
+    // The RESOURCE page (final structure — spec §7): ONLY Resources / Imports
+    // / Exports. No financial summary rows, no sector data — money stays in
+    // the simulation and the Budget page.
+    // Resources — the resource-centric core (spec §2/§3): production ·
+    // consumption · INITIAL shortage/surplus · active import/export · FINAL
+    // balance + the resource's own import/export action.
     const resourcesTitle = this.create('div', 'pd-subtitle');
     resourcesTitle.setText('منابع');
     section.appendChild(resourcesTitle);
@@ -302,43 +303,47 @@ export class PresidentDashboard {
 
   private buildBudget(container: UIElement): UIElement {
     const section = this.section(container, 'pd-budget');
-
+    // EXACTLY three parts (spec §4): Tax · Economic Budget · Military
+    // Budget. No debt, no treasury breakdown, no category spending list —
+    // the economic lever distributes over the existing internal categories
+    // so the simulation keeps working unchanged.
     const taxTitle = this.create('div', 'pd-subtitle');
-    taxTitle.setText('نرخ مالیات‌ها');
+    taxTitle.setText('مالیات');
     section.appendChild(taxTitle);
     for (const category of TAX_CATEGORIES) {
       section.appendChild(this.buildStepperRow(TAX_LABELS[category], 'tax', category, 0.01));
     }
 
-    const spendTitle = this.create('div', 'pd-subtitle');
-    spendTitle.setText('هزینه‌ها — سهم سالانه از تولید ناخالص');
-    section.appendChild(spendTitle);
-    for (const category of SPENDING_CATEGORIES) {
-      section.appendChild(this.buildStepperRow(SPENDING_LABELS[category], 'spending', category, 0.005));
-    }
+    const economicTitle = this.create('div', 'pd-subtitle');
+    economicTitle.setText('بودجهٔ اقتصادی — سهم سالانه از تولید ناخالص');
+    section.appendChild(economicTitle);
+    section.appendChild(this.buildEconomicStepperRow());
+
+    const militaryTitle = this.create('div', 'pd-subtitle');
+    militaryTitle.setText('بودجهٔ نظامی — سهم سالانه از تولید ناخالص');
+    section.appendChild(militaryTitle);
+    section.appendChild(this.buildMilitaryStepperRow());
     return section;
   }
 
   private buildPolitics(container: UIElement): UIElement {
     const section = this.section(container, 'pd-politics');
     this.addRows(section, ['دولت', 'کرسی‌های پارلمان', 'اعتراض‌ها', 'اعتصاب‌ها'], 'politics.');
+    // The POWER DISTRIBUTION PIE (spec §5): which group/party holds how much
+    // political power — REAL data (parliament seats, or normalized support
+    // before the first election) through politicalPowerDistribution.
+    const pieTitle = this.create('div', 'pd-subtitle');
+    pieTitle.setText('توزیع قدرت سیاسی');
+    section.appendChild(pieTitle);
+    const pie = this.create('div', 'pd-power');
+    section.appendChild(pie);
+    this.track(pie, 'power');
     const partiesTitle = this.create('div', 'pd-subtitle');
     partiesTitle.setText('احزاب — حمایت · کرسی · نقش');
     section.appendChild(partiesTitle);
     const parties = this.create('div', 'pd-parties');
     section.appendChild(parties);
     this.track(parties, 'parties');
-    return section;
-  }
-
-  private buildGovernment(container: UIElement): UIElement {
-    const section = this.section(container, 'pd-government');
-    const title = this.create('div', 'pd-subtitle');
-    title.setText('وزارتخانه‌ها — بودجه، کارایی می‌سازد');
-    section.appendChild(title);
-    const list = this.create('div', 'pd-ministries');
-    section.appendChild(list);
-    this.track(list, 'ministries');
     return section;
   }
 
@@ -382,7 +387,8 @@ export class PresidentDashboard {
     return section;
   }
 
-  /** A labeled row with −/+ steppers wired to a budget command. */
+  /** A labeled row with −/+ steppers wired to a budget command. `category`
+   *  is a tax id for 'tax' rows; 'spending' rows are the Military lever. */
   private buildStepperRow(label: string, kind: 'tax' | 'spending', category: string, step: number): UIElement {
     const row = this.create('div', 'pd-stepper');
     const rowLabel = this.create('span', 'pd-stepper-label');
@@ -401,6 +407,48 @@ export class PresidentDashboard {
     const countryId = this.context?.state.player.countryId ?? '';
     minus.onClick(() => this.stepBudget(countryId, kind, category, -step));
     plus.onClick(() => this.stepBudget(countryId, kind, category, +step));
+    return row;
+  }
+
+  /** The ONE Economic Budget lever (spec §4) — sends setEconomicBudget. */
+  private buildEconomicStepperRow(): UIElement {
+    const row = this.create('div', 'pd-stepper');
+    const rowLabel = this.create('span', 'pd-stepper-label');
+    rowLabel.setText('بودجهٔ اقتصادی');
+    const value = this.create('span', 'pd-stepper-value');
+    row.appendChild(rowLabel);
+    row.appendChild(value);
+    const minus = this.create('button', 'pd-step-btn');
+    minus.setText('−');
+    const plus = this.create('button', 'pd-step-btn');
+    plus.setText('+');
+    row.appendChild(minus);
+    row.appendChild(plus);
+    this.rows.set('budget.economic', value);
+    const countryId = this.context?.state.player.countryId ?? '';
+    minus.onClick(() => this.stepEconomicBudget(countryId, -0.005));
+    plus.onClick(() => this.stepEconomicBudget(countryId, +0.005));
+    return row;
+  }
+
+  /** The Military Budget lever (spec §4) — the military spending share. */
+  private buildMilitaryStepperRow(): UIElement {
+    const row = this.create('div', 'pd-stepper');
+    const rowLabel = this.create('span', 'pd-stepper-label');
+    rowLabel.setText('بودجهٔ نظامی');
+    const value = this.create('span', 'pd-stepper-value');
+    row.appendChild(rowLabel);
+    row.appendChild(value);
+    const minus = this.create('button', 'pd-step-btn');
+    minus.setText('−');
+    const plus = this.create('button', 'pd-step-btn');
+    plus.setText('+');
+    row.appendChild(minus);
+    row.appendChild(plus);
+    this.rows.set('budget.military', value);
+    const countryId = this.context?.state.player.countryId ?? '';
+    minus.onClick(() => this.stepMilitaryBudget(countryId, -0.005));
+    plus.onClick(() => this.stepMilitaryBudget(countryId, +0.005));
     return row;
   }
 
@@ -426,25 +474,21 @@ export class PresidentDashboard {
 
   private refreshEconomy(countryId: string): void {
     const context = this.context;
-    const macro = context?.state.economy.macro[countryId];
-    if (context === undefined || context === null || macro === undefined) return;
-    const treasury = context.state.economy.treasury[countryId] ?? 0;
-    // Exactly the four financial rows (macro GDP/inflation/debt/… remain in
-    // state — a future Statistics section can show them).
-    this.rows.get('economy.💰 خزانه')?.setText(money(treasury));
-    this.rows.get('economy.📈 درآمد')?.setText(`${money(macro.lastRevenue)} / ماه`);
-    this.rows.get('economy.💸 هزینه')?.setText(`${money(macro.lastSpending)} / ماه`);
-    this.rows.get('economy.📊 رشد اقتصاد')?.setText(percentSigned(macro.gdpGrowth));
+    if (context === undefined || context === null) return;
+    // The resource page reads ONLY the live resource record (spec §7 — no
+    // money rows here; treasury/GDP live in the Budget page and the status
+    // panel).
     this.rebuildResources(countryId);
     this.rebuildTrades(countryId);
   }
 
   /**
-   * The resource cards (spec §9 — resource-centric, no money):
-   *   name · تولید · مصرف · مازاد: N | کمبود: N | متعادل + the resource's
-   *   own [واردات]/[صادرات] action. Balance = Production − Consumption
-   *   (raw — trade never distorts it); the STATUS is derived (a shortage
-   *   fully covered by imports reads متعادل).
+   * The resource cards (spec §2/§3 — the understandable math):
+   *   تولید · مصرف · INITIAL shortage/surplus · واردات/صادرات · FINAL balance
+   * Initial = Production − Consumption. When the market has sellers the
+   * import fills the WHOLE deficit, so the final balance reads 0 (متعادل).
+   * The trade action follows the POLICY (not the derived status) so an
+   * active import/export can always be switched off again.
    */
   private rebuildResources(countryId: string): void {
     const context = this.context;
@@ -458,54 +502,81 @@ export class PresidentDashboard {
         const resourceId = resource.id;
         const production = record.production[resourceId] ?? 0;
         const consumption = record.consumption[resourceId] ?? 0;
-        const status = resourceDisplayStatusOf(record, resourceId);
-        const balance = resourceRawBalanceOf(record, resourceId);
-        const statusInfo = RESOURCE_STATUS[status];
+        const importing = record.imports[resourceId] ?? 0;
+        const exporting = record.exports[resourceId] ?? 0;
+        const initial = resourceRawBalanceOf(record, resourceId); // = P − C (raw)
+        // DISPLAY math: deltas are computed from the SAME rounded numbers the
+        // lines show, so what the player reads always adds up exactly
+        // (تولید 12 − مصرف 30 → کمبود 18 — never an off-by-one puzzle).
+        const shownProduction = Math.round(production);
+        const shownConsumption = Math.round(consumption);
+        const shownImports = Math.round(importing);
+        const shownExports = Math.round(exporting);
+        const shownInitial = shownProduction - shownConsumption;
+        const shownFinal = shownProduction + shownImports - shownConsumption - shownExports;
 
-        // The status line: مازاد: N / کمبود: N / متعادل (no number).
-        const statusLine =
-          status === 'surplus'
-            ? `مازاد: ${units(balance)}`
-            : status === 'shortage'
-              ? `کمبود: ${units(Math.abs(balance))}`
-              : 'متعادل';
-
-        const card = this.create('div', `pd-resource ${statusInfo.css}`);
+        const finalVisual = statusVisualOf(shownFinal);
+        const card = this.create('div', `pd-resource ${finalVisual.css}`);
         const head = this.create('div', 'pd-resource-head');
         const name = this.create('span', 'pd-resource-name');
         name.setText(resource.name);
         head.appendChild(name);
-        // The resource's own trade action (surplus → export, shortage →
-        // import) — the SAME policy commands as before, just moved onto
-        // the card (spec §9's [Import]/[Export]).
-        if (status === 'surplus' || status === 'shortage') {
-          const exporting = status === 'surplus';
-          const active = exporting
-            ? record.exportPolicy[resourceId] === true
-            : record.importPolicy[resourceId] === true;
+        // The resource's own trade action (spec §9's [Import]/[Export]).
+        // Governed by POLICY + possibility: a deficit can start/stop an
+        // import; a surplus can start/stop an export; an active policy is
+        // ALWAYS stoppable (even when imports made the status balanced).
+        const canImport = initial < -1e-4 || record.importPolicy[resourceId] === true;
+        const canExport = initial > 1e-4 || record.exportPolicy[resourceId] === true;
+        if (canImport || canExport) {
+          const doingImport = canImport && !canExport;
+          const active = doingImport
+            ? record.importPolicy[resourceId] === true
+            : record.exportPolicy[resourceId] === true;
           const button = this.create('button', active ? 'pd-resource-btn on' : 'pd-resource-btn');
           button.setText(
-            exporting
-              ? (active ? 'توقف صادرات' : 'صادرات')
-              : (active ? 'توقف واردات' : 'واردات')
+            doingImport
+              ? (active ? 'توقف واردات' : 'واردات')
+              : (active ? 'توقف صادرات' : 'صادرات')
           );
           button.onClick(() =>
-            this.send({ type: exporting ? 'economy.setExportPolicy' : 'economy.setImportPolicy', countryId, resourceId, active: !active })
+            this.send({
+              type: doingImport ? 'economy.setImportPolicy' : 'economy.setExportPolicy',
+              countryId,
+              resourceId,
+              active: !active
+            })
           );
           head.appendChild(button);
         }
         card.appendChild(head);
 
-        for (const line of [
-          `تولید: ${units(production)}`,
-          `مصرف: ${units(consumption)}`
-        ]) {
+        // — the understandable math lines (spec §3) —
+        const lines: string[] = [
+          `تولید: ${units(shownProduction)}`,
+          `مصرف: ${units(shownConsumption)}`
+        ];
+        if (shownInitial !== 0) {
+          lines.push(
+            shownInitial < 0
+              ? `کمبود اولیه: ${units(-shownInitial)}`
+              : `مازاد اولیه: ${units(shownInitial)}`
+          );
+        }
+        if (importing > 1e-4) lines.push(`واردات: ${units(shownImports)}`);
+        if (exporting > 1e-4) lines.push(`صادرات: ${units(shownExports)}`);
+        for (const line of lines) {
           const detail = this.create('div', 'pd-resource-detail');
           detail.setText(line);
           card.appendChild(detail);
         }
-        const statusElement = this.create('div', `pd-resource-statusline ${statusInfo.css}`);
-        statusElement.setText(statusLine);
+        // The FINAL line (spec §3: Final Balance — the number that must add
+        // up): 0 → متعادل، otherwise the remaining ± amount.
+        const statusElement = this.create('div', `pd-resource-statusline ${finalVisual.css}`);
+        statusElement.setText(
+          shownFinal !== 0
+            ? `${finalVisual.label}: ${units(Math.abs(shownFinal))}`
+            : 'تراز نهایی: متعادل'
+        );
         card.appendChild(statusElement);
         rows.push(card);
       }
@@ -565,17 +636,19 @@ export class PresidentDashboard {
               empty.setText('فروشنده‌ای در بازار نیست');
               block.appendChild(empty);
             } else {
-              const activeSupplier = record.suppliers[resourceId] ?? null;
+              const activeSuppliers = record.suppliers[resourceId] ?? [];
               const pinned = record.preferredSuppliers?.[resourceId] ?? null;
               for (const seller of sellers) {
-                const isActive = seller.sellerId === activeSupplier;
+                const isActive = activeSuppliers.includes(seller.sellerId);
                 const row = this.create('div', isActive ? 'pd-seller on' : 'pd-seller');
                 row.setText(
                   `${countryName(seller.sellerId)} — موجود ${units(seller.spare)} · قیمت ${PRICE_TIER_LABELS[seller.tier]}` +
-                    (isActive ? (pinned === seller.sellerId ? ' · انتخاب شما' : ' · انتخاب بازار') : '')
+                    (isActive ? (pinned === seller.sellerId ? ' · انتخاب شما' : ' · تأمین‌کنندهٔ بازار') : '')
                 );
-                // Click a seller → buy from THERE (pin). Click the pinned
-                // one again → back to automatic market choice.
+                // Click a seller → buy from THERE first (pin). Click the
+                // pinned one again → back to automatic market choice. The
+                // market still fills the FULL deficit (other sellers follow
+                // when the pinned one runs out of spare).
                 const target = pinned === seller.sellerId ? null : seller.sellerId;
                 row.onClick(() => this.send({ type: 'economy.setSupplier', countryId, resourceId, supplierId: target }));
                 block.appendChild(row);
@@ -641,12 +714,17 @@ export class PresidentDashboard {
   private refreshBudget(countryId: string): void {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
+    // Tax — the three rates.
     for (const category of TAX_CATEGORIES) {
       this.rows.get(`budget.tax.${category}`)?.setText(percent(government.budget.taxRates[category]));
     }
-    for (const category of SPENDING_CATEGORIES) {
-      this.rows.get(`budget.spending.${category}`)?.setText(percent(government.budget.spendingShares[category]));
-    }
+    // The economic lever = the SUM of the non-military shares (the value
+    // the setEconomicBudget command distributes over them).
+    const economic = (Object.keys(government.budget.spendingShares) as (keyof typeof government.budget.spendingShares)[])
+      .filter((category) => category !== 'military')
+      .reduce((sum, category) => sum + government.budget.spendingShares[category], 0);
+    this.rows.get('budget.economic')?.setText(percent(economic));
+    this.rows.get('budget.military')?.setText(percent(government.budget.spendingShares.military));
   }
 
   private refreshPolitics(countryId: string): void {
@@ -663,7 +741,71 @@ export class PresidentDashboard {
     this.rows.get('politics.اعتصاب‌ها')?.setText(
       government.politics.generalStrikeUntilMonth !== null ? `اعتصاب سراسری تا ماه ${government.politics.generalStrikeUntilMonth}` : `فشار ${percent(government.politics.strikePressure)}`
     );
+    this.rebuildPowerPie(government);
     this.rebuildParties(government);
+  }
+
+  /**
+   * The POWER DISTRIBUTION PIE (spec §5): a conic-gradient disc over the
+   * REAL power data (politicalPowerDistribution — parliament seats once
+   * assigned, normalized support before) + a legend with the exact shares.
+   * The strongest party is called out as «در رأس قدرت». Rebuilt only when
+   * the distribution actually changes (support drifts monthly).
+   */
+  private rebuildPowerPie(government: GovernmentCountryState): void {
+    const container = this.parents.get('power');
+    if (container === undefined) return;
+    const distribution = politicalPowerDistribution(government);
+    const signature = distribution.map((entry) => `${entry.partyId}:${entry.share.toFixed(4)}`).join('|');
+    if (signature === this.dynamicSignatures.get('power')) return;
+    this.dynamicSignatures.set('power', signature);
+    for (const element of this.dynamic.get('power') ?? []) element.remove();
+
+    const fresh: UIElement[] = [];
+    if (distribution.length === 0) {
+      const empty = this.create('div', 'pd-trade-empty');
+      empty.setText('حزبی وجود ندارد');
+      container.appendChild(empty);
+      fresh.push(empty);
+      this.dynamic.set('power', fresh);
+      return;
+    }
+
+    // — the pie: one conic-gradient covering every party slice —
+    const pie = this.create('div', 'pd-power-pie');
+    const stops: string[] = [];
+    let cursor = 0;
+    distribution.forEach((entry, index) => {
+      const color = POWER_PIE_COLORS[index % POWER_PIE_COLORS.length];
+      const from = cursor * 360;
+      cursor += entry.share;
+      const to = cursor * 360;
+      stops.push(`${color} ${from.toFixed(2)}deg ${to.toFixed(2)}deg`);
+    });
+    pie.setAttribute('style', `background: conic-gradient(${stops.join(', ')});`);
+    container.appendChild(pie);
+    fresh.push(pie);
+
+    // — the legend: exact share + the strongest-party callout —
+    const legend = this.create('div', 'pd-power-legend');
+    distribution.forEach((entry, index) => {
+      const row = this.create('div', entry.inGovernment ? 'pd-power-row in-gov' : 'pd-power-row');
+      const dot = this.create('span', 'pd-power-dot');
+      dot.setAttribute('style', `background: ${POWER_PIE_COLORS[index % POWER_PIE_COLORS.length]};`);
+      const label = this.create('span', 'pd-power-name');
+      label.setText(
+        `${entry.partyName}${index === 0 ? ' — در رأس قدرت' : ''}`
+      );
+      const share = this.create('span', 'pd-power-share');
+      share.setText(percent(entry.share));
+      row.appendChild(dot);
+      row.appendChild(label);
+      row.appendChild(share);
+      legend.appendChild(row);
+      fresh.push(row);
+    });
+    container.appendChild(legend);
+    this.dynamic.set('power', fresh);
   }
 
   private rebuildParties(government: GovernmentCountryState): void {
@@ -677,36 +819,6 @@ export class PresidentDashboard {
         row.setText(
           `${party.name} — ${percent(party.support)} حمایت · ${Math.round(party.seatShare * government.politics.parliament.seatsTotal)} کرسی${party.inGovernment ? ' · در دولت' : ''}`
         );
-        rows.push(row);
-      }
-      return rows;
-    });
-  }
-
-  private refreshGovernment(countryId: string): void {
-    const context = this.context;
-    const government = context?.state.government.countries[countryId];
-    if (context === undefined || context === null || government === undefined) return;
-    this.rebuild('ministries', this.parents.get('ministries'), () => {
-      const rows: UIElement[] = [];
-      for (const ministryId of Object.keys(government.ministries)) {
-        const ministry = government.ministries[ministryId];
-        const def = context.data.ministryTemplateList.find((candidate) => candidate.id === ministryId);
-        const row = this.create('div', 'pd-ministry-row');
-        const label = this.create('span', 'pd-ministry-name');
-        label.setText(`${def?.name ?? ministryId} — کارایی ${percent(ministry.efficiency)}`);
-        const minus = this.create('button', 'pd-step-btn');
-        minus.setText('−');
-        const plus = this.create('button', 'pd-step-btn');
-        plus.setText('+');
-        const value = this.create('span', 'pd-ministry-value');
-        value.setText(percent(ministry.funding));
-        row.appendChild(label);
-        row.appendChild(value);
-        row.appendChild(minus);
-        row.appendChild(plus);
-        minus.onClick(() => this.send({ type: 'government.setMinistryFunding', countryId, ministryId, value: ministry.funding - 0.1 }));
-        plus.onClick(() => this.send({ type: 'government.setMinistryFunding', countryId, ministryId, value: ministry.funding + 0.1 }));
         rows.push(row);
       }
       return rows;
@@ -847,6 +959,7 @@ export class PresidentDashboard {
     this.commands.send(command);
   }
 
+  /** Tax rate stepper — the Tax part of the Budget page (spec §4). */
   private stepBudget(countryId: string, kind: 'tax' | 'spending', category: string, delta: number): void {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
@@ -854,9 +967,30 @@ export class PresidentDashboard {
       const key = category as TaxCategory;
       this.send({ type: 'government.setTaxRate', countryId, category: key, value: government.budget.taxRates[key] + delta });
     } else {
-      const key = category as SpendingCategory;
-      this.send({ type: 'government.setSpending', countryId, category: key, value: government.budget.spendingShares[key] + delta });
+      this.send({ type: 'government.setSpending', countryId, category: 'military', value: government.budget.spendingShares.military + delta });
     }
+  }
+
+  /** The ONE economic lever (spec §4) — core distributes it proportionally. */
+  private stepEconomicBudget(countryId: string, delta: number): void {
+    const government = this.context?.state.government.countries[countryId];
+    if (government === undefined) return;
+    const current = Object.entries(government.budget.spendingShares)
+      .filter(([category]) => category !== 'military')
+      .reduce((sum, [, share]) => sum + share, 0);
+    this.send({ type: 'government.setEconomicBudget', countryId, value: current + delta });
+  }
+
+  /** The military lever (spec §4) — the military spending share. */
+  private stepMilitaryBudget(countryId: string, delta: number): void {
+    const government = this.context?.state.government.countries[countryId];
+    if (government === undefined) return;
+    this.send({
+      type: 'government.setSpending',
+      countryId,
+      category: 'military',
+      value: government.budget.spendingShares.military + delta
+    });
   }
 
   private addRow(container: UIElement, key: string, label: string): void {
@@ -883,10 +1017,6 @@ function partyName(government: GovernmentCountryState, partyId: string): string 
 
 function percent(value: number): string {
   return `${Math.round(value * 100)}٪`;
-}
-
-function percentSigned(value: number): string {
-  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}٪`;
 }
 
 function money(value: number): string {

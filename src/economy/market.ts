@@ -144,24 +144,3 @@ export function demandFactorFromNeeds(
   const sum = demands.reduce((total, demand) => total + demandFactors[demand.tier], 0);
   return sum / demands.length;
 }
-
-/**
- * Average demand-tier factor of ONE resource across ALL countries with a
- * deficit — the market's willingness to pay that an exporter receives per
- * unit. No buyers anywhere → neutral 1.0. Deterministic.
- */
-export function marketDemandFactorOf(
-  records: Readonly<Record<string, CountryResourceState>>,
-  countryIds: readonly string[],
-  resourceId: string,
-  demandFactors: Readonly<Record<TradeTier, number>>
-): number {
-  const needs: Record<string, number> = {};
-  for (const countryId of countryIds) {
-    const record = records[countryId];
-    if (record === undefined) continue;
-    const need = unmetDeficitOf(record, resourceId);
-    if (need > 0) needs[countryId] = need;
-  }
-  return demandFactorFromNeeds(needs, demandFactors);
-}

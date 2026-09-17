@@ -58,10 +58,6 @@ export class StrategicMapRenderer {
   private readonly gridLayer: GridLayer;
   private readonly surfaceLayer: SurfaceLayer;
   private readonly fillLayers = new Map<MapLayerId, CellFillLayer>();
-  /** Transport-line groups that ALSO follow the master ROADS flag (the
-   *  railway capital spine and sea routes must never bypass it). */
-  private readonly railwaysGroup: THREE.Group;
-  private readonly seaRoutesGroup: THREE.Group;
   private readonly lazyLayers = new Map<
     MapLayerId,
     { ensureBuilt(model: StrategicMapModel): void; dispose(): void }
@@ -143,8 +139,6 @@ export class StrategicMapRenderer {
     const roadsLayer = createRoadsLayer(theme, lineGrid);
     const railwaysLayer = createRailwaysLayer(theme, lineGrid);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
-    this.railwaysGroup = railwaysLayer.group;
-    this.seaRoutesGroup = seaRoutesLayer.group;
     const portsLayer = new SiteLayer(['port'], 'circle', theme);
     const industryLayer = new SiteLayer(['farm', 'factory'], 'square', theme);
     const resourcesLayer = new SiteLayer(['mine', 'oil', 'lumber'], 'diamond', theme);
@@ -177,7 +171,7 @@ export class StrategicMapRenderer {
       ['rivers', riverLayer],
       ['lakes', lakeLayer],
       ['grid', gridLayer],
-      ['roads', roadsLayer],
+      ['urbanRoads', roadsLayer],
       ['railways', railwaysLayer],
       ['airports', airportBuildings],
       ['buildings', cityBuildings],
@@ -248,14 +242,27 @@ export class StrategicMapRenderer {
       // per-province fills (with the selection highlight) live together —
       // toggling it hides/shows the whole province presentation.
       provinceBorders: this.borderLayer.provinceGroup,
-      // ONE user-facing 'City Areas' layer: the REAL city connection network
-      // (routes + city highlights + capital rings + junction nodes) built
-      // from the live state.cityAreas slice — synced per frame, rebuilt only
-      // when the network shape changes.
-      cityAreas: this.cityNetworkLayer.group,
+      // ONE user-facing 'Urban Areas + Roads' layer (spec): the REAL city
+      // connection network's urban view (road ribbons + city highlights +
+      // capital rings + junction nodes) AND the thin road lines — ONE toggle
+      // drives ONE parent group, so they can never disagree. The network's
+      // RAILWAY ribbons are NOT here (independent Railways layer below).
+      urbanRoads: (() => {
+        const group = new THREE.Group();
+        group.add(roadsLayer.group);
+        group.add(this.cityNetworkLayer.urbanGroup);
+        return group;
+      })(),
+      // ONE independent 'Railways' layer (spec): the thin railway lines AND
+      // the network's railway-class ribbons (the capital-to-capital spine).
+      // Neither this flag nor urbanRoads influences the other.
+      railways: (() => {
+        const group = new THREE.Group();
+        group.add(railwaysLayer.group);
+        group.add(this.cityNetworkLayer.railGroup);
+        return group;
+      })(),
       countryBorders: this.borderLayer.countryGroup,
-      roads: roadsLayer.group,
-      railways: railwaysLayer.group,
       airports: airportBuildings.group,
       ports: portsLayer.group,
       industry: industryLayer.group,
@@ -274,6 +281,8 @@ export class StrategicMapRenderer {
     groups.countryBorders.add(this.borderLayer.coastGroup);
     // Province fills ride on the 'Provinces' layer group (see groups table).
     groups.provinceBorders.add(this.countryLayer.provinceGroup);
+    // Sea-class city-network ribbons belong to the Ports layer (its toggle).
+    groups.ports.add(this.cityNetworkLayer.seaGroup);
 
     this.root.add(this.ocean);
     for (const layerId of MAP_LAYER_ORDER) {
@@ -336,26 +345,17 @@ export class StrategicMapRenderer {
       }
     }
 
-    // 2c. City Areas network: lazy + signature-guarded rebuild on show;
-    //     visibility follows the layer flag like every other layer. The
-    //     ROADS flag is forwarded as the SINGLE transport-visibility source:
-    //     the network's ribbons (road AND railway/sea — the capital-to-
-    //     capital spine included) are the transport lines the player sees,
-    //     so Roads OFF must hide them ALL — visibility only, data untouched.
+    // 2c. City Areas network: lazy + signature-guarded rebuild on show; the
+    //     THREE system flags come STRAIGHT from the state's layerVisibility
+    //     record — the single visibility source (spec): urban+roads, rail
+    //     and sea each follow ONLY their own toggle, never each other.
     this.cityNetworkLayer.sync(
       this.model,
       state.cityAreas.network,
-      map.layerVisibility.cityAreas !== false,
-      map.layerVisibility.roads !== false
+      map.layerVisibility.urbanRoads !== false,
+      map.layerVisibility.railways !== false,
+      map.layerVisibility.ports !== false
     );
-
-    // 2d. The master ROADS gate (ONE visibility source for every transport
-    //     line network — spec): railways and sea routes may have their own
-    //     toggles, but they can never show while ROADS is OFF. Roads ON
-    //     restores them exactly per their own flags.
-    const roadsOn = map.layerVisibility.roads !== false;
-    this.railwaysGroup.visible = roadsOn && map.layerVisibility.railways !== false;
-    this.seaRoutesGroup.visible = roadsOn && map.layerVisibility.ports !== false;
 
     // 3. Selection (country highlight, city ring, border emphasis, grid-cell
     //    fill/outline, city-connection emphasis) + the persistent player-country

@@ -99,13 +99,15 @@ describe('MapUI country-select screen', () => {
 
   it('layer toggles exist for every registered layer with labels', () => {
     const toggles = findAll(adapter.rootElement, 'map-layer-toggle');
-    // Registry order — 27 layers (Roads restored as a visibility toggle).
-    expect(toggles.length).toBe(27);
+    // Registry order — 26 layers: Urban Areas + Roads are ONE merged toggle
+    // (spec §1); Railways stays as the independent toggle (spec §2).
+    expect(toggles.length).toBe(26);
     const texts = toggles.map((button) => button.text);
     expect(texts).toContain('زیست‌بوم‌ها');
     expect(texts).toContain('توپوگرافی');
-    expect(texts).not.toContain('Roads');
-    expect(texts).toContain('جاده‌ها');
+    expect(texts).toContain('مناطق شهری + جاده‌ها');
+    expect(texts).not.toContain('جاده‌ها'); // merged — no separate roads toggle
+    expect(texts).not.toContain('مناطق شهری'); // merged — no separate urban toggle
     expect(texts).toContain('رودخانه‌ها');
     expect(texts).toContain('دریاچه‌ها / آب');
     expect(texts).toContain('شبکهٔ جغرافیایی');

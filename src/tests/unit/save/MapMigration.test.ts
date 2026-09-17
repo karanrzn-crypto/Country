@@ -32,7 +32,7 @@ describe('save migrations (v1 → … → v10)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -76,7 +76,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
@@ -97,7 +97,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 77 }
     };
     const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const migrated = data as { state: { player: Record<string, unknown> } };
     expect(migrated.state.player.countryConfirmed).toBe(true);
     expect(migrated.state.player.countryId).toBe('country_2');
@@ -111,7 +111,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 100, rngState: 7, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v4, 4, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     expect((data as typeof v4).runtime.tick).toBe(1500);
   });
 
@@ -135,7 +135,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v5, 5, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const map = (data as typeof v5).state.map as Record<string, unknown>;
     for (const key of [
       'selectedGridKey',
@@ -166,7 +166,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v8, 8, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const map = (data as typeof v8).state.map as Record<string, unknown>;
     expect(map.selectionMode).toBe('country');
     // Existing selection state is untouched.
@@ -185,7 +185,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v9, 9, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(SAVE_VERSION);
     const economy = (data as typeof v9).state.economy as Record<string, unknown>;
     // The empty record passes schema validation; the session heal recomputes
     // everything from the live map, so nothing else is injected here.
@@ -194,15 +194,48 @@ describe('save migrations (v1 → … → v10)', () => {
     expect((economy.macro as Record<string, unknown>).country_0).toEqual({ gdp: 1 });
   });
 
-  it('v10 (current) saves keep their resources record untouched', () => {
+  it('pre-v11 saves without layers/suppliers keep their resources record untouched', () => {
     const v10 = {
       state: { economy: { resources: { country_0: { production: { oil: 4 } } } } },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(10);
+    expect(version).toBe(11);
     const economy = (data as typeof v10).state.economy as Record<string, unknown>;
     expect(economy.resources).toEqual({ country_0: { production: { oil: 4 } } });
+  });
+
+  it('v10→v11: layers merge into urbanRoads and single suppliers become lists', () => {
+    const v10 = {
+      state: {
+        map: { layerVisibility: { cityAreas: true, roads: false, railways: true } },
+        economy: {
+          resources: {
+            country_0: {
+              production: { oil: 4 },
+              suppliers: { oil: 'country_2', wood: null, iron: ['country_1'] }
+            }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
+    expect(version).toBe(11);
+    const migrated = data as typeof v10;
+    // Visibility: the merged toggle carries the AND of the two old flags
+    // (an explicit hide wins); the old keys are gone.
+    const visibility = migrated.state.map!.layerVisibility as Record<string, boolean>;
+    expect(visibility.urbanRoads).toBe(false); // roads was explicitly OFF
+    expect('cityAreas' in visibility).toBe(false);
+    expect('roads' in visibility).toBe(false);
+    expect(visibility.railways).toBe(true);
+    // Suppliers: string → [string], null → dropped, arrays pass through.
+    const suppliers = (migrated.state.economy!.resources as Record<string, any>).country_0
+      .suppliers as Record<string, unknown>;
+    expect(suppliers.oil).toEqual(['country_2']);
+    expect('wood' in suppliers).toBe(false);
+    expect(suppliers.iron).toEqual(['country_1']);
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

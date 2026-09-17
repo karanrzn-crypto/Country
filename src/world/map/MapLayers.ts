@@ -20,7 +20,6 @@ export type MapLayerId =
   | 'land'
   | 'countries'
   | 'countryBorders'
-  | 'cityAreas'
   | 'labels'
   // geography
   | 'biomes'
@@ -32,7 +31,7 @@ export type MapLayerId =
   | 'cities'
   | 'capitals'
   // infrastructure
-  | 'roads'
+  | 'urbanRoads'
   | 'railways'
   | 'airports'
   | 'ports'
@@ -67,10 +66,14 @@ export const MAP_LAYERS: readonly MapLayerDef[] = [
   { id: 'lakes', label: 'دریاچه‌ها / آب', group: 'geography', defaultVisible: true },
   { id: 'grid', label: 'شبکهٔ جغرافیایی', group: 'geography', defaultVisible: false },
   { id: 'provinceBorders', label: 'استان‌ها', group: 'geography', defaultVisible: true },
-  { id: 'cityAreas', label: 'مناطق شهری', group: 'geography', defaultVisible: true },
   { id: 'countryBorders', label: 'مرز کشورها', group: 'base', defaultVisible: true },
-  { id: 'roads', label: 'جاده‌ها', group: 'infrastructure', defaultVisible: true },
-  { id: 'railways', label: 'راه‌آهن‌ها', group: 'infrastructure', defaultVisible: false },
+  // ONE user-facing transport surface toggle (spec): the urban view (city
+  // discs / capital rings / junctions / city-network road ribbons) AND the
+  // thin road lines are the SAME layer — they always show or hide together.
+  // Railways are a SEPARATE, fully independent toggle (spec §2): neither
+  // flag influences the other.
+  { id: 'urbanRoads', label: 'مناطق شهری + جاده‌ها', group: 'infrastructure', defaultVisible: true },
+  { id: 'railways', label: 'راه‌آهن‌ها', group: 'infrastructure', defaultVisible: true },
   { id: 'airports', label: 'فرودگاه‌ها', group: 'infrastructure', defaultVisible: false },
   { id: 'ports', label: 'بنادر', group: 'infrastructure', defaultVisible: false },
   { id: 'industry', label: 'صنعت', group: 'infrastructure', defaultVisible: false },

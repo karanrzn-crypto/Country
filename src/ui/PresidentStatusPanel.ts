@@ -42,7 +42,6 @@ const SECTION_DEEPLINKS: Readonly<Record<string, SectionId>> = {
   military: 'overview',
   politics: 'politics',
   parties: 'politics',
-  government: 'government',
   events: 'events',
   election: 'elections'
 };
@@ -116,7 +115,8 @@ export class PresidentStatusPanel {
       'دولت'
     ]);
     this.addSection('parties', 'نفوذ احزاب', [], /* dynamicList */ true);
-    this.addSection('government', 'دولت', ['وزارتخانه‌ها', 'میانگین کارایی']);
+    // No 'government' section (spec §6): the ministries keep simulating, but
+    // they no longer get a dedicated panel of their own.
     this.addSection('events', 'رویدادها', ['رویدادها'], true);
     this.addSection('election', 'انتخابات', ['وضعیت', 'انتخابات بعدی', 'حمایت از حزب']);
     this.addSection('alerts', 'هشدارها', [], true);
@@ -239,7 +239,6 @@ export class PresidentStatusPanel {
     this.refreshMilitary(context, countryId);
     this.refreshPolitics(government);
     this.refreshParties(government);
-    this.refreshGovernment(government);
     this.refreshEvents(context, government);
     this.refreshElection(government);
     this.refreshAlerts(context, government, countryId);
@@ -366,21 +365,6 @@ export class PresidentStatusPanel {
       fresh.push(row);
     }
     this.dynamic.set('parties', fresh);
-  }
-
-  private refreshGovernment(government: GovernmentCountryState): void {
-    const section = this.section('government');
-    if (section === null) return;
-    const ministries = Object.values(government.ministries);
-    const count = ministries.length;
-    const average =
-      count > 0 ? ministries.reduce((sum, ministry) => sum + ministry.efficiency, 0) / count : 0;
-    const spread =
-      count > 0 ? Math.max(...ministries.map((ministry) => Math.abs(ministry.efficiency - average))) : 0;
-    section.rows.get('وزارتخانه‌ها')?.setText(String(count));
-    section.rows
-      .get('میانگین کارایی')
-      ?.setText(`${percent(average)}${spread > 0.15 ? ' ⚠' : ''}`);
   }
 
   private refreshEvents(context: SystemContext, government: GovernmentCountryState): void {

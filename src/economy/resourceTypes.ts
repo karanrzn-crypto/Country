@@ -27,8 +27,13 @@ export interface CountryResourceState {
   /** Player policies — import/export toggles (mutually exclusive per resource). */
   importPolicy: Record<string, boolean>;
   exportPolicy: Record<string, boolean>;
-  /** resourceId → the supplier country the market routes the import through. */
-  suppliers: Record<string, string | null>;
+  /**
+   * resourceId → the countries that actually SUPPLY this import, in purchase
+   * order (the market fills the deficit from several sellers when no single
+   * one covers it — spec: a seller existing means the normal consumption is
+   * fully covered). Empty array = no active import flow.
+   */
+  suppliers: Record<string, string[]>;
   /**
    * resourceId → the supplier country the PLAYER pinned for imports
    * (null/absent = automatic market choice). Preserved across recomputes.

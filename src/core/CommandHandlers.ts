@@ -43,6 +43,7 @@ export interface CoreGameApi {
     category: 'military' | 'healthcare' | 'education' | 'infrastructure' | 'welfare' | 'government' | 'other',
     value: number
   ): void;
+  governmentSetEconomicBudget(countryId: string, value: number): void;
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void;
   governmentEnactDecision(countryId: string, decisionId: string): boolean;
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
@@ -95,6 +96,7 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('map.setViewport', (cmd) => game.mapSetViewport(cmd.width, cmd.height));
   bus.register('government.setTaxRate', (cmd) => game.governmentSetTaxRate(cmd.countryId, cmd.category, cmd.value));
   bus.register('government.setSpending', (cmd) => game.governmentSetSpending(cmd.countryId, cmd.category, cmd.value));
+  bus.register('government.setEconomicBudget', (cmd) => game.governmentSetEconomicBudget(cmd.countryId, cmd.value));
   bus.register('government.setMinistryFunding', (cmd) =>
     game.governmentSetMinistryFunding(cmd.countryId, cmd.ministryId, cmd.value)
   );
