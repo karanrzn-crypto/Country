@@ -15,9 +15,10 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v4 → v5: minute-resolution clock (time v2) — ticks ×15 (15-min → 1-min)
  * - v5 → v6: shared feature selection fields (Part 3.5)
  * - v6 → v7: Phase 2 — government + cityAreas + macro economy
+ * - v7 → v8: city-network connection selection field (City Areas view)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v7)', () => {
+describe('save migrations (v1 → … → v8)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -29,7 +30,7 @@ describe('save migrations (v1 → … → v7)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -73,7 +74,7 @@ describe('save migrations (v1 → … → v7)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
@@ -94,7 +95,7 @@ describe('save migrations (v1 → … → v7)', () => {
       runtime: { tick: 77 }
     };
     const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     const migrated = data as { state: { player: Record<string, unknown> } };
     expect(migrated.state.player.countryConfirmed).toBe(true);
     expect(migrated.state.player.countryId).toBe('country_2');
@@ -108,7 +109,7 @@ describe('save migrations (v1 → … → v7)', () => {
       runtime: { tick: 100, rngState: 7, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v4, 4, SAVE_VERSION);
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     expect((data as typeof v4).runtime.tick).toBe(1500);
   });
 
@@ -132,14 +133,15 @@ describe('save migrations (v1 → … → v7)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v5, 5, SAVE_VERSION);
-    expect(version).toBe(7);
+    expect(version).toBe(8);
     const map = (data as typeof v5).state.map as Record<string, unknown>;
     for (const key of [
       'selectedGridKey',
       'selectedRiverId',
       'selectedLakeId',
       'selectedSiteId',
-      'selectedBuildingId'
+      'selectedBuildingId',
+      'selectedCityConnectionId'
     ]) {
       expect(map[key]).toBeNull();
     }
@@ -157,6 +159,7 @@ describe('save migrations (v1 → … → v7)', () => {
         'camera',
         'layerVisibility',
         'selectedBuildingId',
+        'selectedCityConnectionId',
         'selectedCityId',
         'selectedCountryId',
         'selectedGridKey',

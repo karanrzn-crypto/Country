@@ -22,7 +22,7 @@ import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
  * pass never removes another section's fresh rows.
  */
 
-type SectionId =
+export type SectionId =
   | 'overview'
   | 'economy'
   | 'budget'
@@ -82,6 +82,8 @@ export class PresidentDashboard {
   private readonly sections = new Map<SectionId, UIElement>();
   private readonly dynamic = new Map<string, UIElement[]>();
   private readonly rows = new Map<string, UIElement>();
+  /** Section the NEXT build should show (set by openAt before screens.open). */
+  private requestedSection: SectionId | null = null;
 
   constructor(
     private readonly screens: ScreenManager,
@@ -92,6 +94,22 @@ export class PresidentDashboard {
   register(context: SystemContext): void {
     this.context = context;
     this.screens.registerScreen('president', (container) => this.build(container));
+  }
+
+  /**
+   * Opens the dashboard DIRECTLY at one section (deep link for the status
+   * panel and future entries). When the screen is already open it just
+   * switches the section — the ScreenManager refocuses the stack instead of
+   * duplicating anything (one screen, no parallel state).
+   */
+  openAt(section: SectionId): void {
+    if (this.screens.isOpen('president')) {
+      this.showSection(section);
+      this.refresh();
+      return;
+    }
+    this.requestedSection = section;
+    this.screens.open('president');
   }
 
   /** Refresh when open (called on a cadence + after government events). */
@@ -152,7 +170,10 @@ export class PresidentDashboard {
     this.sections.set('opinion', this.buildOpinion(body));
     this.sections.set('elections', this.buildElections(body));
 
-    this.showSection('overview');
+    // Consume the deep-link request (openAt), default to Overview.
+    const initial = this.requestedSection ?? 'overview';
+    this.requestedSection = null;
+    this.showSection(initial);
     this.refresh();
   }
 
@@ -522,7 +543,12 @@ export class PresidentDashboard {
   }
 
   private showSection(section: SectionId): void {
-    for (const [id, element] of this.sections) element.setVisible(id === section);
+    // Class-based visibility (NOT inline display): the stylesheet keeps
+    // `.pd-section { display: none }`, so an inline `display: ''` would
+    // still compute to none. `.on` wins and restores the flex column.
+    for (const [id, element] of this.sections) {
+      element.setClass(id === section ? `pd-section on pd-${id}` : `pd-section pd-${id}`);
+    }
     for (const [id, button] of this.tabButtons) button.setClass(id === section ? 'pd-tab on' : 'pd-tab');
   }
 

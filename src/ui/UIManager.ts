@@ -14,6 +14,7 @@ import { DialogSystem } from './DialogSystem';
 import { MenuSystem } from './MenuSystem';
 import { MapUI } from './MapUI';
 import { PresidentDashboard } from './PresidentDashboard';
+import { PresidentStatusPanel } from './PresidentStatusPanel';
 
 /**
  * UI phase system (render phase). Assembles all UI foundations and wires
@@ -58,9 +59,14 @@ export class UIManager implements PhaseSystem {
     menus.registerBuilders();
     this.mapUI = new MapUI(this.screens, this.commands, (tag, className) => adapter.create(tag, className));
     this.dashboard = new PresidentDashboard(this.screens, this.commands, (tag, className) => adapter.create(tag, className));
+    // Phase 2 — the permanent bottom-right quick overview, deep-linked into
+    // the dashboard (no screen, no parallel state, no parallel event bus).
+    this.statusPanel = new PresidentStatusPanel(this.dashboard, (tag, className) => adapter.create(tag, className));
+    this.root.appendChild(this.statusPanel.root);
   }
 
   private readonly dashboard: PresidentDashboard;
+  private readonly statusPanel: PresidentStatusPanel;
 
   private createRoot(adapter: UIDomAdapter): UIElement {
     const root = adapter.create('div', 'ui-root');
@@ -73,6 +79,8 @@ export class UIManager implements PhaseSystem {
     this.mapUI.register(context, this.root);
     // Phase 2: the presidential dashboard (screen 'president').
     this.dashboard.register(context);
+    // Phase 2: the permanent presidential status panel (bottom-right).
+    this.statusPanel.register(context, this.root);
     this.unsubscribes.push(
       this.events.on('map.selectionChanged', () => {
         this.mapUI.refreshInfo();
@@ -184,6 +192,9 @@ export class UIManager implements PhaseSystem {
     if (this.frameCounter % 10 === 0) {
       this.hud.update(context);
     }
+    // Status panel: bounded cadence (≈2 Hz at 30 Hz) + its own event-driven
+    // refreshes — reads GameState directly, owns no state.
+    this.statusPanel.update(context, this.frameCounter);
     // Dashboard live refresh while open (2× per second at 30 Hz).
     if (this.screens.isOpen('president') && this.frameCounter % 15 === 0) {
       this.dashboard.refresh();
@@ -224,5 +235,6 @@ export class UIManager implements PhaseSystem {
   dispose(): void {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
+    this.statusPanel.dispose();
   }
 }

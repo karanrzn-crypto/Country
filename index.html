@@ -92,6 +92,7 @@
       .notifications {
         position: absolute; top: 12px; right: 12px;
         display: flex; flex-direction: column; gap: 6px; width: 300px;
+        z-index: 25; /* transient toasts ride ABOVE the status panel (18) */
       }
       .notification {
         background: rgba(13, 18, 28, 0.92);
@@ -223,6 +224,7 @@
       .pd-tab.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
       .pd-body { overflow-y: auto; min-height: 320px; max-height: calc(min(640px, 88vh) - 120px); }
       .pd-section { display: none; flex-direction: column; gap: 3px; }
+      .pd-section.on { display: flex; }
       .pd-subtitle { color: #8a94a6; font-size: 11px; letter-spacing: 1px; margin-top: 8px; }
       .pd-row { display: flex; justify-content: space-between; gap: 14px; }
       .pd-key { color: #8a94a6; flex: 0 0 auto; }
@@ -267,6 +269,67 @@
       }
       .pd-choice:hover { background: #243149; border-color: #4a5f88; }
       .pd-empty { color: #6b7688; font-size: 12px; }
+
+      /* —— president status panel (permanent quick overview, bottom-right) —— */
+      .psp {
+        position: absolute; right: 12px; bottom: 12px;
+        width: min(320px, 34vw); min-width: 264px;
+        max-height: calc(100% - 24px);
+        overflow-y: auto;
+        display: flex; flex-direction: column; gap: 6px;
+        background: rgba(13, 18, 28, 0.88);
+        border: 1px solid #2a3446; border-radius: 8px;
+        padding: 10px 12px;
+        z-index: 18; /* under screens (30) and time bar, above plain map UI */
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+      }
+      .psp-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .psp-title { color: #7fb2ff; font-weight: 700; letter-spacing: 2px; }
+      .psp-open {
+        font: inherit; font-size: 10px; cursor: pointer;
+        border: 1px solid #4a7fa8; border-radius: 3px; padding: 3px 8px;
+        color: #bfe0f5; background: #16222e; letter-spacing: 1px;
+      }
+      .psp-open:hover { background: #1d3145; border-color: #6ba3cc; }
+      .psp-identity { color: #e8edf5; font-weight: 700; font-size: 12px; }
+      .psp-section {
+        border-top: 1px solid #22304a; padding-top: 5px;
+        display: flex; flex-direction: column; gap: 2px;
+      }
+      .psp-section-title {
+        color: #8a94a6; font-size: 10px; letter-spacing: 2px; font-weight: 700;
+        cursor: pointer; user-select: none;
+      }
+      .psp-section-title:hover { color: #bfe0f5; }
+      .psp-rows { display: flex; flex-direction: column; gap: 1px; }
+      .psp-row { display: flex; justify-content: space-between; gap: 12px; }
+      .psp-key { color: #8a94a6; flex: 0 0 auto; }
+      .psp-value {
+        color: #e8edf5; font-weight: 600; text-align: right;
+        overflow-wrap: anywhere; min-width: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      /* parties: name+meta line + support bar */
+      .psp-party { display: flex; flex-direction: column; gap: 1px; }
+      .psp-party-in-line { display: flex; justify-content: space-between; gap: 10px; }
+      .psp-party-name { color: #cfd8e6; }
+      .psp-party.in-gov .psp-party-name { color: #b8e6b8; font-weight: 700; }
+      .psp-party-meta { color: #9aa6ba; font-size: 11px; font-variant-numeric: tabular-nums; }
+      .psp-bar {
+        height: 4px; border-radius: 2px; background: #1a2333;
+        border: 1px solid #22304a; overflow: hidden;
+      }
+      .psp-bar-fill { height: 100%; background: #4a7fa8; }
+      .psp-party.in-gov .psp-bar-fill { background: #4a7f4a; }
+      .psp-alert { color: #ffd27f; font-size: 11px; }
+      .psp-calm { color: #6b7688; font-size: 11px; }
+
+      @media (max-width: 900px) {
+        .psp { width: min(280px, 44vw); }
+      }
+      @media (max-width: 700px) {
+        .psp { width: min(250px, 52vw); padding: 8px 10px; }
+      }
     </style>
   </head>
   <body>

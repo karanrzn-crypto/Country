@@ -474,6 +474,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         selectedLakeId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedSiteId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedBuildingId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectedCityConnectionId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         layerVisibility: { type: 'record', values: { type: 'boolean' } },
         camera: {
           type: 'object',

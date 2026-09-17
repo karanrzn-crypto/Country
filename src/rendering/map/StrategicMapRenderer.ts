@@ -8,6 +8,7 @@ import { MapCamera } from './MapCamera';
 import { CountryLayer } from './CountryLayer';
 import { BorderLayer } from './BorderLayer';
 import { CityLayer } from './CityLayer';
+import { CityNetworkLayer } from './CityNetworkLayer';
 import { LabelLayer } from './LabelLayer';
 import { SurfaceLayer, type SurfaceMode } from './MapSurface';
 import {
@@ -51,6 +52,8 @@ export class StrategicMapRenderer {
   private readonly countryLayer: CountryLayer;
   private readonly borderLayer: BorderLayer;
   private readonly cityLayer: CityLayer;
+  /** The REAL City Areas view — the live city network (state.cityAreas). */
+  private readonly cityNetworkLayer: CityNetworkLayer;
   private readonly labelLayer: LabelLayer;
   private readonly gridLayer: GridLayer;
   private readonly surfaceLayer: SurfaceLayer;
@@ -95,8 +98,20 @@ export class StrategicMapRenderer {
     this.countryLayer = new CountryLayer(model, theme);
     this.borderLayer = new BorderLayer(model, theme);
     this.cityLayer = new CityLayer(model, theme);
+    this.cityNetworkLayer = new CityNetworkLayer(
+      this.columns,
+      context.config.map.rows,
+      context.config.map.cellSize,
+      theme
+    );
     this.labelLayer = new LabelLayer(model, theme, this.columns);
-    this.disposables.push(this.countryLayer, this.borderLayer, this.cityLayer, this.labelLayer);
+    this.disposables.push(
+      this.countryLayer,
+      this.borderLayer,
+      this.cityLayer,
+      this.cityNetworkLayer,
+      this.labelLayer
+    );
 
     // —— Part-3 information layers (lazy, data-driven colors from the theme) ——
     // The land SURFACE is ONE merged mesh whose exclusive mode follows the
@@ -220,7 +235,11 @@ export class StrategicMapRenderer {
       // per-province fills (with the selection highlight) live together —
       // toggling it hides/shows the whole province presentation.
       provinceBorders: this.borderLayer.provinceGroup,
-      cityAreas: this.cityLayer.cityAreasGroup,
+      // ONE user-facing 'City Areas' layer: the REAL city connection network
+      // (routes + city highlights + capital rings + junction nodes) built
+      // from the live state.cityAreas slice — synced per frame, rebuilt only
+      // when the network shape changes.
+      cityAreas: this.cityNetworkLayer.group,
       countryBorders: this.borderLayer.countryGroup,
       roads: roadsLayer.group,
       railways: railwaysLayer.group,
@@ -304,19 +323,28 @@ export class StrategicMapRenderer {
       }
     }
 
+    // 2c. City Areas network: lazy + signature-guarded rebuild on show;
+    // visibility follows the layer flag like every other layer.
+    this.cityNetworkLayer.sync(
+      this.model,
+      state.cityAreas.network,
+      map.layerVisibility.cityAreas !== false
+    );
+
     // 3. Selection (country highlight, city ring, border emphasis, grid-cell
-    //    fill/outline) + the persistent player-country outline — all rebuilt
-    //    ONLY when the selection key actually changes.
+    //    fill/outline, city-connection emphasis) + the persistent player-country
+    //    outline — all rebuilt ONLY when the selection key actually changes.
     const selectionKey =
       `${map.selectedCountryId}|${map.selectedProvinceId}|${map.selectedCityId}` +
       `|${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
-      `|${map.selectedSiteId}|${map.selectedBuildingId}`;
+      `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityConnectionId}`;
     if (selectionKey !== this.lastSelectionKey) {
       this.lastSelectionKey = selectionKey;
       this.countryLayer.setSelection(map.selectedCountryId, this.theme);
       this.countryLayer.setSelectedProvince(map.selectedProvinceId, this.theme);
       this.cityLayer.setSelectedCity(map.selectedCityId, this.model);
       this.borderLayer.setSelectedCountry(map.selectedCountryId, this.model, this.theme);
+      this.cityNetworkLayer.setSelectedConnection(map.selectedCityConnectionId);
       const gridCell =
         map.selectedGridKey !== null ? findGridCell(this.model, map.selectedGridKey) : -1;
       this.gridLayer.setSelectedCell(gridCell >= 0 ? gridCell : null);

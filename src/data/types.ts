@@ -289,6 +289,18 @@ export interface MapThemeData {
   /** City-district boundary line (subtle — must not read as a country border). */
   readonly cityAreaStroke: string;
   readonly cityAreaOpacity: number;
+  /** City Areas network view — real city-to-city route rendering. */
+  readonly cityLinkRoad: string;
+  readonly cityLinkCrossProvince: string;
+  readonly cityLinkRailway: string;
+  readonly cityLinkOpacity: number;
+  readonly cityLinkRoadWidth: number;
+  readonly cityLinkCrossProvinceWidth: number;
+  readonly cityLinkRailwayWidth: number;
+  readonly cityHighlightColor: string;
+  readonly cityHighlightOpacity: number;
+  readonly capitalHighlightColor: string;
+  readonly capitalHighlightOpacity: number;
   readonly cityFill: string;
   readonly cityStroke: string;
   readonly capitalFill: string;

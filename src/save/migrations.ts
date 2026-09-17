@@ -253,6 +253,26 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 7,
+    to: 8,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v7→v8: save payload is not an object');
+      }
+      // City-network connection selection: one more nullable map-slice field
+      // (selections are session-state only — old saves get the null default
+      // so schema validation passes; the session heal drops stale ids).
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { map?: Record<string, unknown> };
+      };
+      const map = clone.state?.map;
+      if (map !== undefined && typeof map.selectedCityConnectionId !== 'string') {
+        map.selectedCityConnectionId = null;
+      }
+      return clone;
+    }
   }
 ];
 

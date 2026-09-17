@@ -1,0 +1,474 @@
+import type { SystemContext } from '../core/GameContext';
+import type { UIElement } from './adapter/UIDomAdapter';
+import type { EventBus } from '../events/EventBus';
+import type { PresidentDashboard, SectionId } from './PresidentDashboard';
+import { activeWarsInvolving } from '../state/slices/warSlice';
+import type { GovernmentCountryState } from '../government/types';
+
+/**
+ * PresidentStatusPanel — the permanent QUICK OVERVIEW of the head of state.
+ *
+ * A small, always-on command center at the BOTTOM-RIGHT of the map: the
+ * live vital signs (economy, military, politics, parties, government,
+ * events, election, alerts) in one glance, with one-click deep links into
+ * the matching PresidentDashboard section.
+ *
+ * Architecture contract (spec 13):
+ *  - owns NO state: every value is read from GameState at refresh time;
+ *  - sends NO simulation-affecting commands: navigation goes through the
+ *    existing PresidentDashboard (UI → CommandBus → Game/Core → GameState
+ *    contract is untouched — the dashboard owns the actions);
+ *  - connected to the EXISTING government event stream (no parallel
+ *    EventBus) plus a bounded refresh cadence for non-event mutations
+ *    (treasury accrual, unit movement, war changes);
+ *  - NOT a Screen: registered as a plain child of the UI root, so it never
+ *    covers the map and never participates in the screen stack.
+ *
+ * Military data source (spec 14): state.military.units / strengthCache and
+ * state.war — destroyed units excluded, soldiers summed from
+ * soldiersCurrent, inCombat counted separately, wars filtered to the
+ * player's country. Nothing here is fabricated.
+ */
+
+/** Which dashboard section each panel section deep-links to. Data, not code:
+ *  a future independent Military screen only edits this mapping. */
+const SECTION_DEEPLINKS: Readonly<Record<string, SectionId>> = {
+  economy: 'economy',
+  // No standalone military screen exists yet — land on Overview (the
+  // architecture-ready mapping makes that a one-line change later).
+  military: 'overview',
+  politics: 'politics',
+  parties: 'politics',
+  government: 'government',
+  events: 'events',
+  election: 'elections'
+};
+
+/** Max simultaneous alert rows (spec 8). */
+const MAX_ALERTS = 3;
+
+/** Panel refresh cadence in frames (≈2 Hz at 30 Hz — never per-frame work). */
+const REFRESH_EVERY_FRAMES = 15;
+
+/** Pre-refresh dynamic-list signature — no real signature can contain NUL,
+ *  so the FIRST refresh always builds (the calm/empty state is '' too). */
+const INITIAL_SIGNATURE = '\u0000';
+
+interface PanelSection {
+  body: UIElement;
+  rows: Map<string, UIElement>;
+}
+
+export class PresidentStatusPanel {
+  private context: SystemContext | null = null;
+  private readonly sections = new Map<string, PanelSection>();
+  private readonly dynamic = new Map<string, UIElement[]>();
+  private readonly dynamicSignatures = new Map<string, string>();
+  /** The panel element (UIManager appends it to the UI root). */
+  readonly root: UIElement;
+  private readonly identity: UIElement;
+  private readonly unsubscribes: (() => void)[] = [];
+  private readonly create: (tag: string, className?: string) => UIElement;
+  private lastRefreshFrame = -1_000_000;
+
+  constructor(
+    private readonly dashboard: PresidentDashboard,
+    create: (tag: string, className?: string) => UIElement
+  ) {
+    this.create = create;
+    this.root = create('div', 'psp');
+    this.root.setVisible(false);
+
+    // —— header: title + the full-office button ——
+    const header = create('div', 'psp-header');
+    const title = create('span', 'psp-title');
+    title.setText('PRESIDENT');
+    header.appendChild(title);
+    const open = create('button', 'psp-open');
+    open.setText('OPEN PRESIDENT OFFICE');
+    open.onClick(() => this.dashboard.openAt('overview'));
+    header.appendChild(open);
+    this.root.appendChild(header);
+
+    // —— identity line: name · country · party ——
+    this.identity = create('div', 'psp-identity');
+    this.root.appendChild(this.identity);
+
+    // —— fixed sections (top → bottom) ——
+    this.addSection('economy', 'ECONOMY', ['Treasury', 'GDP', 'Growth', 'Inflation', 'Unemployment', 'Balance']);
+    this.addSection('military', 'MILITARY', ['Strength', 'Active Units', 'Soldiers', 'In Combat', 'Moving', 'Wars']);
+    this.addSection('politics', 'POLITICS', [
+      'Approval',
+      'Political',
+      'Public Trust',
+      'Authority',
+      'Protests',
+      'Strikes',
+      'Government'
+    ]);
+    this.addSection('parties', 'PARTY INFLUENCE', [], /* dynamicList */ true);
+    this.addSection('government', 'GOVERNMENT', ['Ministries', 'Avg. Efficiency']);
+    this.addSection('events', 'EVENTS', ['Events'], true);
+    this.addSection('election', 'ELECTION', ['Status', 'Next Election', 'Party Support']);
+    this.addSection('alerts', 'ALERTS', [], true);
+  }
+
+  // ———————————————————————————————————————————————————————————— wiring ——
+
+  /** Registers into the UI root + subscribes to the EXISTING event streams. */
+  register(context: SystemContext, container: UIElement): void {
+    this.context = context;
+    container.appendChild(this.root);
+    const events: EventBus = context.events;
+    this.unsubscribes.push(
+      // —— Phase 2 government flow (the SAME events the dashboard uses) ——
+      events.on('government.eventFired', () => this.refresh()),
+      events.on('government.eventResolved', () => this.refresh()),
+      events.on('government.decisionEnacted', () => this.refresh()),
+      events.on('government.budgetChanged', () => this.refresh()),
+      events.on('government.ministryFundingChanged', () => this.refresh()),
+      events.on('government.electionHeld', () => this.refresh()),
+      events.on('government.campaignStarted', () => this.refresh()),
+      events.on('government.monthProcessed', ({ countryId }) => {
+        if (countryId === context.state.player.countryId) this.refresh();
+      }),
+      // —— player / military mutations that have no monthly event ——
+      events.on('player.countryConfirmed', () => this.refresh()),
+      events.on('sim.economyTreasuryChanged', ({ factionId }) => {
+        if (factionId === context.state.player.countryId) this.refresh();
+      }),
+      events.on('combat.engagementStarted', () => this.refresh())
+    );
+    this.refresh();
+  }
+
+  /** Bounded cadence (called from UIManager's frame update). */
+  update(_context: SystemContext, frameIndex: number): void {
+    if (frameIndex - this.lastRefreshFrame < REFRESH_EVERY_FRAMES) return;
+    this.lastRefreshFrame = frameIndex;
+    this.refresh();
+  }
+
+  dispose(): void {
+    for (const unsubscribe of this.unsubscribes) unsubscribe();
+    this.unsubscribes.length = 0;
+    this.root.remove();
+  }
+
+  // ————————————————————————————————————————————————————————————— build ——
+
+  private addSection(id: string, label: string, rows: readonly string[], hasDynamicList = false): void {
+    const section = this.create('div', 'psp-section');
+    const title = this.create('div', 'psp-section-title');
+    title.setText(label);
+    const body = this.create('div', 'psp-rows');
+    section.appendChild(title);
+    section.appendChild(body);
+    this.root.appendChild(section);
+
+    // Deep link into the President Office (the section title is the button).
+    const deeplink = SECTION_DEEPLINKS[id];
+    if (deeplink !== undefined) {
+      title.setAttribute('title', 'Open in the President Office');
+      const target: SectionId = deeplink;
+      title.onClick(() => this.dashboard.openAt(target));
+    }
+
+    const rowMap = new Map<string, UIElement>();
+    for (const rowLabel of rows) {
+      const row = this.create('div', 'psp-row');
+      const key = this.create('span', 'psp-key');
+      key.setText(rowLabel);
+      const value = this.create('span', 'psp-value');
+      row.appendChild(key);
+      row.appendChild(value);
+      body.appendChild(row);
+      rowMap.set(rowLabel, value);
+    }
+    if (hasDynamicList) {
+      this.dynamic.set(id, []);
+      this.dynamicSignatures.set(id, INITIAL_SIGNATURE);
+    }
+    this.sections.set(id, { body, rows: rowMap });
+  }
+
+  // ——————————————————————————————————————————————————————————— refresh ——
+
+  refresh(): void {
+    const context = this.context;
+    if (context === null) return;
+    const state = context.state;
+    const countryId = state.player.countryId;
+    const government: GovernmentCountryState | undefined =
+      countryId !== '' ? state.government.countries[countryId] : undefined;
+    const visible = state.player.countryConfirmed && government !== undefined;
+    this.root.setVisible(visible);
+    if (!visible || government === undefined) return;
+
+    this.refreshIdentity(context, government);
+    this.refreshEconomy(context, countryId);
+    this.refreshMilitary(context, countryId);
+    this.refreshPolitics(government);
+    this.refreshParties(government);
+    this.refreshGovernment(government);
+    this.refreshEvents(context, government);
+    this.refreshElection(government);
+    this.refreshAlerts(context, government, countryId);
+  }
+
+  private refreshIdentity(context: SystemContext, government: GovernmentCountryState): void {
+    const countryName = context.state.countries.countries[context.state.player.countryId]?.name ?? '—';
+    const party = government.politics.parties[government.president.partyId]?.name ?? government.president.partyId;
+    this.identity.setText(`${government.president.name} — ${countryName} · ${party}`);
+  }
+
+  private refreshEconomy(context: SystemContext, countryId: string): void {
+    const economy = this.section('economy');
+    if (economy === null) return;
+    const macro = context.state.economy.macro[countryId];
+    const treasury = context.state.economy.treasury[countryId] ?? 0;
+    economy.rows.get('Treasury')?.setText(moneyM(treasury));
+    if (macro !== undefined) {
+      economy.rows.get('GDP')?.setText(moneyM(macro.gdp));
+      economy.rows.get('Growth')?.setText(percentSigned(macro.gdpGrowth));
+      economy.rows.get('Inflation')?.setText(percentSigned(macro.inflation));
+      economy.rows.get('Unemployment')?.setText(percent(macro.unemployment));
+      economy.rows.get('Balance')?.setText(`${signed(moneyM(Math.abs(macro.lastBalance)), macro.lastBalance >= 0)}/mo`);
+    } else {
+      economy.rows.get('GDP')?.setText('—');
+      economy.rows.get('Growth')?.setText('—');
+      economy.rows.get('Inflation')?.setText('—');
+      economy.rows.get('Unemployment')?.setText('—');
+      economy.rows.get('Balance')?.setText('—');
+    }
+  }
+
+  private refreshMilitary(context: SystemContext, countryId: string): void {
+    const military = this.section('military');
+    if (military === null) return;
+    let active = 0;
+    let soldiers = 0;
+    let inCombat = 0;
+    let moving = 0;
+    for (const unit of Object.values(context.state.military.units)) {
+      if (unit.countryId !== countryId || unit.operationalState === 'destroyed') continue;
+      active += 1;
+      soldiers += unit.soldiersCurrent;
+      if (unit.operationalState === 'inCombat') inCombat += 1;
+      if (unit.operationalState === 'moving') moving += 1;
+    }
+    const strength = context.state.military.strengthCache[countryId] ?? 0;
+    const wars = activeWarsInvolving(context.state.war, countryId).length;
+    military.rows.get('Strength')?.setText(strength.toLocaleString('en-US'));
+    military.rows.get('Active Units')?.setText(String(active));
+    military.rows.get('Soldiers')?.setText(soldiers.toLocaleString('en-US'));
+    military.rows.get('In Combat')?.setText(String(inCombat));
+    military.rows.get('Moving')?.setText(String(moving));
+    military.rows.get('Wars')?.setText(String(wars));
+  }
+
+  private refreshPolitics(government: GovernmentCountryState): void {
+    const politics = this.section('politics');
+    if (politics === null) return;
+    politics.rows.get('Approval')?.setText(percent(government.president.approval));
+    politics.rows.get('Political')?.setText(percent(government.president.politicalSupport));
+    politics.rows.get('Public Trust')?.setText(percent(government.politics.publicTrust));
+    politics.rows.get('Authority')?.setText(percent(government.president.executiveAuthority));
+    politics.rows.get('Protests')?.setText(protestLabel(government.politics.protests));
+    politics.rows.get('Strikes')?.setText(
+      government.politics.generalStrikeUntilMonth !== null
+        ? 'GENERAL STRIKE'
+        : percent(government.politics.strikePressure)
+    );
+    const coalition = government.politics.coalition
+      .map((partyId) => government.politics.parties[partyId]?.name ?? partyId)
+      .join(' + ');
+    politics.rows.get('Government')?.setText(coalition !== '' ? coalition : 'caretaker');
+  }
+
+  private refreshParties(government: GovernmentCountryState): void {
+    const container = this.dynamic.get('parties');
+    const parent = this.sectionBody('parties');
+    if (container === undefined || parent === null) return;
+    const parties = Object.values(government.politics.parties).sort((a, b) => b.support - a.support);
+    // Rebuild ONLY on real change (support is drifted monthly, not per frame).
+    const signature = parties
+      .map((party) => `${party.id}:${party.support.toFixed(3)}:${party.inGovernment ? 1 : 0}`)
+      .join('|');
+    if (signature === this.dynamicSignatures.get('parties')) return;
+    this.dynamicSignatures.set('parties', signature);
+    for (const row of this.dynamic.get('parties') ?? []) row.remove();
+
+    const fresh: UIElement[] = [];
+    const seatsTotal = Math.max(1, government.politics.parliament.seatsTotal);
+    for (const party of parties) {
+      const row = this.create('div', party.inGovernment ? 'psp-party in-gov' : 'psp-party');
+      const name = this.create('span', 'psp-party-name');
+      name.setText(`${party.inGovernment ? '★ ' : ''}${party.name}`);
+      const meta = this.create('span', 'psp-party-meta');
+      meta.setText(`${percent(party.support)} · ${Math.round(party.seatShare * seatsTotal)} seats`);
+      const bar = this.create('div', 'psp-bar');
+      const fill = this.create('div', 'psp-bar-fill');
+      fill.setAttribute('style', `width:${Math.round(party.support * 100)}%`);
+      bar.appendChild(fill);
+      row.appendChild(name);
+      row.appendChild(meta);
+      row.appendChild(bar);
+      parent.appendChild(row);
+      fresh.push(row);
+    }
+    this.dynamic.set('parties', fresh);
+  }
+
+  private refreshGovernment(government: GovernmentCountryState): void {
+    const section = this.section('government');
+    if (section === null) return;
+    const ministries = Object.values(government.ministries);
+    const count = ministries.length;
+    const average =
+      count > 0 ? ministries.reduce((sum, ministry) => sum + ministry.efficiency, 0) / count : 0;
+    const spread =
+      count > 0 ? Math.max(...ministries.map((ministry) => Math.abs(ministry.efficiency - average))) : 0;
+    section.rows.get('Ministries')?.setText(String(count));
+    section.rows
+      .get('Avg. Efficiency')
+      ?.setText(`${percent(average)}${spread > 0.15 ? ' ⚠' : ''}`);
+  }
+
+  private refreshEvents(context: SystemContext, government: GovernmentCountryState): void {
+    const section = this.section('events');
+    if (section === null) return;
+    const pending = government.events.pending;
+    section.rows.get('Events')?.setText(pending.length > 0 ? `${pending.length} pending` : 'None');
+    const titles = pending
+      .map((instance) => context.data.eventList.find((def) => def.id === instance.eventId)?.title ?? instance.eventId)
+      .slice(0, 3);
+    const parent = this.sectionBody('events');
+    const container = this.dynamic.get('events');
+    if (parent === null || container === undefined) return;
+    const signature = titles.join('|');
+    if (signature === this.dynamicSignatures.get('events')) return;
+    this.dynamicSignatures.set('events', signature);
+    for (const row of this.dynamic.get('events') ?? []) row.remove();
+    const fresh: UIElement[] = [];
+    for (const title of titles) {
+      const row = this.create('div', 'psp-alert');
+      row.setText(`⚠ ${title}`);
+      parent.appendChild(row);
+      fresh.push(row);
+    }
+    this.dynamic.set('events', fresh);
+  }
+
+  private refreshElection(government: GovernmentCountryState): void {
+    const section = this.section('election');
+    if (section === null) return;
+    const elections = government.elections;
+    const monthsLeft = Math.max(0, elections.nextElectionMonth - government.lastSimMonth);
+    section.rows.get('Status')?.setText(
+      elections.phase === 'campaigning' ? 'Campaigning ●' : 'Idle'
+    );
+    section.rows.get('Next Election')?.setText(`${monthsLeft} month${monthsLeft === 1 ? '' : 's'}`);
+    section.rows
+      .get('Party Support')
+      ?.setText(percent(government.politics.parties[government.president.partyId]?.support ?? 0));
+  }
+
+  private refreshAlerts(context: SystemContext, government: GovernmentCountryState, countryId: string): void {
+    const parent = this.sectionBody('alerts');
+    const container = this.dynamic.get('alerts');
+    if (parent === null || container === undefined) return;
+    const alerts: string[] = [];
+    // 1. Unanswered events — the most urgent items (titles, not ids).
+    for (const instance of government.events.pending) {
+      if (alerts.length >= MAX_ALERTS) break;
+      const def = context.data.eventList.find((candidate) => candidate.id === instance.eventId);
+      alerts.push(`⚠ ${def?.title ?? instance.eventId}`);
+    }
+    const macro = context.state.economy.macro[countryId];
+    const treasury = context.state.economy.treasury[countryId] ?? 0;
+    // 2. Hard fiscal alarm.
+    if (treasury < 0 && alerts.length < MAX_ALERTS) alerts.push('⚠ Treasury deficit');
+    // 3. Active war involving the player's country.
+    const wars = activeWarsInvolving(context.state.war, countryId).length;
+    if (wars > 0 && alerts.length < MAX_ALERTS) alerts.push(`⚠ ${wars === 1 ? 'War' : `${wars} wars`} ongoing`);
+    // 4. Civil unrest.
+    if (government.politics.generalStrikeUntilMonth !== null && alerts.length < MAX_ALERTS) {
+      alerts.push('⚠ General strike');
+    }
+    if (government.politics.protests === 'massive' && alerts.length < MAX_ALERTS) {
+      alerts.push('⚠ Massive protests');
+    }
+    // 5. Economy shocks.
+    if (macro !== undefined && macro.unemployment > 0.15 && alerts.length < MAX_ALERTS) {
+      alerts.push('⚠ Unemployment crisis');
+    }
+    if (macro !== undefined && macro.inflation > 0.12 && alerts.length < MAX_ALERTS) {
+      alerts.push('⚠ Inflation crisis');
+    }
+
+    const signature = alerts.join('|');
+    if (signature === this.dynamicSignatures.get('alerts')) return;
+    this.dynamicSignatures.set('alerts', signature);
+    for (const row of this.dynamic.get('alerts') ?? []) row.remove();
+    const fresh: UIElement[] = [];
+    if (alerts.length === 0) {
+      const calm = this.create('div', 'psp-calm');
+      calm.setText('All quiet');
+      parent.appendChild(calm);
+      fresh.push(calm);
+    } else {
+      for (const alert of alerts) {
+        const row = this.create('div', 'psp-alert');
+        row.setText(alert);
+        parent.appendChild(row);
+        fresh.push(row);
+      }
+    }
+    this.dynamic.set('alerts', fresh);
+  }
+
+  // ————————————————————————————————————————————————————————————— helpers ——
+
+  private section(id: string): PanelSection | null {
+    return this.sections.get(id) ?? null;
+  }
+
+  private sectionBody(id: string): UIElement | null {
+    return this.sections.get(id)?.body ?? null;
+  }
+}
+
+// ————————————————————————————————————————————————————————————— formatting ——
+
+/** Money in $M (the state unit): `$24,520M`. */
+function moneyM(value: number): string {
+  const rounded = Math.round(value);
+  return `${rounded < 0 ? '−' : ''}$${Math.abs(rounded).toLocaleString('en-US')}M`;
+}
+
+/** Prefixes a magnitude with +/− (positive strips the minus moneyM may add). */
+function signed(text: string, positive: boolean): string {
+  return `${positive ? '+' : '−'}${text.replace('−', '')}`;
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function percentSigned(value: number): string {
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
+}
+
+function protestLabel(level: GovernmentCountryState['politics']['protests']): string {
+  switch (level) {
+    case 'none':
+      return 'None';
+    case 'minor':
+      return 'Minor';
+    case 'significant':
+      return 'Significant';
+    case 'massive':
+      return 'MASSIVE';
+  }
+}

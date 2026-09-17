@@ -21,6 +21,8 @@ import type { CountryId, ProvinceId, CityId } from '../../world/types';
 import type { MapLayerId } from '../../world/map/MapLayers';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { DEFAULT_LAYER_VISIBILITY } from '../../world/map/MapLayers';
+import type { CityConnection } from '../../world/cityareas/CityConnections';
+import { connectionsOfCity } from '../../world/cityareas/CityConnections';
 
 export interface MapCameraState {
   /** Camera center in world coordinates. */
@@ -47,6 +49,12 @@ export interface MapSlice {
   selectedSiteId: string | null;
   /** features.buildings entry (urban facility). */
   selectedBuildingId: string | null;
+  /**
+   * City Areas network connection (`CityConnection.id`) — selectable only
+   * while the 'cityAreas' layer is visible. References the DERIVED city
+   * network view; never copies its geometry (no parallel state).
+   */
+  selectedCityConnectionId: string | null;
   layerVisibility: Record<MapLayerId, boolean>;
   camera: MapCameraState;
   viewport: MapViewport;
@@ -58,7 +66,8 @@ export type MapFeatureSelection =
   | { readonly kind: 'river'; readonly riverId: string }
   | { readonly kind: 'lake'; readonly lakeId: string }
   | { readonly kind: 'site'; readonly siteId: string }
-  | { readonly kind: 'building'; readonly buildingId: string };
+  | { readonly kind: 'building'; readonly buildingId: string }
+  | { readonly kind: 'cityLink'; readonly connectionId: string };
 
 /** Default logical camera: whole continent centered, fully zoomed out. */
 export function createDefaultMapSlice(columns = 30, rows = 20, cellSize = 10): MapSlice {
@@ -71,6 +80,7 @@ export function createDefaultMapSlice(columns = 30, rows = 20, cellSize = 10): M
     selectedLakeId: null,
     selectedSiteId: null,
     selectedBuildingId: null,
+    selectedCityConnectionId: null,
     layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
     camera: { x: (columns * cellSize) / 2, z: (rows * cellSize) / 2, viewHeight: rows * cellSize },
     viewport: { width: 1280, height: 720 }
@@ -86,6 +96,7 @@ export function clearMapSelection(slice: MapSlice): void {
   slice.selectedLakeId = null;
   slice.selectedSiteId = null;
   slice.selectedBuildingId = null;
+  slice.selectedCityConnectionId = null;
 }
 
 /**
@@ -104,13 +115,14 @@ export function setMapSelection(
   slice.selectedLakeId = null;
   slice.selectedSiteId = null;
   slice.selectedBuildingId = null;
+  slice.selectedCityConnectionId = null;
 }
 
 /**
- * Feature selection (grid cell / river / lake / site / building). Clears the
- * country hierarchy and every other feature kind atomically. Pure state
- * write — ids are NOT validated here (the caller resolves them from the
- * model; describe* functions re-validate on read).
+ * Feature selection (grid cell / river / lake / site / building / city
+ * network connection). Clears the country hierarchy and every other feature
+ * kind atomically. Pure state write — ids are NOT validated here (the caller
+ * resolves them from the model; describe* functions re-validate on read).
  */
 export function setFeatureSelection(slice: MapSlice, selection: MapFeatureSelection): void {
   clearMapSelection(slice);
@@ -130,6 +142,9 @@ export function setFeatureSelection(slice: MapSlice, selection: MapFeatureSelect
     case 'building':
       slice.selectedBuildingId = selection.buildingId;
       break;
+    case 'cityLink':
+      slice.selectedCityConnectionId = selection.connectionId;
+      break;
   }
 }
 
@@ -141,6 +156,9 @@ export function featureSelectionOf(slice: MapSlice): MapFeatureSelection | null 
   if (slice.selectedSiteId !== null) return { kind: 'site', siteId: slice.selectedSiteId };
   if (slice.selectedBuildingId !== null) {
     return { kind: 'building', buildingId: slice.selectedBuildingId };
+  }
+  if (slice.selectedCityConnectionId !== null) {
+    return { kind: 'cityLink', connectionId: slice.selectedCityConnectionId };
   }
   return null;
 }
@@ -155,10 +173,21 @@ export function featureSelectionOf(slice: MapSlice): MapFeatureSelection | null 
  *
  * Pure function over (state, model) — unit-testable without DOM.
  */
-export function selectionSummary(slice: MapSlice, model: StrategicMapModel): string {
+export function selectionSummary(
+  slice: MapSlice,
+  model: StrategicMapModel,
+  cityConnections: readonly CityConnection[] = []
+): string {
   const feature = featureSelectionOf(slice);
   if (feature !== null) {
     switch (feature.kind) {
+      case 'cityLink': {
+        const connection = cityConnections.find((entry) => entry.id === feature.connectionId);
+        if (connection === undefined) return 'unknown city connection';
+        const nameA = model.cities[connection.cityA]?.name ?? connection.cityA;
+        const nameB = model.cities[connection.cityB]?.name ?? connection.cityB;
+        return `${nameA} → ${nameB} (city connection)`;
+      }
       case 'grid': {
         // `countryId#gridId` → "B7 (grid cell, CountryName)".
         const separator = feature.gridKey.indexOf('#');
@@ -190,7 +219,8 @@ export function selectionSummary(slice: MapSlice, model: StrategicMapModel): str
   if (slice.selectedCityId !== null) {
     const city = model.cities[slice.selectedCityId];
     if (city !== undefined) {
-      return `${city.name} (city, ${city.isCapital ? 'capital' : 'city'})`;
+      const linked = connectionsOfCity(cityConnections, city.id).length;
+      return `${city.name} (city, ${city.isCapital ? 'capital' : 'city'}${linked > 0 ? `, ${linked} connections` : ''})`;
     }
   }
   if (slice.selectedProvinceId !== null) {

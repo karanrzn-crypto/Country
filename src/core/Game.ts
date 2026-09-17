@@ -31,6 +31,11 @@ import {
 import { MapCameraController } from '../world/map/MapCameraController';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import { clearMapSelection, setMapSelection, setFeatureSelection, type MapFeatureSelection } from '../state/slices/mapSlice';
+import {
+  cityConnectionsOf,
+  cityConnectionExists,
+  pickCityConnection
+} from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
@@ -439,19 +444,24 @@ export class Game {
       map.selectedCityId = null;
     }
     // Feature selections (Part 3.5) heal the same way — a stale key/id from
-    // seed drift is dropped rather than rendered as a ghost selection.
+    // seed drift is dropped rather than rendered as a ghost selection. City
+    // connections validate against the DERIVED network view of the live
+    // cityAreas slice (the network itself was re-synced above).
     if (
       (map.selectedGridKey !== null && findGridCell(this.mapModel, map.selectedGridKey) < 0) ||
       (map.selectedRiverId !== null && !this.mapModel.features.rivers.some((r) => r.id === map.selectedRiverId)) ||
       (map.selectedLakeId !== null && !this.mapModel.features.lakes.some((l) => l.id === map.selectedLakeId)) ||
       (map.selectedSiteId !== null && !this.mapModel.features.sites.some((s) => s.id === map.selectedSiteId)) ||
-      (map.selectedBuildingId !== null && !this.mapModel.features.buildings.some((b) => b.id === map.selectedBuildingId))
+      (map.selectedBuildingId !== null && !this.mapModel.features.buildings.some((b) => b.id === map.selectedBuildingId)) ||
+      (map.selectedCityConnectionId !== null &&
+        !cityConnectionExists(cityConnectionsOf(this.state.cityAreas.network), map.selectedCityConnectionId))
     ) {
       map.selectedGridKey = null;
       map.selectedRiverId = null;
       map.selectedLakeId = null;
       map.selectedSiteId = null;
       map.selectedBuildingId = null;
+      map.selectedCityConnectionId = null;
     }
     this.time.setTick(data.runtime.tick, data.runtime.stepCounter ?? 0);
     // Runtime extras (optional — older saves predate them): the time mode
@@ -677,6 +687,13 @@ export class Game {
       this.applyFeatureSelection({ kind: 'lake', lakeId: result.lakeId });
       return;
     }
+    // City Areas network: clicking a route selects the city connection
+    // (only while the layer is visible — you select what you can see).
+    const cityConnectionId = this.pickCityConnectionAt({ x, z });
+    if (cityConnectionId !== null) {
+      this.applyFeatureSelection({ kind: 'cityLink', connectionId: cityConnectionId });
+      return;
+    }
     if (result.gridCellKey !== null) {
       this.applyFeatureSelection({ kind: 'grid', gridKey: result.gridCellKey });
       return;
@@ -772,6 +789,21 @@ export class Game {
     };
   }
 
+  /**
+   * City Areas network pick: resolves the nearest city-to-city connection
+   * to the click point while the 'cityAreas' layer is visible. Derived from
+   * the live network slice (pure function — no renderer involvement).
+   * Tolerance scales with the camera so zoomed-out clicks can still hit a
+   * thin route, but never steals clicks resolved by pickAt above.
+   */
+  private pickCityConnectionAt(point: { x: number; z: number }): string | null {
+    if (this.state.map.layerVisibility.cityAreas !== true) return null;
+    const connections = cityConnectionsOf(this.state.cityAreas.network);
+    if (connections.length === 0) return null;
+    const tolerance = Math.max(1.2, this.state.map.camera.viewHeight * 0.012);
+    return pickCityConnection(connections, point, tolerance);
+  }
+
   /** Applies a validated feature selection (unknown ids are ignored with a
    *  warning — stale ids can only come from hand-made state). */
   private applyFeatureSelection(selection: MapFeatureSelection): void {
@@ -785,7 +817,9 @@ export class Game {
       (selection.kind === 'site' &&
         this.mapModel.features.sites.some((site) => site.id === selection.siteId)) ||
       (selection.kind === 'building' &&
-        this.mapModel.features.buildings.some((building) => building.id === selection.buildingId));
+        this.mapModel.features.buildings.some((building) => building.id === selection.buildingId)) ||
+      (selection.kind === 'cityLink' &&
+        cityConnectionExists(cityConnectionsOf(this.state.cityAreas.network), selection.connectionId));
     if (!valid) {
       this.logger.warn(`mapPick: unknown feature ${JSON.stringify(selection)}`);
       return;
@@ -1001,7 +1035,8 @@ export class Game {
       riverId: map.selectedRiverId,
       lakeId: map.selectedLakeId,
       siteId: map.selectedSiteId,
-      buildingId: map.selectedBuildingId
+      buildingId: map.selectedBuildingId,
+      cityConnectionId: map.selectedCityConnectionId
     });
   }
 

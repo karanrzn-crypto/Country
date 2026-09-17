@@ -115,6 +115,8 @@ export interface GameEventMap {
     readonly lakeId: string | null;
     readonly siteId: string | null;
     readonly buildingId: string | null;
+    /** City Areas network route selection (derived view of the network). */
+    readonly cityConnectionId: string | null;
   };
   /** Ephemeral hover info (never saved) — renderer highlights, UI shows a tip. */
   'map.hoverChanged': {

@@ -8,6 +8,8 @@ import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
 import { describeGridCell, describeProvince } from '../world/map/MapGeography';
 import { selectionSummary } from '../state/slices/mapSlice';
+import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
+import type { CityConnection } from '../world/cityareas/CityConnections';
 import {
   buildBiomeLegend,
   buildElevationLegend,
@@ -242,7 +244,7 @@ export class MapUI {
     const signature =
       `${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
       `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}` +
-      `|${map.selectedProvinceId}`;
+      `|${map.selectedProvinceId}|${map.selectedCityConnectionId}`;
     if (signature === this.featureSignature) return;
     this.featureSignature = signature;
     for (const row of this.featureRows) row.remove();
@@ -355,6 +357,21 @@ export class MapUI {
         addRow('Population', formatCompact(city.population));
         addRow('Type', city.type);
         addRow('Importance', `${Math.round(city.importance * 100)}%`);
+        // Real City Areas data (state.cityAreas) — the urban core's
+        // development and the city's actual network connections. No
+        // parallel city data: resolved live from the network slice.
+        const network = context.state.cityAreas.network;
+        const core = network.areas[`area_${city.id}_core`];
+        if (core !== undefined) addRow('Development', `${Math.round(core.development * 100)}%`);
+        const connections = cityConnectionsOf(network);
+        addChips(
+          'Connections',
+          connectionsOfCity(connections, city.id).map((connection) => {
+            const otherId = connectionOtherCity(connection, city.id);
+            const other = model.cities[otherId];
+            return `${other?.name ?? otherId} (${connectionLengthKm(connection)} km)`;
+          })
+        );
         addChips('Resources', [...city.resourceIds]);
         addRow(
           'Infrastructure',
@@ -362,6 +379,40 @@ export class MapUI {
             `Airport ${yesNo(city.infrastructure.airportId !== null)} · Port ${yesNo(city.infrastructure.portId !== null)}`
         );
         addRow('Strategic Value', String(city.strategicValue));
+      }
+    }
+
+    // —— CITY CONNECTION (City Areas network route) ——
+    if (featureVisible === false && map.selectedCityConnectionId !== null) {
+      const connections: readonly CityConnection[] = cityConnectionsOf(context.state.cityAreas.network);
+      const connection = connections.find((entry) => entry.id === map.selectedCityConnectionId);
+      if (connection !== undefined) {
+        featureVisible = true;
+        const nameA = model.cities[connection.cityA]?.name ?? connection.cityA;
+        const nameB = model.cities[connection.cityB]?.name ?? connection.cityB;
+        this.featureTitle?.setText(`CITY CONNECTION — ${nameA} → ${nameB}`);
+        addRow('From', nameA);
+        addRow('To', nameB);
+        addRow('Provinces',
+          connection.provinceA === connection.provinceB
+            ? (model.provinces[connection.provinceA]?.name ?? connection.provinceA)
+            : `${model.provinces[connection.provinceA]?.name ?? connection.provinceA} ↔ ${model.provinces[connection.provinceB]?.name ?? connection.provinceB}`
+        );
+        addRow('Distance', `${connectionLengthKm(connection).toLocaleString('en-US')} km`);
+        addRow('Type', connection.kind === 'railway' ? 'Railway' : 'Road');
+        addRow('Scope', connection.crossProvince ? 'Inter-province' : 'Intra-province');
+        // Link condition = the network's live maintenance state (0..1).
+        const conditions = connection.linkIds
+          .map((linkId) => context.state.cityAreas.network.links[linkId]?.condition)
+          .filter((value): value is number => value !== undefined);
+        const condition = conditions.length > 0
+          ? conditions.reduce((sum, value) => sum + value, 0) / conditions.length
+          : 0;
+        addRow(
+          'Infrastructure',
+          condition >= 0.75 ? 'Developed' : condition >= 0.5 ? 'Good' : condition >= 0.25 ? 'Worn' : 'Poor'
+        );
+        addRow('Waypoints', String(connection.path.length));
       }
     }
 
@@ -572,7 +623,7 @@ export class MapUI {
       // ONE central summary for EVERY selection kind — the same state (and
       // the same resolver) the feature detail block uses, so the panels can
       // never contradict each other.
-      Selection: selectionSummary(state, model)
+      Selection: selectionSummary(state, model, cityConnectionsOf(context.state.cityAreas.network))
     };
     for (const row of this.infoRows) {
       row.value.setText(values[row.label] ?? '');

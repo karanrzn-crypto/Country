@@ -2,7 +2,7 @@ import type { IdGeneratorState } from '../core/IdGenerator';
 import type { GameState } from '../state/GameState';
 
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */
@@ -15,6 +15,8 @@ export const SAVE_VERSION_MINUTE_TICKS = 5;
 export const SAVE_VERSION_FEATURE_SELECTION = 6;
 /** Version that introduced government + city areas + macro economy (Phase 2). */
 export const SAVE_VERSION_PHASE2_GOVERNMENT = 7;
+/** Version that introduced the city-network connection selection (City Areas view). */
+export const SAVE_VERSION_CITY_CONNECTION = 8;
 
 export interface SaveMeta {
   readonly version: number;
