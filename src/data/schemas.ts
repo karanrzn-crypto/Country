@@ -73,7 +73,6 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       allowUnknown: false,
       fields: {
         productionScale: positiveNumber,
-        exportShare: { type: 'number', min: 0, max: 1 },
         importMarkup: positiveNumber,
         priceTiers: {
           type: 'object',

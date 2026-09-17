@@ -361,6 +361,61 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 11,
+    to: 12,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v11→v12: save payload is not an object');
+      }
+      // The GLOBAL trade network (world-level matching) replaced the player
+      // policy system: import/export policies + the pinned supplier are gone
+      // (trade resolves automatically for EVERY country), `suppliers` became
+      // a per-seller AMOUNT record (resourceId → sellerId → units), and the
+      // world market reports its `unfilledShortage`. The session heal
+      // recomputes all flows from the live map right after load.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: { resources?: Record<string, Record<string, unknown>> } };
+      };
+      const resources = clone.state?.economy?.resources;
+      if (resources !== undefined) {
+        for (const record of Object.values(resources)) {
+          if (record === undefined || typeof record !== 'object') continue;
+          delete record['importPolicy'];
+          delete record['exportPolicy'];
+          delete record['preferredSuppliers'];
+          const suppliers = record['suppliers'];
+          const converted: Record<string, Record<string, number>> = {};
+          if (suppliers !== undefined && suppliers !== null && typeof suppliers === 'object') {
+            for (const [resourceId, value] of Object.entries(suppliers as Record<string, unknown>)) {
+              if (Array.isArray(value)) {
+                // v11 list form: seller ids without stored amounts — the
+                // amounts are re-derived by the post-load recompute.
+                const bySeller: Record<string, number> = {};
+                for (const sellerId of value) {
+                  if (typeof sellerId === 'string') bySeller[sellerId] = 0;
+                }
+                if (Object.keys(bySeller).length > 0) converted[resourceId] = bySeller;
+              } else if (value !== null && typeof value === 'object') {
+                // Already the v12 record form — keep it (amounts ≥ 0).
+                const bySeller: Record<string, number> = {};
+                for (const [sellerId, amount] of Object.entries(value as Record<string, unknown>)) {
+                  if (typeof amount === 'number' && Number.isFinite(amount) && amount >= 0) {
+                    bySeller[sellerId] = amount;
+                  }
+                }
+                if (Object.keys(bySeller).length > 0) converted[resourceId] = bySeller;
+              }
+              // null / anything else → no entry (no active import flow).
+            }
+          }
+          record['suppliers'] = converted;
+          if (record['unfilledShortage'] === undefined) record['unfilledShortage'] = {};
+        }
+      }
+      return clone;
+    }
   }
 ];
 

@@ -131,14 +131,6 @@ export class UIManager implements PhaseSystem {
         if (countryId === context.state.player.countryId) {
           this.notify('info', 'کارزار انتخاباتی', 'مهلت کارزار انتخاباتی گشوده شد.');
         }
-      }),
-      // Strategic resource trade: policy toggles land back as refresh events.
-      this.events.on('economy.resourceTradeChanged', ({ countryId, active, kind }) => {
-        if (countryId === context.state.player.countryId && active) {
-          const label = kind === 'import' ? 'واردات' : 'صادرات';
-          this.notify('info', 'تجارت منابع', `${label} فعال شد.`);
-        }
-        this.dashboard.refresh();
       })
     );
     // Country-selection flow (Part 3): the core drives the phase via events;

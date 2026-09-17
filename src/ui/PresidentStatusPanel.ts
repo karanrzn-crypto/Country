@@ -146,9 +146,6 @@ export class PresidentStatusPanel {
       events.on('sim.economyTreasuryChanged', ({ factionId }) => {
         if (factionId === context.state.player.countryId) this.refresh();
       }),
-      events.on('economy.resourceTradeChanged', ({ countryId }) => {
-        if (countryId === context.state.player.countryId) this.refresh();
-      }),
       events.on('combat.engagementStarted', () => this.refresh())
     );
     this.refresh();

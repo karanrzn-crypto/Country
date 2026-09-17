@@ -18,9 +18,12 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v7 → v8: city-network connection selection field (City Areas view)
  * - v8 → v9: region-selection mode field (province/country land-click pick)
  * - v9 → v10: strategic resource economy (economy.resources record)
+ * - v10 → v11: Urban+Roads layer merge; supplier lists
+ * - v11 → v12: GLOBAL trade network — policies/pins removed, supplier
+ *   amounts, unfilledShortage
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v10)', () => {
+describe('save migrations (v1 → … → v12)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -194,18 +197,20 @@ describe('save migrations (v1 → … → v10)', () => {
     expect((economy.macro as Record<string, unknown>).country_0).toEqual({ gdp: 1 });
   });
 
-  it('pre-v11 saves without layers/suppliers keep their resources record untouched', () => {
+  it('pre-v11 saves without layers/suppliers gain the v12 trade record shape', () => {
     const v10 = {
       state: { economy: { resources: { country_0: { production: { oil: 4 } } } } },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(11);
+    expect(version).toBe(12);
     const economy = (data as typeof v10).state.economy as Record<string, unknown>;
-    expect(economy.resources).toEqual({ country_0: { production: { oil: 4 } } });
+    expect(economy.resources).toEqual({
+      country_0: { production: { oil: 4 }, suppliers: {}, unfilledShortage: {} }
+    });
   });
 
-  it('v10→v11: layers merge into urbanRoads and single suppliers become lists', () => {
+  it('v10→v11: layers merge into urbanRoads; single suppliers become lists (then amounts)', () => {
     const v10 = {
       state: {
         map: { layerVisibility: { cityAreas: true, roads: false, railways: true } },
@@ -221,7 +226,7 @@ describe('save migrations (v1 → … → v10)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(11);
+    expect(version).toBe(12);
     const migrated = data as typeof v10;
     // Visibility: the merged toggle carries the AND of the two old flags
     // (an explicit hide wins); the old keys are gone.
@@ -230,12 +235,49 @@ describe('save migrations (v1 → … → v10)', () => {
     expect('cityAreas' in visibility).toBe(false);
     expect('roads' in visibility).toBe(false);
     expect(visibility.railways).toBe(true);
-    // Suppliers: string → [string], null → dropped, arrays pass through.
+    // Suppliers: string → [string] → { seller: amount }; null → dropped.
     const suppliers = (migrated.state.economy!.resources as Record<string, any>).country_0
       .suppliers as Record<string, unknown>;
-    expect(suppliers.oil).toEqual(['country_2']);
+    expect(suppliers.oil).toEqual({ country_2: 0 });
     expect('wood' in suppliers).toBe(false);
-    expect(suppliers.iron).toEqual(['country_1']);
+    expect(suppliers.iron).toEqual({ country_1: 0 });
+  });
+
+  it('v11→v12: policies and pins are stripped, suppliers become amounts, unfilled is added', () => {
+    const v11 = {
+      state: {
+        economy: {
+          resources: {
+            country_0: {
+              production: { oil: 4 },
+              consumption: { oil: 2 },
+              imports: { oil: 0 },
+              exports: { oil: 0 },
+              importPolicy: { oil: true },
+              exportPolicy: {},
+              suppliers: { oil: ['country_1', 'country_2'] },
+              preferredSuppliers: { oil: 'country_1' },
+              importCost: 5,
+              exportIncome: 0
+            }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v11, 11, SAVE_VERSION);
+    expect(version).toBe(12);
+    const record = (data as typeof v11).state.economy!.resources!.country_0 as Record<string, unknown>;
+    // The policy system is GONE (the world market decides for everyone).
+    expect('importPolicy' in record).toBe(false);
+    expect('exportPolicy' in record).toBe(false);
+    expect('preferredSuppliers' in record).toBe(false);
+    // Suppliers became per-seller amounts (amounts re-derived on load heal).
+    expect(record.suppliers).toEqual({ oil: { country_1: 0, country_2: 0 } });
+    expect(record.unfilledShortage).toEqual({});
+    // Money and flows pass through untouched.
+    expect(record.importCost).toBe(5);
+    expect(record.production).toEqual({ oil: 4 });
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

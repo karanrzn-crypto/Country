@@ -44,7 +44,6 @@
   },
   "strategicResources": {
     "productionScale": 1.2,
-    "exportShare": 0.5,
     "importMarkup": 1.25,
     "priceTiers": {
       "supply": { "low": 0.85, "medium": 1.0, "high": 1.25 },

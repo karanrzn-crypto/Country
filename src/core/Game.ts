@@ -62,7 +62,6 @@ import { absoluteMonthIndex } from '../time/Calendar';
 import { setTaxRate, setSpendingShare, setEconomicSpendingShare, setMinistryFunding } from '../state/slices/governmentSlice';
 import { decisionBlockReason, enactDecision } from '../government/DecisionEngine';
 import { resolvePendingEvent } from '../government/EventEngine';
-import { recomputeResourceEconomies } from '../economy/resources';
 import { registerDebugCommandHandlers } from '../debug/DebugCommands';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import type { IGameRenderer } from './RendererAdapter';
@@ -1066,68 +1065,6 @@ export class Game {
       this.events.emit('government.eventResolved', { countryId, instanceId, choiceId });
     }
     return resolved;
-  }
-
-  /**
-   * Trade policy toggles of the strategic resource economy (ONE mutation
-   * path per policy). The two policies are mutually exclusive per resource
-   * (a country cannot import and export the same resource at once) —
-   * enabling one clears the other. The whole resource economy recomputes
-   * from live data so imports/exports/costs update immediately.
-   */
-  economySetImportPolicy(countryId: string, resourceId: string, active: boolean): void {
-    this.assertInitialized();
-    const record = this.state.economy.resources[countryId];
-    if (record === undefined || !this.isKnownStrategicResource(resourceId)) {
-      this.log.warn(`economySetImportPolicy: unknown country/resource "${countryId}/${resourceId}"`);
-      return;
-    }
-    record.importPolicy[resourceId] = active;
-    if (active) record.exportPolicy[resourceId] = false;
-    recomputeResourceEconomies(this.state, this.mapModel, this.data.economyData.strategicResources);
-    this.events.emit('economy.resourceTradeChanged', { countryId, resourceId, kind: 'import', active });
-  }
-
-  economySetExportPolicy(countryId: string, resourceId: string, active: boolean): void {
-    this.assertInitialized();
-    const record = this.state.economy.resources[countryId];
-    if (record === undefined || !this.isKnownStrategicResource(resourceId)) {
-      this.log.warn(`economySetExportPolicy: unknown country/resource "${countryId}/${resourceId}"`);
-      return;
-    }
-    record.exportPolicy[resourceId] = active;
-    if (active) record.importPolicy[resourceId] = false;
-    recomputeResourceEconomies(this.state, this.mapModel, this.data.economyData.strategicResources);
-    this.events.emit('economy.resourceTradeChanged', { countryId, resourceId, kind: 'export', active });
-  }
-
-  /**
-   * Pins (or unpins, supplierId null → automatic market choice) the country
-   * the player buys THIS resource from. The pin is honored only while the
-   * chosen seller has spare surplus; otherwise the market falls back to the
-   * largest seller. Recomputes so suppliers/costs update immediately.
-   */
-  economySetSupplier(countryId: string, resourceId: string, supplierId: string | null): void {
-    this.assertInitialized();
-    const record = this.state.economy.resources[countryId];
-    if (record === undefined || !this.isKnownStrategicResource(resourceId)) {
-      this.log.warn(`economySetSupplier: unknown country/resource "${countryId}/${resourceId}"`);
-      return;
-    }
-    if (supplierId !== null) {
-      if (supplierId === countryId || this.state.economy.resources[supplierId] === undefined) {
-        this.log.warn(`economySetSupplier: invalid supplier "${supplierId}" for "${countryId}/${resourceId}"`);
-        return;
-      }
-    }
-    record.preferredSuppliers ??= {}; // old-save records healed on first write
-    record.preferredSuppliers[resourceId] = supplierId;
-    recomputeResourceEconomies(this.state, this.mapModel, this.data.economyData.strategicResources);
-    this.events.emit('economy.supplierChanged', { countryId, resourceId, supplierId });
-  }
-
-  private isKnownStrategicResource(resourceId: string): boolean {
-    return this.data.economyData.strategicResources.resources.some((resource) => resource.id === resourceId);
   }
 
   private emitSelectionChanged(): void {

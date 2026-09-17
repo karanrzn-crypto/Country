@@ -98,8 +98,6 @@ export interface DomesticBaselineConfig {
 export interface StrategicResourcesConfig {
   /** Deposit quantity (1..100) → monthly production multiplier. */
   readonly productionScale: number;
-  /** Fraction of the surplus offered on the market when exporting. */
-  readonly exportShare: number;
   /** Import price multiplier over the base price (transport premium). */
   readonly importMarkup: number;
   /** Tier pricing factors (supply side + demand side). */

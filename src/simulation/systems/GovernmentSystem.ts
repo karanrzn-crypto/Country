@@ -4,6 +4,9 @@
  * ONE system owns the month cadence for every strategic country and
  * sequences the pure domain engines in a fixed, deterministic order:
  *
+ *   0. global trade (ONE world-market pass per month, BEFORE any ledger:
+ *      every country's production/consumption → global supply & demand →
+ *      exporter↔importer matching → trade transactions)
  *   1. economy      (EconomySimulation.processMonthEconomy)
  *   2. public opinion (updateOpinionTopics → approval drift)
  *   3. decisions    (modifier expiry / cooldowns age with months)
@@ -24,6 +27,7 @@ import type { Random } from '../../utils/Random';
 import type { TickInfo } from '../../time/TimeSystem';
 import type { SimulationSystemDef } from '../SimulationEngine';
 import { absoluteMonthIndex } from '../../time/Calendar';
+import { recomputeResourceEconomies } from '../../economy/resources';
 import { processMonthEconomy } from '../../economy/EconomySimulation';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
 import { expireOverdueEvents, firePendingEvent, newEventInstanceId, rollEvents } from '../../government/EventEngine';
@@ -44,10 +48,30 @@ export class GovernmentSystem implements SimulationSystemDef {
   tick(context: SystemContext, _tick: TickInfo): void {
     const currentMonth = absoluteMonthIndex(context.time.date, context.time.startDate);
     const { state } = context;
+    const countryIds = Object.keys(state.government.countries);
 
-    for (const countryId of Object.keys(state.government.countries)) {
-      const government = state.government.countries[countryId];
-      while (government.lastSimMonth < currentMonth) {
+    // Month-LOCKSTEP catch-up: every due country lives through month M
+    // before anyone starts M+1. This is what lets the GLOBAL trade network
+    // run exactly ONCE per month (spec §13: a monthly economic cadence, not
+    // a per-frame or per-country recomputation):
+    //
+    //   world trade pass (all countries → global supply/demand → trades)
+    //     ↓
+    //   every due country's ledger bills its OWN flows for that month.
+    for (;;) {
+      const due = countryIds.filter(
+        (countryId) => state.government.countries[countryId].lastSimMonth < currentMonth
+      );
+      if (due.length === 0) break;
+      if (context.map !== undefined) {
+        recomputeResourceEconomies(
+          state,
+          context.map,
+          context.data.economyData.strategicResources
+        );
+      }
+      for (const countryId of due) {
+        const government = state.government.countries[countryId];
         government.lastSimMonth += 1;
         this.processMonth(context, countryId, government, government.lastSimMonth);
       }
@@ -64,9 +88,9 @@ export class GovernmentSystem implements SimulationSystemDef {
     const { state, events, rng, ids, data } = context;
 
     // —— 1. economy (treasury, GDP, sectors, debt, inflation, jobs) ——
-    // The map model + resource config drive the strategic resource economy
-    // (production from city deposits → consumption → world market → ledger).
-    processMonthEconomy(state, countryId, rng, context.map, data.economyData.strategicResources);
+    // Bills the country's trade flows resolved by THIS month's world pass
+    // (the global trade network ran once, above, before any ledger).
+    processMonthEconomy(state, countryId, rng);
 
     // —— 2. public opinion → presidential approval ——
     updateOpinionTopics(state, countryId);

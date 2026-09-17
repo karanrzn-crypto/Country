@@ -358,10 +358,8 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               consumption: { type: 'record', values: { type: 'number' } },
               imports: { type: 'record', values: { type: 'number', min: 0 } },
               exports: { type: 'record', values: { type: 'number', min: 0 } },
-              importPolicy: { type: 'record', values: { type: 'boolean' } },
-              exportPolicy: { type: 'record', values: { type: 'boolean' } },
-              suppliers: { type: 'record', values: { type: 'array', items: { type: 'string' } } },
-              preferredSuppliers: { type: 'record', values: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] } },
+              suppliers: { type: 'record', values: { type: 'record', values: { type: 'number', min: 0 } } },
+              unfilledShortage: { type: 'record', values: { type: 'number', min: 0 } },
               importCost: { type: 'number', min: 0 },
               exportIncome: { type: 'number', min: 0 }
             }

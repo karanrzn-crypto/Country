@@ -16,49 +16,42 @@ export type ResourceStatus = 'surplus' | 'balanced' | 'shortage' | 'imported' | 
 
 /** Per-country resource economy record — fully JSON-safe (save-friendly). */
 export interface CountryResourceState {
-  /** Monthly production per resource id (Σ attributed city deposits). */
+  /** Monthly production per resource id (deposits + geography baseline). */
   production: Record<string, number>;
   /** Monthly consumption per resource id (population/sectors/military). */
   consumption: Record<string, number>;
-  /** Active monthly imports per resource id (after world-market capping). */
+  /** Monthly imports per resource id (ACTUALLY bought on the world market). */
   imports: Record<string, number>;
-  /** Active monthly exports per resource id (surplus × exportShare). */
+  /** Monthly exports per resource id (ACTUALLY sold to buyers). */
   exports: Record<string, number>;
-  /** Player policies — import/export toggles (mutually exclusive per resource). */
-  importPolicy: Record<string, boolean>;
-  exportPolicy: Record<string, boolean>;
   /**
-   * resourceId → the countries that actually SUPPLY this import, in purchase
-   * order (the market fills the deficit from several sellers when no single
-   * one covers it — spec: a seller existing means the normal consumption is
-   * fully covered). Empty array = no active import flow.
+   * The REAL trade partners of the world market: resourceId → sellerId →
+   * monthly units bought from that seller. Empty inner records = no active
+   * import flow. The same flows, read from the sellers' side, reconstruct
+   * the exports (every unit sold appears on exactly one buyer's record).
    */
-  suppliers: Record<string, string[]>;
+  suppliers: Record<string, Record<string, number>>;
   /**
-   * resourceId → the supplier country the PLAYER pinned for imports
-   * (null/absent = automatic market choice). Preserved across recomputes.
+   * resourceId → units still missing after the world market cleared (the
+   * GLOBAL supply could not cover the GLOBAL demand — spec §7's Unfilled
+   * Shortage). Zero/absent = the market (or domestic production) covered it.
    */
-  preferredSuppliers: Record<string, string | null>;
+  unfilledShortage: Record<string, number>;
   /** Last computed monthly import cost (M$) — enters the ledger as spending. */
   importCost: number;
   /** Last computed monthly export income (M$) — enters the ledger as revenue. */
   exportIncome: number;
 }
 
-/** Empty record with the given policies preserved (defaults off). */
-export function emptyCountryResourceState(
-  importPolicy: Record<string, boolean> = {},
-  exportPolicy: Record<string, boolean> = {}
-): CountryResourceState {
+/** Empty record (trade is resolved by the world market, not by policies). */
+export function emptyCountryResourceState(): CountryResourceState {
   return {
     production: {},
     consumption: {},
     imports: {},
     exports: {},
-    importPolicy: { ...importPolicy },
-    exportPolicy: { ...exportPolicy },
     suppliers: {},
-    preferredSuppliers: {},
+    unfilledShortage: {},
     importCost: 0,
     exportIncome: 0
   };

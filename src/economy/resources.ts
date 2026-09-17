@@ -11,18 +11,20 @@
  *     ↓
  *   Resource Consumption  (population × sectors × military — from live state)
  *     ↓
- *   Balance               (production + imports − consumption − exports)
+ *   Balance               (production − consumption; trade never distorts it)
  *     ↓
  *   Shortage / Surplus    (derived status — never stored by hand)
  *     ↓
- *   Import / Export       (player policies, world-market resolution)
+ *   Global Trade Network  (any surplus country ↔ any shortage country)
  *
- * recomputeResourceEconomies is the ONE mutation path: it recomputes every
- * country's records from the LIVE map model + game state, resolves world
- * trade deterministically and writes state.economy.resources. It runs at
- * state creation, after every load (heal), once per campaign month (inside
- * processMonthEconomy) and after every trade-policy command — so losing a
- * city, growing industry or toggling a policy is reflected immediately.
+ * recomputeResourceEconomies is the ONE mutation path of the GLOBAL trade
+ * network: it recomputes every country's production/consumption from the
+ * LIVE map model + game state, resolves the world market for ALL countries
+ * at once (any surplus country can serve any shortage country — the player
+ * is not the hub) and writes state.economy.resources. It runs at state
+ * creation, after every load (heal) and ONCE per campaign month (from the
+ * GovernmentSystem, before the country ledgers) — so losing a city or
+ * growing industry is reflected at the next month boundary.
  *
  * LEAF-friendly: depends only on state/map TYPES + utils. No renderer, no UI.
  */
@@ -33,16 +35,11 @@ import type { StrategicResourcesConfig } from './types';
 import { liveUnits } from '../state/slices/militarySlice';
 import { roundTo } from '../utils/math';
 import {
-  emptyCountryResourceState,
   type CountryResourceState,
   type ResourceStatus
 } from './resourceTypes';
 import { countryBaselineProduction } from './domesticBaseline';
-import {
-  demandFactorFromNeeds,
-  tiersFromSpares,
-  type TradeTier
-} from './market';
+import { resolveWorldTradeForResource } from './tradeNetwork';
 
 // Record shapes live in the LEAF types module (state imports them without
 // reaching this logic — keeps GameState → economySlice → resourceTypes
@@ -278,24 +275,23 @@ export function resourceDisplayStatusOf(
 }
 
 /**
- * THE single recompute path for the whole strategic resource economy.
- * Recomputes production/consumption for every strategic country from the
- * live map + state (production = attributed city deposits + the GEOGRAPHY
- * baseline — spec §3) and resolves the world market deterministically:
+ * THE single recompute path of the GLOBAL TRADE NETWORK.
  *
- *  - the PLAYER-pinned supplier is bought from FIRST (while it has spare);
- *  - the remaining deficit is filled from the other sellers, LARGEST spare
- *    first (tie → country id) — as many as needed;
- *  - a seller's pool DECREMENTS as the market buys, so supply is never
- *    sold twice;
- *  - if any seller exists, the FULL normal deficit is bought (spec §3:
- *    production 10 + import 20 − consumption 30 = 0). A shortage survives
- *    only when the whole market is exhausted.
+ * Pipeline (spec §11 — world level, NOT player-centric):
+ *   production (deposits + geography baseline) for EVERY country
+ *     → consumption (population/sectors/military) for EVERY country
+ *     → surplus/shortage per country and resource
+ *     → the world matcher connects exporters with importers (ANY two
+ *       countries with a real surplus and a real shortage — no policies,
+ *       no seller picking; a country never sells what it needs itself)
+ *     → trade transactions (imports = actually bought, exports = actually
+ *       sold — an unmatched surplus stays export POTENTIAL, never fake
+ *       income)
+ *     → unfilled shortage survives only when GLOBAL supply < GLOBAL demand.
  *
- * Policies and the preferred suppliers are PRESERVED across passes; import
- * cost bills each seller at ITS OWN price tier (cheap sellers hold more
- * surplus — spec §4/§7); export income uses the market's average DEMAND
- * tier (eager buyers pay more — spec §6/§7).
+ * Deterministic: largest surplus serves first, most urgent shortage buys
+ * first, ties → country id. Billing uses the GLOBAL market price tier
+ * (spec §10: abundant → cheap, scarce → expensive).
  */
 export function recomputeResourceEconomies(
   state: GameState,
@@ -333,120 +329,72 @@ export function recomputeResourceEconomies(
     });
   }
 
-  // —— pass 2: world market per resource (deterministic) ——
-  const priceOf = new Map<string, number>(config.resources.map((resource) => [resource.id, resource.price]));
-  const importsOf = new Map<string, Record<string, number>>();
-  const exportsOf = new Map<string, Record<string, number>>();
-  const suppliersOf = new Map<string, Record<string, string[]>>();
-  // Per-resource seller price tiers (from the CURRENT pass's spares) and the
-  // market's average willingness to pay — the ledger's tier pricing inputs.
-  const sellerTiersOf = new Map<string, Record<string, TradeTier>>();
-  const demandFactorOf = new Map<string, number>();
-  // buyerId → resourceId → per-seller purchased amounts (the tiered import
-  // billing source: each seller charges at its OWN supply tier).
-  const purchaseFlows = new Map<string, Record<string, { sellerId: string; amount: number }[]>>();
-  for (const resourceId of strategicResourceIds(config)) {
-    // Exports first: policy ON → offer the configured share of the surplus.
-    const exports: Record<string, number> = {};
-    const netSurplus: Record<string, number> = {};
-    const needs: Record<string, number> = {};
-    for (const countryId of order) {
-      const { production, consumption } = computed.get(countryId)!;
-      const surplus = Math.max(0, (production[resourceId] ?? 0) - (consumption[resourceId] ?? 0));
-      const policy = state.economy.resources[countryId]?.exportPolicy[resourceId] === true;
-      const offered = policy ? surplus * config.exportShare : 0;
-      exports[countryId] = Math.round(offered);
-      netSurplus[countryId] = Math.round(surplus - exports[countryId]); // offered units leave the market pool
-      const need = (consumption[resourceId] ?? 0) - (production[resourceId] ?? 0);
-      if (need > EPSILON) needs[countryId] = need;
-    }
-    // Tiers BEFORE any import buys: the surplus field the sellers really
-    // offer from (net of their own export commitments — spec §4's basis).
-    sellerTiersOf.set(resourceId, tiersFromSpares(netSurplus));
-    demandFactorOf.set(resourceId, demandFactorFromNeeds(needs, config.priceTiers.demand));
-    // Imports: the FULL deficit is bought whenever the market can cover it
-    // (spec §3). The seller pool DECREMENTS with every purchase (supply is
-    // never sold twice). Fill order: the PLAYER-pinned supplier first
-    // (preferredSuppliers), then the largest remaining spare (tie → id) —
-    // deterministic regardless of iteration order.
-    const available: Record<string, number> = { ...netSurplus };
-    const suppliers: Record<string, string[]> = {};
-    for (const countryId of order) {
-      const { production, consumption } = computed.get(countryId)!;
-      const deficit = Math.max(0, (consumption[resourceId] ?? 0) - (production[resourceId] ?? 0));
-      const policy = state.economy.resources[countryId]?.importPolicy[resourceId] === true;
-      suppliers[countryId] = [];
-      if (!policy || deficit <= EPSILON) continue;
-      const preferred = state.economy.resources[countryId]?.preferredSuppliers?.[resourceId] ?? null;
-      const candidates = order
-        .filter((otherId) => otherId !== countryId && (available[otherId] ?? 0) > EPSILON)
-        .sort((a, b) => {
-          const pinA = a === preferred ? 0 : 1;
-          const pinB = b === preferred ? 0 : 1;
-          if (pinA !== pinB) return pinA - pinB;
-          const spareA = available[a] ?? 0;
-          const spareB = available[b] ?? 0;
-          if (Math.abs(spareA - spareB) > EPSILON) return spareB - spareA;
-          return a < b ? -1 : 1;
-        });
-      let remaining = deficit;
-      const flows: { sellerId: string; amount: number }[] = [];
-      for (const sellerId of candidates) {
-        if (remaining <= EPSILON) break;
-        const spare = available[sellerId] ?? 0;
-        if (spare <= EPSILON) continue;
-        const bought = Math.min(spare, remaining);
-        available[sellerId] = Math.round(spare - bought);
-        remaining = Math.round(remaining - bought);
-        flows.push({ sellerId, amount: Math.round(bought) });
-      }
-      const boughtTotal = flows.reduce((sum, flow) => sum + flow.amount, 0);
-      importsOf.set(countryId, { ...(importsOf.get(countryId) ?? {}), [resourceId]: boughtTotal });
-      suppliers[countryId] = flows.map((flow) => flow.sellerId);
-      if (flows.length > 0) {
-        purchaseFlows.set(countryId, { ...(purchaseFlows.get(countryId) ?? {}), [resourceId]: flows });
-      }
-    }
-    for (const countryId of order) {
-      exportsOf.set(countryId, { ...(exportsOf.get(countryId) ?? {}), [resourceId]: exports[countryId] });
-      suppliersOf.set(countryId, { ...(suppliersOf.get(countryId) ?? {}), [resourceId]: suppliers[countryId] });
-    }
+  // —— pass 2: the GLOBAL trade market, resource by resource ——
+  // Production/consumption of ALL countries are already computed (pass 1);
+  // the matcher builds the global supply/demand and connects ANY surplus
+  // country with ANY shortage country (A→B, C→B, … — player or not).
+  const productionByCountry: Record<string, Record<string, number>> = {};
+  const consumptionByCountry: Record<string, Record<string, number>> = {};
+  for (const countryId of order) {
+    const record = computed.get(countryId)!;
+    productionByCountry[countryId] = record.production;
+    consumptionByCountry[countryId] = record.consumption;
   }
 
-  // —— pass 3: write records (policies + preferred suppliers preserved) ——
-  // Import cost bills EACH SELLER at its own price tier (cheap sellers
-  // charge less — spec §7); export income uses the market's average DEMAND
-  // tier (eager buyers pay more) — internal money only, never shown as $.
-  const records = new Map<string, CountryResourceState>();
-  for (const countryId of order) {
-    const previous = state.economy.resources[countryId] ?? emptyCountryResourceState();
-    records.set(countryId, previous);
+  const priceOf = new Map<string, number>(config.resources.map((resource) => [resource.id, resource.price]));
+  // Per-resource resolution results (flows + market tier) for the billing.
+  const resolved = new Map<string, ReturnType<typeof resolveWorldTradeForResource>>();
+  for (const resourceId of strategicResourceIds(config)) {
+    resolved.set(
+      resourceId,
+      resolveWorldTradeForResource(order, productionByCountry, consumptionByCountry, resourceId)
+    );
   }
+
+  // —— pass 3: write records — imports/exports are the ACTUAL trade flows ——
+  // Billing: buyers pay the market tier's supply factor over the base price
+  // (+ transport markup), sellers receive the tier's demand factor —
+  // internal money only, never shown as $ in the UI (spec §10).
   for (const countryId of order) {
-    const previous = records.get(countryId)!;
     const { production, consumption } = computed.get(countryId)!;
+    const imports: Record<string, number> = {};
+    const exports: Record<string, number> = {};
+    const suppliers: Record<string, Record<string, number>> = {};
+    const unfilledShortage: Record<string, number> = {};
     let importCost = 0;
     let exportIncome = 0;
     for (const resourceId of strategicResourceIds(config)) {
+      const result = resolved.get(resourceId)!;
       const price = priceOf.get(resourceId) ?? 0;
-      for (const flow of purchaseFlows.get(countryId)?.[resourceId] ?? []) {
-        const tier = sellerTiersOf.get(resourceId)?.[flow.sellerId] ?? 'medium';
-        importCost += flow.amount * price * config.importMarkup * config.priceTiers.supply[tier];
+      const tier = result.marketTier;
+      const bought = result.importsByBuyer[countryId] ?? 0;
+      const sold = result.exportsBySeller[countryId] ?? 0;
+      if (bought > 0) {
+        imports[resourceId] = bought;
+        importCost += bought * price * config.importMarkup * config.priceTiers.supply[tier];
       }
-      const exports = exportsOf.get(countryId)?.[resourceId] ?? 0;
-      if (exports > 0) {
-        exportIncome += exports * price * (demandFactorOf.get(resourceId) ?? 1);
+      if (sold > 0) {
+        exports[resourceId] = sold;
+        exportIncome += sold * price * config.priceTiers.demand[tier];
       }
+      const partnerFlows = result.flows.filter(
+        (flow) => flow.buyerId === countryId && flow.amount > 0
+      );
+      if (partnerFlows.length > 0) {
+        const bySeller: Record<string, number> = {};
+        for (const flow of partnerFlows) bySeller[flow.sellerId] = flow.amount;
+        suppliers[resourceId] = bySeller;
+      }
+      const unfilled = result.unfilledByBuyer[countryId] ?? 0;
+      if (unfilled > 0) unfilledShortage[resourceId] = unfilled;
     }
     state.economy.resources[countryId] = {
       production,
       consumption,
-      imports: importsOf.get(countryId) ?? {},
-      exports: exportsOf.get(countryId) ?? {},
-      importPolicy: { ...previous.importPolicy },
-      exportPolicy: { ...previous.exportPolicy },
-      suppliers: suppliersOf.get(countryId) ?? {},
-      preferredSuppliers: { ...(previous.preferredSuppliers ?? {}) },
+      imports,
+      exports,
+      suppliers,
+      unfilledShortage,
       importCost: roundTo(importCost, 2),
       exportIncome: roundTo(exportIncome, 2)
     };

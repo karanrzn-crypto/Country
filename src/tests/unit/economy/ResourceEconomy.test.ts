@@ -1,13 +1,16 @@
 /**
- * Strategic resource economy tests — the HoI4-inspired, city-driven economy.
+ * Strategic resource economy + GLOBAL TRADE NETWORK tests.
  *
- * Covers the directive's verification checklist:
- *  - production derived from CITY deposits (never hand-made numbers)
+ * Covers the directive's required checklist (Tests 1–7) against the LIVE
+ * game state, plus the standing invariants:
+ *  - production derived from CITY deposits (+ geography baseline)
  *  - country = Σ of its cities; losing a city loses its production
  *  - consumption emerges from population / sectors / military units
- *  - consumption ↑ → shortage; production ↑ → surplus
- *  - shortage → import action; surplus → export action
- *  - shortage resolved → import status gone; surplus gone → export gone
+ *  - trade resolves at WORLD level: any surplus country ↔ any shortage
+ *    country, even with NO player involvement
+ *  - import only for a REAL domestic shortage (never for self-produced
+ *    resources); exports are what was ACTUALLY sold (never fake offers)
+ *  - unfilled shortage only when the GLOBAL supply cannot cover demand
  *  - Roads ON/OFF — OFF hides, never deletes; ON restores everything
  */
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -26,11 +29,12 @@ import {
   attributeDeposits,
   emptyCountryResourceState
 } from '../../../economy/resources';
+import { resolveWorldTradeForResource } from '../../../economy/tradeNetwork';
+import { marketPriceTierOf } from '../../../economy/market';
 import { processMonthEconomy } from '../../../economy/EconomySimulation';
-import { sellerPriceTiersOf } from '../../../economy/market';
 import type { StrategicMapModel } from '../../../world/map/MapTypes';
 
-describe('strategic resource economy', () => {
+describe('strategic resource economy (global trade network)', () => {
   let game: Game;
   let context: SystemContext;
   let mapModel: StrategicMapModel;
@@ -43,6 +47,26 @@ describe('strategic resource economy', () => {
     config = context.data.economyData.strategicResources;
   });
 
+  /** Σ of the TRUE surplus (max(P−C, 0)) of a resource over the given countries. */
+  function globalSupplyOf(resourceId: string, countryIds: readonly string[]): number {
+    return countryIds.reduce((sum, countryId) => {
+      const record = context.state.economy.resources[countryId]!;
+      const balance =
+        (record.production[resourceId] ?? 0) - (record.consumption[resourceId] ?? 0);
+      return sum + Math.max(0, balance);
+    }, 0);
+  }
+
+  /** Σ of the TRUE shortage (max(C−P, 0)) of a resource over the given countries. */
+  function globalDemandOf(resourceId: string, countryIds: readonly string[]): number {
+    return countryIds.reduce((sum, countryId) => {
+      const record = context.state.economy.resources[countryId]!;
+      const balance =
+        (record.production[resourceId] ?? 0) - (record.consumption[resourceId] ?? 0);
+      return sum + Math.max(0, -balance);
+    }, 0);
+  }
+
   it('state creation computed a live resource record for every strategic country', () => {
     for (const countryId of mapModel.countryOrder) {
       const record = context.state.economy.resources[countryId];
@@ -50,9 +74,10 @@ describe('strategic resource economy', () => {
       // Production exists for SOME resource — every country has deposits/farms.
       const total = Object.values(record!.production).reduce((sum, value) => sum + value, 0);
       expect(total).toBeGreaterThan(0);
-      // Policies default off; no trade without them.
-      expect(record!.importCost).toBe(0);
-      expect(record!.exportIncome).toBe(0);
+      // Trade flows are internally consistent from the very first pass.
+      const importSum = Object.values(record!.imports).reduce((sum, value) => sum + value, 0);
+      expect(record!.importCost).toBeGreaterThanOrEqual(0);
+      expect(importSum).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -177,125 +202,219 @@ describe('strategic resource economy', () => {
     expect(resourceBalanceOf(make({ production: { oil: 50 }, consumption: { oil: 80 }, imports: { oil: 30 } }), 'oil')).toBe(0);
   });
 
-  it('shortage shows import, import covers the deficit, resolving it removes the status', () => {
-    // Find a country + resource that is genuinely short AND importable
-    // (some other country has spare surplus of that resource).
+  // ———————————— THE DIRECTIVE'S TESTS 1–7 (live world state) ————————————
+
+  it('Test 1 + 7: a country never imports a resource it produces enough of', () => {
     recomputeResourceEconomies(context.state, mapModel, config);
-    const spareOf = (resourceId: string, excludeCountryId: string): number =>
-      mapModel.countryOrder
-        .filter((otherId) => otherId !== excludeCountryId)
-        .reduce((sum, otherId) => {
-          const other = context.state.economy.resources[otherId]!;
-          return (
-            sum +
-            Math.max(
-              0,
-              (other.production[resourceId] ?? 0) - (other.consumption[resourceId] ?? 0)
-            )
-          );
-        }, 0);
-    let shortCountry: string | null = null;
-    let shortResource: string | null = null;
-    outer: for (const countryId of mapModel.countryOrder) {
+    let checked = 0;
+    for (const countryId of mapModel.countryOrder) {
       const record = context.state.economy.resources[countryId]!;
       for (const resource of config.resources) {
-        if (resourceStatusOf(record, resource.id) === 'shortage' && spareOf(resource.id, countryId) > 0) {
-          shortCountry = countryId;
-          shortResource = resource.id;
-          break outer;
+        const production = record.production[resource.id] ?? 0;
+        const consumption = record.consumption[resource.id] ?? 0;
+        if (production >= consumption) {
+          // Self-sufficient → NO imports, NO unfilled shortage, ever.
+          expect(record.imports[resource.id] ?? 0).toBe(0);
+          expect(record.unfilledShortage[resource.id] ?? 0).toBe(0);
+          expect(Object.keys(record.suppliers[resource.id] ?? {})).toEqual([]);
+          checked++;
         }
       }
     }
-    expect(shortCountry).not.toBeNull();
-    expect(shortResource).not.toBeNull();
-
-    const record = context.state.economy.resources[shortCountry!]!;
-    const deficit =
-      (record.consumption[shortResource!] ?? 0) - (record.production[shortResource!] ?? 0);
-    expect(deficit).toBeGreaterThan(0);
-
-    // Import ON via the command path (UI parity).
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: shortCountry!, resourceId: shortResource!, active: true });
-    game.commandBus.flush();
-    const importing = context.state.economy.resources[shortCountry!]!;
-    expect(importing.importPolicy[shortResource!]).toBe(true);
-    expect(importing.imports[shortResource!] ?? 0).toBeGreaterThan(0);
-    expect(importing.imports[shortResource!] ?? 0).toBeLessThanOrEqual(deficit + 1e-6);
-    expect(importing.importCost).toBeGreaterThan(0);
-    const statusAfter = resourceStatusOf(importing, shortResource!);
-    expect(['imported', 'shortage']).toContain(statusAfter); // covered → imported; partial → still short
-
-    // Import OFF again → the import status is gone.
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: shortCountry!, resourceId: shortResource!, active: false });
-    game.commandBus.flush();
-    const stopped = context.state.economy.resources[shortCountry!]!;
-    expect(stopped.imports[shortResource!] ?? 0).toBe(0);
-    expect(resourceStatusOf(stopped, shortResource!)).toBe('shortage');
+    expect(checked).toBeGreaterThan(0); // the invariant held on real countries
   });
 
-  it('surplus shows export, export caps automatically when the surplus vanishes', () => {
+  it('Test 2: shortage + seller ⇒ import = shortage, final shortage = 0', () => {
     recomputeResourceEconomies(context.state, mapModel, config);
-    let surplusCountry: string | null = null;
-    let surplusResource: string | null = null;
-    outer: for (const countryId of mapModel.countryOrder) {
+    const order = mapModel.countryOrder;
+    // When the GLOBAL supply covers the GLOBAL demand (spec §7), EVERY buyer
+    // must be filled completely. Find a resource whose market clears, then
+    // its LARGEST buyer (served first by the deterministic matcher).
+    let found = false;
+    for (const resource of config.resources) {
+      const supply = globalSupplyOf(resource.id, order);
+      const demand = globalDemandOf(resource.id, order);
+      if (demand <= 0 || supply < demand) continue;
+      let largestBuyer: string | null = null;
+      let largestShortage = 0;
+      for (const countryId of order) {
+        const record = context.state.economy.resources[countryId]!;
+        const shortage =
+          (record.consumption[resource.id] ?? 0) - (record.production[resource.id] ?? 0);
+        if (shortage > largestShortage) {
+          largestShortage = shortage;
+          largestBuyer = countryId;
+        }
+      }
+      expect(largestBuyer).not.toBeNull();
+      const record = context.state.economy.resources[largestBuyer!]!;
+      // THE exact math: import fills the WHOLE shortage (P + I − C = 0).
+      expect(record.imports[resource.id] ?? 0).toBe(largestShortage);
+      expect(resourceBalanceOf(record, resource.id)).toBeCloseTo(0, 2);
+      expect(resourceStatusOf(record, resource.id)).toBe('imported');
+      expect(resourceDisplayStatusOf(record, resource.id)).toBe('balanced');
+      expect(record.unfilledShortage[resource.id] ?? 0).toBe(0);
+      expect(Object.keys(record.suppliers[resource.id] ?? {}).length).toBeGreaterThan(0);
+      found = true;
+      break;
+    }
+    expect(found).toBe(true); // such a market exists on this map
+  });
+
+  it('Test 3: surplus ⇒ export potential > 0 (sold when the world buys)', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    let found = false;
+    for (const countryId of mapModel.countryOrder) {
       const record = context.state.economy.resources[countryId]!;
       for (const resource of config.resources) {
-        if (resourceStatusOf(record, resource.id) === 'surplus') {
-          surplusCountry = countryId;
-          surplusResource = resource.id;
-          break outer;
+        const surplus =
+          (record.production[resource.id] ?? 0) - (record.consumption[resource.id] ?? 0);
+        if (surplus <= 0) continue;
+        // Export POTENTIAL is the full true surplus; exports are only what
+        // was ACTUALLY bought by someone this month.
+        const sold = record.exports[resource.id] ?? 0;
+        expect(sold).toBeGreaterThanOrEqual(0);
+        expect(sold).toBeLessThanOrEqual(surplus);
+        if (sold > 0) {
+          expect(resourceStatusOf(record, resource.id)).toBe('exported');
+          expect(record.exportIncome).toBeGreaterThan(0);
+        }
+        found = true;
+        break;
+      }
+      if (found) break;
+    }
+    expect(found).toBe(true);
+    // And SOMEONE in the world actually sold something (the market trades).
+    const sellers = mapModel.countryOrder.filter((countryId) =>
+      Object.values(context.state.economy.resources[countryId]!.exports).some((amount) => amount > 0)
+    );
+    expect(sellers.length).toBeGreaterThan(0);
+  });
+
+  it('Test 4 + 5: countries trade with EACH OTHER even when one country sits out', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    // For EVERY candidate "inactive" country: does the REST of the world
+    // still trade among itself? At least one world must (Test 4's premise:
+    // the player not being in a trade never blocks the others).
+    let worldTradesWithoutSomeone = false;
+    for (const excludedId of mapModel.countryOrder) {
+      const others = mapModel.countryOrder.filter((id) => id !== excludedId);
+      let aiToAiFlows = 0;
+      for (const buyerId of others) {
+        const record = context.state.economy.resources[buyerId]!;
+        for (const sellers of Object.values(record.suppliers)) {
+          for (const [sellerId, amount] of Object.entries(sellers)) {
+            if (sellerId !== excludedId && sellerId !== buyerId && amount > 0) aiToAiFlows++;
+          }
         }
       }
+      if (aiToAiFlows > 0) {
+        worldTradesWithoutSomeone = true;
+        break;
+      }
     }
-    expect(surplusCountry).not.toBeNull();
-
-    game.commandBus.send({ type: 'economy.setExportPolicy', countryId: surplusCountry!, resourceId: surplusResource!, active: true });
-    game.commandBus.flush();
-    const exporting = context.state.economy.resources[surplusCountry!]!;
-    const surplus =
-      (exporting.production[surplusResource!] ?? 0) - (exporting.consumption[surplusResource!] ?? 0);
-    expect(exporting.exports[surplusResource!] ?? 0).toBeCloseTo(surplus * config.exportShare, 6);
-    expect(exporting.exportIncome).toBeGreaterThan(0);
-    expect(resourceStatusOf(exporting, surplusResource!)).toBe('exported');
-
-    // Consumption explodes → surplus gone → exports auto-stop, status gone.
-    const macro = context.state.economy.macro[surplusCountry!];
-    const resource = surplusResource!;
-    const driver = config.consumption[resource];
-    if (driver?.perBillionOutput !== undefined) {
-      const sectorId = Object.keys(driver.perBillionOutput)[0];
-      const sector = macro.sectors[sectorId as keyof typeof macro.sectors];
-      if (sector !== undefined) {
-        const original = sector.output;
-        sector.output = original * 1000;
-        recomputeResourceEconomies(context.state, mapModel, config);
-        const collapsed = context.state.economy.resources[surplusCountry!]!;
-        const collapsedSurplus =
-          (collapsed.production[resource] ?? 0) - (collapsed.consumption[resource] ?? 0);
-        if (collapsedSurplus <= 0) {
-          expect(collapsed.exports[resource] ?? 0).toBe(0);
-          expect(['balanced', 'shortage']).toContain(resourceStatusOf(collapsed, resource));
+    expect(worldTradesWithoutSomeone).toBe(true); // the world does NOT revolve around one country
+    // Whatever country the player IS, it participates only where its own
+    // economy requires it (Test 7's invariant holds world-wide — Test 1).
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        const shortage =
+          (record.consumption[resource.id] ?? 0) - (record.production[resource.id] ?? 0);
+        if (shortage <= 0) {
+          expect(record.imports[resource.id] ?? 0).toBe(0);
+        } else {
+          expect(record.imports[resource.id] ?? 0).toBeLessThanOrEqual(shortage);
         }
-        sector.output = original;
-        recomputeResourceEconomies(context.state, mapModel, config);
       }
     }
   });
 
-  it('import and export policies are mutually exclusive per resource', () => {
+  it('Test 6: global supply < global demand ⇒ honest unfilled shortages remain', () => {
+    const order = mapModel.countryOrder;
+    const resourceId = 'iron';
+    // Drive ONE country's consumption to Dwarf the whole world supply —
+    // the market cannot cover everyone, so the remainder stays unfilled.
+    const victimId = order[0];
+    const victimMacro = context.state.economy.macro[victimId];
+    const originalIndustry = victimMacro.sectors.industry.output;
+    victimMacro.sectors.industry.output = originalIndustry * 100_000;
     recomputeResourceEconomies(context.state, mapModel, config);
-    const countryId = mapModel.countryOrder[0];
-    const resourceId = config.resources[0].id;
-    game.commandBus.send({ type: 'economy.setExportPolicy', countryId, resourceId, active: true });
-    game.commandBus.flush();
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId, resourceId, active: true });
-    game.commandBus.flush();
-    const record = context.state.economy.resources[countryId]!;
-    expect(record.importPolicy[resourceId]).toBe(true);
-    expect(record.exportPolicy[resourceId]).toBe(false); // cleared by the import toggle
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId, resourceId, active: false });
-    game.commandBus.send({ type: 'economy.setExportPolicy', countryId, resourceId, active: false });
-    game.commandBus.flush();
+
+    const supply = globalSupplyOf(resourceId, order);
+    const demand = globalDemandOf(resourceId, order);
+    expect(demand).toBeGreaterThan(supply);
+    // Every buyer's imports are capped by the market; the shortage left
+    // open is exactly C − P − I, and Σ(unfilled) = global demand − supply.
+    let unfilledTotal = 0;
+    for (const countryId of order) {
+      const record = context.state.economy.resources[countryId]!;
+      const consumption = record.consumption[resourceId] ?? 0;
+      const production = record.production[resourceId] ?? 0;
+      const imports = record.imports[resourceId] ?? 0;
+      const unfilled = record.unfilledShortage[resourceId] ?? 0;
+      const trueShortage = Math.max(0, consumption - production);
+      if (trueShortage > 0) {
+        expect(imports).toBeLessThanOrEqual(trueShortage);
+        expect(unfilled).toBe(Math.max(0, trueShortage - imports));
+      } else {
+        expect(unfilled).toBe(0);
+      }
+      unfilledTotal += unfilled;
+    }
+    expect(unfilledTotal).toBeCloseTo(demand - supply, 6);
+    expect(unfilledTotal).toBeGreaterThan(0);
+
+    // Restore the world and leave a clean state for the following tests.
+    victimMacro.sectors.industry.output = originalIndustry;
+    recomputeResourceEconomies(context.state, mapModel, config);
+  });
+
+  it('exports are ACTUAL flows: every sold unit appears on exactly one buyer', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    for (const resource of config.resources) {
+      const resourceId = resource.id;
+      let soldTotal = 0;
+      let boughtTotal = 0;
+      for (const countryId of mapModel.countryOrder) {
+        const record = context.state.economy.resources[countryId]!;
+        soldTotal += record.exports[resourceId] ?? 0;
+        boughtTotal += record.imports[resourceId] ?? 0;
+        // The supplier amounts sum EXACTLY to the recorded imports.
+        const supplierSum = Object.values(record.suppliers[resourceId] ?? {}).reduce(
+          (sum, amount) => sum + amount,
+          0
+        );
+        expect(supplierSum).toBe(record.imports[resourceId] ?? 0);
+      }
+      expect(boughtTotal).toBe(soldTotal); // conservation: every unit lands somewhere
+    }
+  });
+
+  it('billing uses the GLOBAL market tier (import unit cost = price × markup × tier factor)', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    const order = mapModel.countryOrder;
+    for (const countryId of order) {
+      const record = context.state.economy.resources[countryId]!;
+      if (record.importCost === 0 && record.exportIncome === 0) continue;
+      let expectedImportCost = 0;
+      let expectedExportIncome = 0;
+      for (const resource of config.resources) {
+        const bought = record.imports[resource.id] ?? 0;
+        const sold = record.exports[resource.id] ?? 0;
+        if (bought === 0 && sold === 0) continue;
+        const tier = marketPriceTierOf(context.state.economy.resources, order, resource.id);
+        if (bought > 0) {
+          expectedImportCost += bought * resource.price * config.importMarkup * config.priceTiers.supply[tier];
+        }
+        if (sold > 0) {
+          expectedExportIncome += sold * resource.price * config.priceTiers.demand[tier];
+        }
+      }
+      expect(record.importCost).toBeCloseTo(expectedImportCost, 1);
+      expect(record.exportIncome).toBeCloseTo(expectedExportIncome, 1);
+    }
   });
 
   it('recompute is deterministic and JSON-safe', () => {
@@ -305,22 +424,35 @@ describe('strategic resource economy', () => {
     expect(JSON.stringify(context.state.economy.resources)).toBe(first);
   });
 
-  it('resource trade money enters the monthly ledger (import cost → spending)', () => {
+  it('resource trade money enters the monthly ledger (the world pass bills the flows)', () => {
     const countryId = mapModel.countryOrder[0];
     recomputeResourceEconomies(context.state, mapModel, config);
-    const before = processMonthEconomy(context.state, countryId, context.rng, mapModel, config);
-    // Enable importing of EVERY short resource for this country.
     const record = context.state.economy.resources[countryId]!;
-    for (const resource of config.resources) {
-      if (resourceStatusOf(record, resource.id) === 'shortage') {
-        record.importPolicy[resource.id] = true;
-      }
-    }
-    recomputeResourceEconomies(context.state, mapModel, config);
-    const after = processMonthEconomy(context.state, countryId, context.rng, mapModel, config);
-    const importCost = context.state.economy.resources[countryId]!.importCost;
+    const importCost = record.importCost;
+    const exportIncome = record.exportIncome;
+
+    // Clone the state and zero the trade billing there — the DELTA between
+    // the two ledger runs is EXACTLY the trade money.
+    const withTrade = context.state;
+    const withoutTrade = JSON.parse(JSON.stringify(context.state)) as typeof withTrade;
+    const bareRecord = withoutTrade.economy.resources[countryId];
+    bareRecord.importCost = 0;
+    bareRecord.exportIncome = 0;
+    // Keep imports/exports (they are flows, not money) so sector dynamics
+    // run identically in both clones.
+
+    const billed = processMonthEconomy(withTrade, countryId, context.rng);
+    const bare = processMonthEconomy(withoutTrade, countryId, context.rng);
+
     if (importCost > 0) {
-      expect(after.spending).toBeGreaterThan(before.spending);
+      expect(billed.spending).toBeCloseTo(bare.spending + importCost, 4);
+    } else {
+      expect(billed.spending).toBeCloseTo(bare.spending, 4);
+    }
+    if (exportIncome > 0) {
+      expect(billed.revenue).toBeCloseTo(bare.revenue + exportIncome, 4);
+    } else {
+      expect(billed.revenue).toBeCloseTo(bare.revenue, 4);
     }
   });
 
@@ -349,53 +481,6 @@ describe('strategic resource economy', () => {
     game.mapSetLayerVisible('urbanRoads', true);
     expect(context.state.map.layerVisibility.urbanRoads).toBe(true);
     expect(mapModel.features.lines.length).toBe(linesBefore.length);
-  });
-
-  // ———————— THE spec §3 math: a seller existing ⇒ the deficit is FULLY bought ————————
-  it('imports cover the FULL deficit whenever the market has sellers (P + I − C = 0)', () => {
-    // Everyone wants to import everything they are short of.
-    for (const countryId of mapModel.countryOrder) {
-      const record = context.state.economy.resources[countryId]!;
-      for (const resource of config.resources) {
-        record.importPolicy[resource.id] = true;
-      }
-    }
-    recomputeResourceEconomies(context.state, mapModel, config);
-    let fullyCoveredExists = false;
-    let importedFlowExists = false;
-    for (const countryId of mapModel.countryOrder) {
-      const record = context.state.economy.resources[countryId]!;
-      for (const resource of config.resources) {
-        const id = resource.id;
-        const deficit = (record.consumption[id] ?? 0) - (record.production[id] ?? 0);
-        if (deficit <= 1e-4) continue;
-        const imports = record.imports[id] ?? 0;
-        const suppliers = record.suppliers[id] ?? [];
-        expect(imports).toBeLessThanOrEqual(deficit + 1e-4); // never MORE than needed
-        if (imports > 1e-4) {
-          importedFlowExists = true;
-          expect(suppliers.length).toBeGreaterThan(0);
-          expect(suppliers.every((sellerId) => sellerId !== countryId)).toBe(true);
-        }
-        if (imports >= deficit - 1e-4) {
-          // THE user's exact example: 10 + 20 − 30 = 0 — never 10 + 20 − 30 = −10.
-          fullyCoveredExists = true;
-          expect(resourceBalanceOf(record, id)).toBeCloseTo(0, 2);
-          expect(resourceStatusOf(record, id)).toBe('imported');
-          expect(resourceDisplayStatusOf(record, id)).toBe('balanced');
-        }
-      }
-    }
-    expect(importedFlowExists).toBe(true); // the market actually trades
-    expect(fullyCoveredExists).toBe(true); // at least one deficit is fully covered
-    // Policies OFF again — leave a clean state for the following tests.
-    for (const countryId of mapModel.countryOrder) {
-      const record = context.state.economy.resources[countryId]!;
-      for (const resource of config.resources) {
-        record.importPolicy[resource.id] = false;
-      }
-    }
-    recomputeResourceEconomies(context.state, mapModel, config);
   });
 
   // ———————————— Balance display + the three display statuses (spec §2/§5) ————————————
@@ -489,143 +574,28 @@ describe('strategic resource economy', () => {
     expect(new Set(wood).size).toBeGreaterThan(1);
   });
 
-  // ————————— Supplier choice + tier pricing (spec §4/§5/§7) —————————
-  it('the player can pick the seller; the market honors the pin while it has spare', () => {
-    recomputeResourceEconomies(context.state, mapModel, config);
-    // Find a country + short resource with at least TWO sellers on the market.
-    const spareOf = (resourceId: string, excludeCountryId: string): string[] =>
-      mapModel.countryOrder.filter((otherId) => {
-        if (otherId === excludeCountryId) return false;
-        const other = context.state.economy.resources[otherId]!;
-        return (other.production[resourceId] ?? 0) - (other.consumption[resourceId] ?? 0) > 0;
-      });
-    let buyerId: string | null = null;
-    let resourceShort: string | null = null;
-    outer: for (const countryId of mapModel.countryOrder) {
-      const record = context.state.economy.resources[countryId]!;
-      for (const resource of config.resources) {
-        if (
-          resourceStatusOf(record, resource.id) === 'shortage' &&
-          spareOf(resource.id, countryId).length >= 2
-        ) {
-          buyerId = countryId;
-          resourceShort = resource.id;
-          break outer;
-        }
-      }
-    }
-    if (buyerId === null || resourceShort === null) return; // map lacks such a market — nothing to prove here
-
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId: resourceShort, active: true });
-    game.commandBus.flush();
-    const sellers = spareOf(resourceShort, buyerId);
-    const pinned = sellers[sellers.length - 1]; // a specific (not auto-largest) seller
-    game.commandBus.send({ type: 'economy.setSupplier', countryId: buyerId, resourceId: resourceShort, supplierId: pinned });
-    game.commandBus.flush();
-
-    const record = context.state.economy.resources[buyerId]!;
-    expect(record.preferredSuppliers[resourceShort]).toBe(pinned);
-    expect(record.suppliers[resourceShort]).toEqual([pinned]);
-    expect(record.imports[resourceShort] ?? 0).toBeGreaterThan(0);
-
-    // Unpin → automatic market choice again.
-    game.commandBus.send({ type: 'economy.setSupplier', countryId: buyerId, resourceId: resourceShort, supplierId: null });
-    game.commandBus.flush();
-    const unpinned = context.state.economy.resources[buyerId]!;
-    expect(unpinned.preferredSuppliers[resourceShort] ?? null).toBeNull();
-    // Auto still buys from the LARGEST spare seller (first in the fill order).
-    let largest: string | null = null;
-    let largestSpare = 0;
-    for (const sellerId of sellers) {
-      const seller = context.state.economy.resources[sellerId]!;
-      const spare = (seller.production[resourceShort] ?? 0) - (seller.consumption[resourceShort] ?? 0);
-      if (spare > largestSpare) {
-        largestSpare = spare;
-        largest = sellerId;
-      }
-    }
-    expect(unpinned.suppliers[resourceShort]?.[0]).toBe(largest);
-  });
-
-  it('tier pricing: a bigger seller is cheaper — the ledger reflects the tier (§4/§7)', () => {
-    recomputeResourceEconomies(context.state, mapModel, config);
-    const buyerId = mapModel.countryOrder[0];
-    // Any resource this country imports right now (or can import) works.
-    let resourceId: string | null = null;
-    for (const resource of config.resources) {
-      const deficit = (record0Consumption(context, buyerId, resource.id)) - (record0Production(context, buyerId, resource.id));
-      const hasSellers = mapModel.countryOrder.some((otherId) => {
-        if (otherId === buyerId) return false;
-        const other = context.state.economy.resources[otherId]!;
-        return (other.production[resource.id] ?? 0) - (other.consumption[resource.id] ?? 0) > 0;
-      });
-      if (deficit > 0 && hasSellers) {
-        resourceId = resource.id;
-        break;
-      }
-    }
-    if (resourceId === null) return; // nothing importable on this map — nothing to prove here
-    const resource = config.resources.find((candidate) => candidate.id === resourceId)!;
-
-    // Isolate: import ONLY this resource (importCost is a per-country SUM).
-    for (const other of config.resources) {
-      if (other.id !== resourceId) {
-        game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId: other.id, active: false });
-      }
-    }
-    game.commandBus.send({ type: 'economy.setImportPolicy', countryId: buyerId, resourceId, active: true });
-    game.commandBus.flush();
-    const record = context.state.economy.resources[buyerId]!;
-    const imports = record.imports[resourceId] ?? 0;
-    const suppliers = record.suppliers[resourceId] ?? [];
-    expect(imports).toBeGreaterThan(0);
-    expect(suppliers.length).toBeGreaterThan(0);
-
-    // The unit cost = price × markup × tierFactor(supplier tier) — exactly.
-    const tiers = sellerPriceTiersOf(context.state.economy.resources, mapModel.countryOrder.filter((id) => id !== buyerId), resourceId);
-    const tier = tiers[suppliers[0]] ?? 'medium';
-    const expectedUnitCost = resource.price * config.importMarkup * config.priceTiers.supply[tier];
-    expect(record.importCost).toBeGreaterThan(0);
-    expect(record.importCost / imports).toBeCloseTo(expectedUnitCost, 1);
-
-    // Export income carries the market's willingness to pay (demand tiers).
-    let exporterId: string | null = null;
-    let exportResource: string | null = null;
-    outer: for (const countryId of mapModel.countryOrder) {
-      const candidate = context.state.economy.resources[countryId]!;
-      for (const candidateResource of config.resources) {
-        if (
-          (candidate.production[candidateResource.id] ?? 0) - (candidate.consumption[candidateResource.id] ?? 0) > 0 &&
-          mapModel.countryOrder.some((otherId) => {
-            const other = context.state.economy.resources[otherId]!;
-            return (other.consumption[candidateResource.id] ?? 0) - (other.production[candidateResource.id] ?? 0) > 0;
-          })
-        ) {
-          exporterId = countryId;
-          exportResource = candidateResource.id;
-          break outer;
-        }
-      }
-    }
-    if (exporterId === null || exportResource === null) return;
-    game.commandBus.send({ type: 'economy.setExportPolicy', countryId: exporterId, resourceId: exportResource, active: true });
-    game.commandBus.flush();
-    const exporter = context.state.economy.resources[exporterId]!;
-    const sold = exporter.exports[exportResource] ?? 0;
-    expect(sold).toBeGreaterThan(0);
-    const exportPrice = config.resources.find((candidate) => candidate.id === exportResource)!.price;
-    // The unit income is price × (average demand factor) — a REAL market
-    // reaction (≥ 0.5 of the base price whatever the mix, sanity-bounded).
-    expect(exporter.exportIncome / sold).toBeGreaterThan(0);
-    expect(exporter.exportIncome / sold / exportPrice).toBeGreaterThan(0.5);
-    expect(exporter.exportIncome / sold / exportPrice).toBeLessThan(1.5);
+  // ———————— the §12 pipeline end-to-end through the pure matcher ————————
+  it('the world matcher reproduces the spec §12 example exactly (A→B=20, C→B=20)', () => {
+    const production: Record<string, Record<string, number>> = {
+      a: { food: 100 },
+      b: { food: 50 },
+      c: { food: 120 },
+      d: { food: 70 }
+    };
+    const consumption: Record<string, Record<string, number>> = {
+      a: { food: 80 },
+      b: { food: 90 },
+      c: { food: 100 },
+      d: { food: 60 }
+    };
+    const result = resolveWorldTradeForResource(['a', 'b', 'c', 'd'], production, consumption, 'food');
+    expect(result.globalSupply).toBe(50);
+    expect(result.globalDemand).toBe(40);
+    expect(result.importsByBuyer['b']).toBe(40);
+    expect(result.unfilledByBuyer['b'] ?? 0).toBe(0);
+    expect(result.flows.map((flow) => `${flow.sellerId}→${flow.buyerId}:${flow.amount}`)).toEqual([
+      'a→b:20',
+      'c→b:20'
+    ]);
   });
 });
-
-function record0Production(context: { state: import('../../../state/GameState').GameState }, countryId: string, resourceId: string): number {
-  return context.state.economy.resources[countryId]?.production[resourceId] ?? 0;
-}
-
-function record0Consumption(context: { state: import('../../../state/GameState').GameState }, countryId: string, resourceId: string): number {
-  return context.state.economy.resources[countryId]?.consumption[resourceId] ?? 0;
-}
