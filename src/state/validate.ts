@@ -475,6 +475,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         selectedSiteId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedBuildingId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedCityConnectionId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        selectionMode: { type: 'enum', values: ['country', 'province'] },
         layerVisibility: { type: 'record', values: { type: 'boolean' } },
         camera: {
           type: 'object',

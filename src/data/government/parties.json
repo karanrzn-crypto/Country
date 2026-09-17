@@ -1,7 +1,32 @@
 {
-  "centrist_union": { "id": "centrist_union", "name": "Civic Union", "ideology": "centrist", "baseSupport": 1.0 },
-  "progress_front": { "id": "progress_front", "name": "Progress Front", "ideology": "progressive", "baseSupport": 0.8 },
-  "heritage_party": { "id": "heritage_party", "name": "Heritage Party", "ideology": "conservative", "baseSupport": 0.85 },
-  "workers_league": { "id": "workers_league", "name": "Workers' League", "ideology": "socialist", "baseSupport": 0.7 },
-  "liberty_guild": { "id": "liberty_guild", "name": "Liberty Guild", "ideology": "liberal", "baseSupport": 0.6 }
+  "centrist_union": {
+    "id": "centrist_union",
+    "name": "اتحادیهٔ مدنی",
+    "ideology": "centrist",
+    "baseSupport": 1.0
+  },
+  "progress_front": {
+    "id": "progress_front",
+    "name": "جبههٔ پیشرفت",
+    "ideology": "progressive",
+    "baseSupport": 0.8
+  },
+  "heritage_party": {
+    "id": "heritage_party",
+    "name": "حزب میراث",
+    "ideology": "conservative",
+    "baseSupport": 0.85
+  },
+  "workers_league": {
+    "id": "workers_league",
+    "name": "اتحادیهٔ کارگران",
+    "ideology": "socialist",
+    "baseSupport": 0.7
+  },
+  "liberty_guild": {
+    "id": "liberty_guild",
+    "name": "انجمن آزادی",
+    "ideology": "liberal",
+    "baseSupport": 0.6
+  }
 }

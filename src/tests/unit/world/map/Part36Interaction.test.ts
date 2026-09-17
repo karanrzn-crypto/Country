@@ -166,7 +166,7 @@ describe('Part 3.6 — selection integrity, provinces, capitals', () => {
     const slice = createDefaultMapSlice(columns, rows, cellSize);
 
     // None → empty state.
-    expect(selectionSummary(slice, model)).toBe('nothing — click the map');
+    expect(selectionSummary(slice, model)).toBe('هیچ — روی نقشه کلیک کنید');
 
     // Grid cell (canonical countryId#gridId).
     let gridKey: string | null = null;
@@ -176,36 +176,36 @@ describe('Part 3.6 — selection integrity, provinces, capitals', () => {
     expect(gridKey).not.toBeNull();
     setFeatureSelection(slice, { kind: 'grid', gridKey: gridKey as string });
     const gridSummary = selectionSummary(slice, model);
-    expect(gridSummary).toContain('(grid cell');
+    expect(gridSummary).toContain('(خانهٔ شبکه');
     expect(gridSummary.startsWith(gridKey?.split('#')[1] ?? '')).toBe(true);
 
     // River / lake / site / building kinds (first of each in the model).
     const river = model.features.rivers[0];
     if (river !== undefined) {
       setFeatureSelection(slice, { kind: 'river', riverId: river.id });
-      expect(selectionSummary(slice, model)).toBe(`${river.name} (river)`);
+      expect(selectionSummary(slice, model)).toBe(`${river.name} (رودخانه)`);
     }
     const lake = model.features.lakes[0];
     if (lake !== undefined) {
       setFeatureSelection(slice, { kind: 'lake', lakeId: lake.id });
-      expect(selectionSummary(slice, model)).toBe(`${lake.name} (lake)`);
+      expect(selectionSummary(slice, model)).toBe(`${lake.name} (دریاچه)`);
     }
     const site = model.features.sites[0];
     if (site !== undefined) {
       setFeatureSelection(slice, { kind: 'site', siteId: site.id });
-      expect(selectionSummary(slice, model)).toBe(`${site.kind} (site)`);
+      expect(selectionSummary(slice, model)).toBe(`${site.kind} (محوطه)`);
     }
     const building = model.features.buildings[0];
     if (building !== undefined) {
       setFeatureSelection(slice, { kind: 'building', buildingId: building.id });
-      expect(selectionSummary(slice, model)).toBe(`${building.kind} (building)`);
+      expect(selectionSummary(slice, model)).toBe(`${building.kind} (ساختمان)`);
     }
 
     // Hierarchy kinds.
     setMapSelection(slice, { countryId: model.countryOrder[0] });
-    expect(selectionSummary(slice, model)).toContain('(country)');
+    expect(selectionSummary(slice, model)).toContain('(کشور)');
     clearMapSelection(slice);
-    expect(selectionSummary(slice, model)).toBe('nothing — click the map');
+    expect(selectionSummary(slice, model)).toBe('هیچ — روی نقشه کلیک کنید');
   });
 
   it('a grid selection and the country detail agree (panel sync contract)', () => {
@@ -225,7 +225,7 @@ describe('Part 3.6 — selection integrity, provinces, capitals', () => {
     setFeatureSelection(slice, { kind: 'grid', gridKey: clicked.gridCellKey });
     // The general panel reads the SAME state: a grid selection is visible in
     // the summary (not "nothing") while the country rows stay empty.
-    expect(selectionSummary(slice, model)).toContain('(grid cell');
+    expect(selectionSummary(slice, model)).toContain('(خانهٔ شبکه');
     expect(slice.selectedCountryId).toBeNull();
     expect(slice.selectedProvinceId).toBeNull();
   });

@@ -1,11 +1,56 @@
 {
-  "finance": { "id": "finance", "name": "Ministry of Finance", "portfolio": "government", "focus": "taxEfficiency" },
-  "defense": { "id": "defense", "name": "Ministry of Defense", "portfolio": "military", "focus": "militaryPower" },
-  "interior": { "id": "interior", "name": "Ministry of Interior", "portfolio": "government", "focus": "corruption" },
-  "health": { "id": "health", "name": "Ministry of Health", "portfolio": "healthcare", "focus": "services" },
-  "education": { "id": "education", "name": "Ministry of Education", "portfolio": "education", "focus": "productivity" },
-  "industry": { "id": "industry", "name": "Ministry of Industry", "portfolio": "government", "focus": "sector.industry" },
-  "energy": { "id": "energy", "name": "Ministry of Energy", "portfolio": "government", "focus": "sector.energy" },
-  "infrastructure": { "id": "infrastructure", "name": "Ministry of Infrastructure", "portfolio": "infrastructure", "focus": "capacity" },
-  "foreign": { "id": "foreign", "name": "Ministry of Foreign Affairs", "portfolio": "government", "focus": "trade" }
+  "finance": {
+    "id": "finance",
+    "name": "وزارت دارایی",
+    "portfolio": "government",
+    "focus": "taxEfficiency"
+  },
+  "defense": {
+    "id": "defense",
+    "name": "وزارت دفاع",
+    "portfolio": "military",
+    "focus": "militaryPower"
+  },
+  "interior": {
+    "id": "interior",
+    "name": "وزارت کشور",
+    "portfolio": "government",
+    "focus": "corruption"
+  },
+  "health": {
+    "id": "health",
+    "name": "وزارت بهداشت",
+    "portfolio": "healthcare",
+    "focus": "services"
+  },
+  "education": {
+    "id": "education",
+    "name": "وزارت آموزش",
+    "portfolio": "education",
+    "focus": "productivity"
+  },
+  "industry": {
+    "id": "industry",
+    "name": "وزارت صنعت",
+    "portfolio": "government",
+    "focus": "sector.industry"
+  },
+  "energy": {
+    "id": "energy",
+    "name": "وزارت انرژی",
+    "portfolio": "government",
+    "focus": "sector.energy"
+  },
+  "infrastructure": {
+    "id": "infrastructure",
+    "name": "وزارت زیرساخت",
+    "portfolio": "infrastructure",
+    "focus": "capacity"
+  },
+  "foreign": {
+    "id": "foreign",
+    "name": "وزارت امور خارجه",
+    "portfolio": "government",
+    "focus": "trade"
+  }
 }

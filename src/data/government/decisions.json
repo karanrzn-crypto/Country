@@ -1,145 +1,323 @@
 {
   "industrial_subsidy": {
     "id": "industrial_subsidy",
-    "name": "Industrial Subsidy",
-    "description": "Direct grants to national manufacturers. Costly now, but factories expand and hiring follows.",
+    "name": "یارانهٔ صنعتی",
+    "description": "کمک مالی مستقیم به کارخانه‌های ملی. اکنون پرهزینه است، اما کارخانه‌ها گسترش می‌یابند و استخدام دنباله می‌گیرد.",
     "category": "economic",
-    "cost": { "treasury": 2000 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 2000 }],
+    "cost": {
+      "treasury": 2000
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 2000
+      }
+    ],
     "effects": [
-      { "target": "sector.industry", "mode": "mul", "value": 0.05 },
-      { "target": "unemployment", "mode": "add", "value": -0.004 },
-      { "target": "approval", "mode": "add", "value": 0.03 }
+      {
+        "target": "sector.industry",
+        "mode": "mul",
+        "value": 0.05
+      },
+      {
+        "target": "unemployment",
+        "mode": "add",
+        "value": -0.004
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": 0.03
+      }
     ],
     "durationMonths": 24,
     "cooldownMonths": 36
   },
   "increase_military_spending": {
     "id": "increase_military_spending",
-    "name": "Military Readiness Drive",
-    "description": "Emergency procurement and drills. The general staff cheers, pacifists do not.",
+    "name": "برنامهٔ آمادگی نظامی",
+    "description": "خریدهای اضطراری و رزمایش‌ها. ستاد کل شاد می‌شود؛ صلح‌طلبان نه.",
     "category": "military",
-    "cost": { "treasury": 5000 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 5000 }],
+    "cost": {
+      "treasury": 5000
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 5000
+      }
+    ],
     "effects": [
-      { "target": "militaryPower", "mode": "mul", "value": 0.1 },
-      { "target": "approval", "mode": "add", "value": -0.02 }
+      {
+        "target": "militaryPower",
+        "mode": "mul",
+        "value": 0.1
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": -0.02
+      }
     ],
     "durationMonths": 12,
     "cooldownMonths": 24
   },
   "anti_corruption_campaign": {
     "id": "anti_corruption_campaign",
-    "name": "Anti-Corruption Campaign",
-    "description": "Independent auditors, protected whistleblowers, prosecutions. Institutions get cleaner; the old guard gets nervous.",
+    "name": "کارزار مبارزه با فساد",
+    "description": "حسابرسان مستقل، حمایت از افشاگران و تعقیب قانونی. نهادها پاک‌تر می‌شوند؛ رجال قدیمی نگران.",
     "category": "political",
-    "cost": { "treasury": 800 },
-    "preconditions": [{ "metric": "corruption", "op": "gte", "value": 0.15 }],
+    "cost": {
+      "treasury": 800
+    },
+    "preconditions": [
+      {
+        "metric": "corruption",
+        "op": "gte",
+        "value": 0.15
+      }
+    ],
     "effects": [
-      { "target": "corruption", "mode": "add", "value": -0.04 },
-      { "target": "publicTrust", "mode": "add", "value": 0.03 },
-      { "target": "executiveAuthority", "mode": "add", "value": -0.02 }
+      {
+        "target": "corruption",
+        "mode": "add",
+        "value": -0.04
+      },
+      {
+        "target": "publicTrust",
+        "mode": "add",
+        "value": 0.03
+      },
+      {
+        "target": "executiveAuthority",
+        "mode": "add",
+        "value": -0.02
+      }
     ],
     "durationMonths": 12,
     "cooldownMonths": 18
   },
   "tax_reform_relief": {
     "id": "tax_reform_relief",
-    "name": "Middle-Class Tax Relief",
-    "description": "A one-off household rebate funded from the treasury. Popular, expensive.",
+    "name": "اتکای مالیاتی طبقهٔ متوسط",
+    "description": "یارانهٔ یک‌بارهٔ خانوارها از خزانهٔ کشور. محبوب اما پرهزینه.",
     "category": "economic",
-    "cost": { "treasury": 3500 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 3500 }],
+    "cost": {
+      "treasury": 3500
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 3500
+      }
+    ],
     "effects": [
-      { "target": "gdpGrowth", "mode": "add", "value": 0.004 },
-      { "target": "approval", "mode": "add", "value": 0.05 }
+      {
+        "target": "gdpGrowth",
+        "mode": "add",
+        "value": 0.004
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": 0.05
+      }
     ],
     "durationMonths": 6,
     "cooldownMonths": 24
   },
   "infrastructure_program": {
     "id": "infrastructure_program",
-    "name": "National Infrastructure Program",
-    "description": "Roads, bridges and grids. Construction booms and the economy's ceiling rises for years.",
+    "name": "برنامهٔ ملی زیرساخت",
+    "description": "جاده‌ها، پل‌ها و شبکهٔ برق. ظرفیت صنعتی را باز می‌کند اما صندوق کشور را خالی می‌کند.",
     "category": "economic",
-    "cost": { "treasury": 6000 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 6000 }],
+    "cost": {
+      "treasury": 6000
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 6000
+      }
+    ],
     "effects": [
-      { "target": "sector.construction", "mode": "mul", "value": 0.08 },
-      { "target": "unemployment", "mode": "add", "value": -0.005 }
+      {
+        "target": "sector.construction",
+        "mode": "mul",
+        "value": 0.08
+      },
+      {
+        "target": "unemployment",
+        "mode": "add",
+        "value": -0.005
+      }
     ],
     "durationMonths": 36,
     "cooldownMonths": 48
   },
   "agriculture_modernization": {
     "id": "agriculture_modernization",
-    "name": "Agriculture Modernization",
-    "description": "Subsidized machinery and irrigation. Yields rise, rural voters remember.",
+    "name": "نوسازی کشاورزی",
+    "description": "تجهیزات مدرن، بذرهای بهتر و آبیاری کارآمد برای مزارع کشور.",
     "category": "economic",
-    "cost": { "treasury": 1500 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 1500 }],
+    "cost": {
+      "treasury": 1500
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 1500
+      }
+    ],
     "effects": [
-      { "target": "sector.agriculture", "mode": "mul", "value": 0.06 },
-      { "target": "approval", "mode": "add", "value": 0.02 }
+      {
+        "target": "sector.agriculture",
+        "mode": "mul",
+        "value": 0.06
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": 0.02
+      }
     ],
     "durationMonths": 30,
     "cooldownMonths": 30
   },
   "technology_fund": {
     "id": "technology_fund",
-    "name": "National Technology Fund",
-    "description": "Grants for research labs and startups. A bet on the next decade, paid for this one.",
+    "name": "صندوق ملی فناوری",
+    "description": "سرمایه‌گذاری در پژوهش و نوآوری برای رشد بلندمدت اقتصاد دانش‌بنیان.",
     "category": "economic",
-    "cost": { "treasury": 2200 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 2200 }],
+    "cost": {
+      "treasury": 2200
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 2200
+      }
+    ],
     "effects": [
-      { "target": "sector.technology", "mode": "mul", "value": 0.08 },
-      { "target": "gdpGrowth", "mode": "add", "value": 0.002 }
+      {
+        "target": "sector.technology",
+        "mode": "mul",
+        "value": 0.08
+      },
+      {
+        "target": "gdpGrowth",
+        "mode": "add",
+        "value": 0.002
+      }
     ],
     "durationMonths": 36,
     "cooldownMonths": 36
   },
   "energy_grid_investment": {
     "id": "energy_grid_investment",
-    "name": "Energy Grid Investment",
-    "description": "Transmission lines and plant upgrades keep the lights on and industry running.",
+    "name": "سرمایه‌گذاری در شبکهٔ انرژی",
+    "description": "نیروگاه‌ها و خطوط انتقال تازه؛ ستون فقرات صنعت و شهرها.",
     "category": "economic",
-    "cost": { "treasury": 2800 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 2800 }],
+    "cost": {
+      "treasury": 2800
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 2800
+      }
+    ],
     "effects": [
-      { "target": "sector.energy", "mode": "mul", "value": 0.07 },
-      { "target": "sector.industry", "mode": "mul", "value": 0.02 }
+      {
+        "target": "sector.energy",
+        "mode": "mul",
+        "value": 0.07
+      },
+      {
+        "target": "sector.industry",
+        "mode": "mul",
+        "value": 0.02
+      }
     ],
     "durationMonths": 30,
     "cooldownMonths": 30
   },
   "state_of_emergency": {
     "id": "state_of_emergency",
-    "name": "Declare State of Emergency",
-    "description": "Emergency powers restore order fast — at the price of trust and legitimacy.",
+    "name": "اعلام وضعیت اضطراری",
+    "description": "اختیارات ویژه برای بازگرداندن نظم. اقتدار اجرایی بالا می‌رود؛ اعتماد عمومی پایین.",
     "category": "political",
     "cost": {},
-    "preconditions": [{ "metric": "protestPressure", "op": "gte", "value": 0.4 }],
+    "preconditions": [
+      {
+        "metric": "protestPressure",
+        "op": "gte",
+        "value": 0.4
+      }
+    ],
     "effects": [
-      { "target": "protestPressure", "mode": "add", "value": -0.3 },
-      { "target": "stability", "mode": "add", "value": 0.05 },
-      { "target": "publicTrust", "mode": "add", "value": -0.08 },
-      { "target": "approval", "mode": "add", "value": -0.04 },
-      { "target": "executiveAuthority", "mode": "add", "value": 0.1 }
+      {
+        "target": "protestPressure",
+        "mode": "add",
+        "value": -0.3
+      },
+      {
+        "target": "stability",
+        "mode": "add",
+        "value": 0.05
+      },
+      {
+        "target": "publicTrust",
+        "mode": "add",
+        "value": -0.08
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": -0.04
+      },
+      {
+        "target": "executiveAuthority",
+        "mode": "add",
+        "value": 0.1
+      }
     ],
     "durationMonths": 6,
     "cooldownMonths": 12
   },
   "education_initiative": {
     "id": "education_initiative",
-    "name": "Education Initiative",
-    "description": "New schools and teacher salaries. Human capital compounds quietly for decades.",
+    "name": "برنامهٔ آموزشی ملی",
+    "description": "مدارس و دانشگاه‌های بهتر؛ سرمایهٔ انسانی بلندمدت کشور.",
     "category": "social",
-    "cost": { "treasury": 1800 },
-    "preconditions": [{ "metric": "treasury", "op": "gte", "value": 1800 }],
+    "cost": {
+      "treasury": 1800
+    },
+    "preconditions": [
+      {
+        "metric": "treasury",
+        "op": "gte",
+        "value": 1800
+      }
+    ],
     "effects": [
-      { "target": "gdpGrowth", "mode": "add", "value": 0.003 },
-      { "target": "approval", "mode": "add", "value": 0.02 }
+      {
+        "target": "gdpGrowth",
+        "mode": "add",
+        "value": 0.003
+      },
+      {
+        "target": "approval",
+        "mode": "add",
+        "value": 0.02
+      }
     ],
     "durationMonths": 48,
     "cooldownMonths": 48

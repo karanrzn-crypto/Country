@@ -109,8 +109,8 @@ describe('HUD model (pure)', () => {
     const game = createTestGame();
     game.runTicks(30);
     const state = game.gameState;
-    const model = buildHudModel(state, 'President', game.gameWorld.counts());
-    expect(model.mode).toBe('President');
+    const model = buildHudModel(state, 'رئیس‌جمهور', game.gameWorld.counts());
+    expect(model.mode).toBe('رئیس‌جمهور');
     expect(model.treasury).not.toBe('');
     expect(model.chunks).toMatch(/^A:\d+ S:\d+ U:\d+$/);
     game.dispose();

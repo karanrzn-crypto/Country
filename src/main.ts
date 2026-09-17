@@ -10,6 +10,8 @@ import { BrowserDomAdapter } from './ui/adapter/BrowserDomAdapter';
 import { BrowserLocalStorageStorage } from './save/SaveStorage';
 import { createKeyboardSource } from './input/sources';
 import bindings from './data/inputBindings.json';
+// Persian UI font (bundled woff2) — must load before any UI text renders.
+import './ui/fonts.css';
 
 function bootstrap(): void {
   const mount = document.getElementById('app');

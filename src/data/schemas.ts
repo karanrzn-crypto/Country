@@ -290,12 +290,6 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
             max: { type: 'number', min: 0.1, max: 20 }
           }
         },
-        roadColors: {
-          type: 'object',
-          allowUnknown: false,
-          fields: { highway: colorField, secondary: colorField, dirt: colorField }
-        },
-        roadOpacity: { type: 'number', min: 0, max: 1 },
         railwayStroke: colorField,
         railwayOpacity: { type: 'number', min: 0, max: 1 },
         seaRouteStroke: colorField,

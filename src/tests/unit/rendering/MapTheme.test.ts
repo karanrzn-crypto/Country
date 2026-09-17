@@ -62,9 +62,9 @@ describe('map layer registry', () => {
     }
   });
 
-  it('exposes the fifteen user-facing information layers', () => {
+  it('exposes the fourteen user-facing information layers', () => {
     const userLayers: readonly string[] = [
-      'biomes', 'terrain', 'roads', 'rivers', 'cities', 'industry', 'resources',
+      'biomes', 'terrain', 'rivers', 'cities', 'industry', 'resources',
       'ports', 'railways', 'military', 'provinceBorders', 'population',
       'economy', 'weather', 'intelligence'
     ];

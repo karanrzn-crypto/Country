@@ -1,26 +1,36 @@
 {
   "president": {
     "id": "president",
-    "name": "President",
+    "name": "رئیس‌جمهور",
     "camera": "strategic",
-    "transitions": ["commander"]
+    "transitions": [
+      "commander"
+    ]
   },
   "commander": {
     "id": "commander",
-    "name": "Commander",
+    "name": "فرمانده",
     "camera": "tactical",
-    "transitions": ["president", "soldier", "aircraft"]
+    "transitions": [
+      "president",
+      "soldier",
+      "aircraft"
+    ]
   },
   "soldier": {
     "id": "soldier",
-    "name": "Soldier",
+    "name": "سرباز",
     "camera": "ground",
-    "transitions": ["commander"]
+    "transitions": [
+      "commander"
+    ]
   },
   "aircraft": {
     "id": "aircraft",
-    "name": "Aircraft Pilot",
+    "name": "خلبان",
     "camera": "aircraft",
-    "transitions": ["commander"]
+    "transitions": [
+      "commander"
+    ]
   }
 }

@@ -15,7 +15,7 @@ import {
 /**
  * FeatureLayers — Part-3 information-layer visuals EXCEPT the land surface
  * (biomes/terrain live in MapSurface.ts — the single land-surface
- * definition shared with the legends): rivers/lakes, roads, railways,
+ * definition shared with the legends): rivers/lakes, railways,
  * sea routes, ports, industry, resources, military, population, economy.
  *
  * Performance contract (weak-hardware friendly):
@@ -252,22 +252,6 @@ export class LineFeatureLayer {
     this.material?.dispose();
     this.material = null;
   }
-}
-
-/** Roads: vertex-colored by road class (theme data). */
-export function createRoadsLayer(theme: MapTheme): LineFeatureLayer {
-  const colors: Record<string, RGB> = {};
-  for (const [kind, hex] of Object.entries(theme.layerColors.roadColors)) {
-    colors[kind] = rgb(hex);
-  }
-  return new LineFeatureLayer(
-    (model) =>
-      model.features.lines
-        .filter((line) => line.kind !== 'railway' && line.kind !== 'seaRoute')
-        .map((line) => ({ color: colors[line.kind] ?? colors.secondary, polyline: line.polyline })),
-    theme.layerColors.roadOpacity,
-    0.85
-  );
 }
 
 /** Railways: single theme color. */

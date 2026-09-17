@@ -132,6 +132,8 @@ export interface GameEventMap {
     } | null;
   };
   'map.layerVisibilityChanged': { readonly layer: string; readonly visible: boolean };
+  /** Region-selection mode flipped (country ⇄ province land-click pick). */
+  'map.selectionModeChanged': { readonly mode: 'country' | 'province' };
   'map.cameraChanged': { readonly x: number; readonly z: number; readonly viewHeight: number };
   /**
    * Presentation-side camera gesture channel (Part 2 camera rework).

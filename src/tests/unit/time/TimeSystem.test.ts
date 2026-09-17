@@ -76,7 +76,7 @@ describe('TimeSystem (mode-based simulation clock)', () => {
     runUnits(time, 1);
     expect(time.date.month).toBe(3);
     expect(formatCalendarElapsed(time.date, time.startDate)).toBe(
-      'Year 1 — March — Day 1 — 00:00'
+      'سال 1 — مارس — روز 1 — 00:00'
     );
   });
 

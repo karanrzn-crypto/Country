@@ -1,16 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Country — Strategic Foundation</title>
+    <title>کشور — بازی استراتژیک</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body {
         width: 100%; height: 100%; overflow: hidden;
         background: #0b0e14; color: #d7dde8;
-        font-family: ui-monospace, 'JetBrains Mono', Consolas, Menlo, monospace;
-        font-size: 13px; line-height: 1.45;
+        /* Persian UI font: Vazirmatn (bundled, correct joining) with
+           system fallbacks; Latin digits/units render in its Latin set. */
+        font-family: 'Vazirmatn', 'Segoe UI', Tahoma, 'Noto Naskh Arabic', sans-serif;
+        font-size: 13px; line-height: 1.55;
       }
       #app { width: 100%; height: 100%; position: relative; }
       #app canvas { display: block; }
@@ -186,6 +188,15 @@
       }
       .map-layer-toggle.on { border-color: #4a7f4a; color: #b8e6b8; background: #1d2b1d; }
       .map-layer-toggle.off { opacity: 0.45; text-decoration: line-through; }
+      /* —— selection-mode segment (country ⇄ province pick) —— */
+      .map-selectmode { display: flex; gap: 4px; margin-top: 4px; }
+      .map-mode-btn {
+        font: inherit; font-size: 11px; cursor: pointer; flex: 1 1 auto;
+        border: 1px solid #33415c; border-radius: 3px;
+        padding: 3px 8px; color: #cfd8e6; background: #1a2333;
+      }
+      .map-mode-btn:hover { background: #243149; border-color: #4a5f88; }
+      .map-mode-btn.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
       .map-country-list button { font: inherit; }
       /* —— country-select screen (Part 3) —— */
       .screen-actions { display: flex; gap: 8px; margin-top: 14px; justify-content: center; }
@@ -328,7 +339,27 @@
         .psp { width: min(280px, 44vw); }
       }
       @media (max-width: 700px) {
-        .psp { width: min(250px, 52vw); padding: 8px 10px; }
+        /* The time bar wraps to two rows at this width — keep the panel's
+           TOP clear of it (same policy as the info panel). */
+        .psp { width: min(250px, 52vw); padding: 8px 10px; max-height: calc(100% - 150px); }
+      }
+
+      /* —— president panel toggle (bottom-center, clear of every panel) ——
+         The HUD ends left of center and the status panel starts right of
+         center on every supported width; at ≤560px it shrinks, never moves
+         under another control. */
+      .psp-toggle {
+        position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+        font: inherit; font-size: 12px; cursor: pointer;
+        border: 1px solid #33415c; border-radius: 5px;
+        padding: 6px 16px; color: #e8edf5; background: #1a2333;
+        z-index: 22; letter-spacing: 0.5px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+      }
+      .psp-toggle:hover { background: #243149; border-color: #4a5f88; }
+      .psp-toggle.on { border-color: #4a7fa8; color: #bfe0f5; background: #16222e; font-weight: 700; }
+      @media (max-width: 560px) {
+        .psp-toggle { font-size: 11px; padding: 4px 10px; bottom: 10px; }
       }
     </style>
   </head>

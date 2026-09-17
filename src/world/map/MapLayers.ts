@@ -32,7 +32,9 @@ export type MapLayerId =
   | 'cities'
   | 'capitals'
   // infrastructure
-  | 'roads'
+  // ('roads' was removed as a user-facing layer — the road LINES remain in
+  //  the map model and inside the City Areas network, but there is no
+  //  standalone Roads toggle any more.)
   | 'railways'
   | 'airports'
   | 'ports'
@@ -50,7 +52,7 @@ export type MapLayerId =
 
 export interface MapLayerDef {
   readonly id: MapLayerId;
-  /** English display label (UI renders it verbatim — no country data here). */
+  /** Persian display label (UI renders it verbatim — no country data here). */
   readonly label: string;
   readonly group: MapLayerGroup;
   readonly defaultVisible: boolean;
@@ -58,33 +60,32 @@ export interface MapLayerDef {
 
 /** Bottom → top render order. Fills < lines < borders < markers < labels. */
 export const MAP_LAYERS: readonly MapLayerDef[] = [
-  { id: 'ocean', label: 'Ocean', group: 'base', defaultVisible: true },
-  { id: 'land', label: 'Land', group: 'base', defaultVisible: true },
-  { id: 'countries', label: 'Countries', group: 'base', defaultVisible: true },
-  { id: 'biomes', label: 'Biomes', group: 'geography', defaultVisible: false },
-  { id: 'terrain', label: 'Terrain', group: 'geography', defaultVisible: false },
-  { id: 'rivers', label: 'Rivers', group: 'geography', defaultVisible: true },
-  { id: 'lakes', label: 'Lakes / Water', group: 'geography', defaultVisible: true },
-  { id: 'grid', label: 'Geographic Grid', group: 'geography', defaultVisible: false },
-  { id: 'provinceBorders', label: 'Provinces', group: 'geography', defaultVisible: true },
-  { id: 'cityAreas', label: 'City Areas', group: 'geography', defaultVisible: true },
-  { id: 'countryBorders', label: 'Country Borders', group: 'base', defaultVisible: true },
-  { id: 'roads', label: 'Roads', group: 'infrastructure', defaultVisible: false },
-  { id: 'railways', label: 'Railways', group: 'infrastructure', defaultVisible: false },
-  { id: 'airports', label: 'Airports', group: 'infrastructure', defaultVisible: false },
-  { id: 'ports', label: 'Ports', group: 'infrastructure', defaultVisible: false },
-  { id: 'industry', label: 'Industry', group: 'infrastructure', defaultVisible: false },
-  { id: 'buildings', label: 'Buildings', group: 'infrastructure', defaultVisible: false },
-  { id: 'resources', label: 'Resources', group: 'infrastructure', defaultVisible: false },
-  { id: 'military', label: 'Military', group: 'infrastructure', defaultVisible: false },
-  { id: 'cities', label: 'Cities', group: 'geography', defaultVisible: true },
-  { id: 'capitals', label: 'Capitals', group: 'geography', defaultVisible: true },
-  { id: 'population', label: 'Population', group: 'society', defaultVisible: false },
-  { id: 'economy', label: 'Economy', group: 'society', defaultVisible: false },
-  { id: 'strategic', label: 'Strategic Value', group: 'society', defaultVisible: false },
-  { id: 'weather', label: 'Weather', group: 'society', defaultVisible: false },
-  { id: 'intelligence', label: 'Intelligence', group: 'society', defaultVisible: false },
-  { id: 'labels', label: 'Labels', group: 'base', defaultVisible: true }
+  { id: 'ocean', label: 'اقیانوس', group: 'base', defaultVisible: true },
+  { id: 'land', label: 'خشکی', group: 'base', defaultVisible: true },
+  { id: 'countries', label: 'کشورها', group: 'base', defaultVisible: true },
+  { id: 'biomes', label: 'زیست‌بوم‌ها', group: 'geography', defaultVisible: false },
+  { id: 'terrain', label: 'توپوگرافی', group: 'geography', defaultVisible: false },
+  { id: 'rivers', label: 'رودخانه‌ها', group: 'geography', defaultVisible: true },
+  { id: 'lakes', label: 'دریاچه‌ها / آب', group: 'geography', defaultVisible: true },
+  { id: 'grid', label: 'شبکهٔ جغرافیایی', group: 'geography', defaultVisible: false },
+  { id: 'provinceBorders', label: 'استان‌ها', group: 'geography', defaultVisible: true },
+  { id: 'cityAreas', label: 'مناطق شهری', group: 'geography', defaultVisible: true },
+  { id: 'countryBorders', label: 'مرز کشورها', group: 'base', defaultVisible: true },
+  { id: 'railways', label: 'راه‌آهن‌ها', group: 'infrastructure', defaultVisible: false },
+  { id: 'airports', label: 'فرودگاه‌ها', group: 'infrastructure', defaultVisible: false },
+  { id: 'ports', label: 'بنادر', group: 'infrastructure', defaultVisible: false },
+  { id: 'industry', label: 'صنعت', group: 'infrastructure', defaultVisible: false },
+  { id: 'buildings', label: 'ساختمان‌ها', group: 'infrastructure', defaultVisible: false },
+  { id: 'resources', label: 'منابع', group: 'infrastructure', defaultVisible: false },
+  { id: 'military', label: 'نظامی', group: 'infrastructure', defaultVisible: false },
+  { id: 'cities', label: 'شهرها', group: 'geography', defaultVisible: true },
+  { id: 'capitals', label: 'پایتخت‌ها', group: 'geography', defaultVisible: true },
+  { id: 'population', label: 'جمعیت', group: 'society', defaultVisible: false },
+  { id: 'economy', label: 'اقتصاد', group: 'society', defaultVisible: false },
+  { id: 'strategic', label: 'ارزش راهبردی', group: 'society', defaultVisible: false },
+  { id: 'weather', label: 'آب‌وهوا', group: 'society', defaultVisible: false },
+  { id: 'intelligence', label: 'اطلاعات', group: 'society', defaultVisible: false },
+  { id: 'labels', label: 'برچسب‌ها', group: 'base', defaultVisible: true }
 ] as const;
 
 /** Flat bottom→top id order (renderer group order + validation). */

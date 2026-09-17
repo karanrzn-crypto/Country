@@ -118,12 +118,12 @@
       "elevationLightness": 0.07
     },
     "biomeLabels": {
-      "forest": "Forest",
-      "grassland": "Grassland",
-      "desert": "Desert",
-      "tundra": "Tundra",
-      "drylands": "Drylands",
-      "jungle": "Jungle"
+      "forest": "جنگل",
+      "grassland": "علفزار",
+      "desert": "بیابان",
+      "tundra": "تندرا",
+      "drylands": "مناطق خشک",
+      "jungle": "جنگل استوایی"
     },
     "biomeLegendOrder": [
       "forest",
@@ -156,8 +156,8 @@
       }
     ],
     "elevationLegend": {
-      "lowLabel": "Low Elevation",
-      "highLabel": "High Elevation",
+      "lowLabel": "ارتفاع کم",
+      "highLabel": "ارتفاع زیاد",
       "samples": 24
     },
     "tintFillOpacity": 0.4,
@@ -176,12 +176,6 @@
       "perCell": 0.09,
       "max": 2.4
     },
-    "roadColors": {
-      "highway": "#8a3f22",
-      "secondary": "#a06a3f",
-      "dirt": "#8f7a55"
-    },
-    "roadOpacity": 0.9,
     "railwayStroke": "#46355a",
     "railwayOpacity": 0.9,
     "seaRouteStroke": "#9fc4e0",

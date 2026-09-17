@@ -111,7 +111,7 @@ describe('country selection flow', () => {
     expect(game2.gameState.map.layerVisibility.labels).toBe(false);
     // …and new information layers receive their defaults (OFF for overlays).
     expect(game2.gameState.map.layerVisibility.biomes).toBe(false);
-    expect(game2.gameState.map.layerVisibility.roads).toBe(false);
+    expect(game2.gameState.map.layerVisibility.railways).toBe(false);
     expect(game2.gameState.map.layerVisibility.rivers).toBe(true);
     game2.dispose();
   });

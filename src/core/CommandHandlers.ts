@@ -31,6 +31,7 @@ export interface CoreGameApi {
   mapHover(x: number | null, z: number | null): void;
   mapClearSelection(): void;
   mapSetLayerVisible(layer: string, visible: boolean): void;
+  mapSetSelectionMode(mode: 'country' | 'province'): void;
   mapSetCamera(view: { x?: number; z?: number; viewHeight?: number }): void;
   mapPanBy(dx: number, dz: number): void;
   mapZoomBy(factor: number, anchor?: { x: number; z: number }, screen?: { x: number; y: number }): void;
@@ -77,6 +78,7 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('map.hover', (cmd) => game.mapHover(cmd.x, cmd.z));
   bus.register('map.clearSelection', () => game.mapClearSelection());
   bus.register('map.setLayerVisible', (cmd) => game.mapSetLayerVisible(cmd.layer, cmd.visible));
+  bus.register('map.setSelectionMode', (cmd) => game.mapSetSelectionMode(cmd.mode));
   bus.register('map.setCamera', (cmd) => game.mapSetCamera({ x: cmd.x, z: cmd.z, viewHeight: cmd.viewHeight }));
   bus.register('map.panBy', (cmd) => game.mapPanBy(cmd.dx, cmd.dz));
   bus.register('map.zoomBy', (cmd) =>

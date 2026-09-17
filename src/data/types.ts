@@ -225,8 +225,6 @@ export interface MapLayerColorsData {
    * World units — cells are ~10 units wide.
    */
   readonly riverWidth: { readonly source: number; readonly perCell: number; readonly max: number };
-  readonly roadColors: Readonly<Record<'highway' | 'secondary' | 'dirt', string>>;
-  readonly roadOpacity: number;
   readonly railwayStroke: string;
   readonly railwayOpacity: number;
   readonly seaRouteStroke: string;

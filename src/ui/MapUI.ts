@@ -20,16 +20,75 @@ import {
 import type { MapLegendEntry, ElevationLegendData } from './biomeLegend';
 
 /**
- * Strategic map UI (Part 1 + 2 + 3):
+ * Strategic map UI (Part 1 + 2 + 3) — all player-facing text in PERSIAN:
  * - country info panel: flag, capital, population, economy, resources,
  *   military and foreign relations — all read from Game State (countrySlice
  *   + static map model); the UI owns no country data;
  * - layer toggle row (each map layer independently switchable);
+ * - the region-selection mode segment (country ⇄ province land-click pick);
  * - the 'map' screen lists countries (flag + core stats); clicking selects +
  *   focuses it.
  *
  * UI observes state + sends commands only — it never mutates state directly.
  */
+
+// —— Persian display vocabularies (kind/enum ids → readable labels) ——
+
+const TERRAIN_LABELS: Readonly<Record<string, string>> = {
+  lowland: 'جلگه',
+  valley: 'دره',
+  plains: 'دشت',
+  plateau: 'فلات',
+  hills: 'تپه‌ها',
+  mountain: 'کوهستان',
+  highMountain: 'کوه‌های بلند'
+};
+
+const CITY_TYPE_LABELS: Readonly<Record<string, string>> = {
+  capital: 'پایتخت',
+  major: 'کلان‌شهر',
+  medium: 'شهر متوسط',
+  small: 'شهر کوچک',
+  settlement: 'آبادی'
+};
+
+const SITE_KIND_LABELS: Readonly<Record<string, string>> = {
+  port: 'بندر',
+  farm: 'مزرعه',
+  factory: 'کارخانه',
+  mine: 'معدن',
+  oil: 'چاه نفت',
+  base: 'پایگاه نظامی',
+  airbase: 'پایگاه هوایی'
+};
+
+const BUILDING_KIND_LABELS: Readonly<Record<string, string>> = {
+  residential: 'مسکونی',
+  industrial: 'صنعتی',
+  commercial: 'تجاری',
+  government: 'دولتی',
+  hospital: 'بیمارستان',
+  militaryBase: 'پایگاه نظامی',
+  airport: 'فرودگاه',
+  port: 'بندر',
+  railwayStation: 'ایستگاه راه‌آهن',
+  power: 'نیروگاه'
+};
+
+const RIVER_MOUTH_LABELS: Readonly<Record<string, string>> = {
+  ocean: 'دریا',
+  lake: 'دریاچه',
+  river: 'رودخانهٔ بزرگ‌تر'
+};
+
+const RELATION_BAND_LABELS: Readonly<Record<string, string>> = {
+  hostile: 'متخاصم',
+  wary: 'محتاط',
+  neutral: 'بی‌طرف',
+  cordial: 'صمیمی',
+  friendly: 'دوستانه'
+};
+
 export class MapUI {
   private context: SystemContext | null = null;
   private readonly infoRows: { label: string; value: UIElement }[] = [];
@@ -55,6 +114,7 @@ export class MapUI {
     relations: null as unknown as UIElement
   };
   private layerButtons = new Map<MapLayerId, UIElement>();
+  private modeButtons: { country: UIElement; province: UIElement } | null = null;
   private confirmButton: UIElement | null = null;
   private legendContainer: UIElement | null = null;
   private legendRows: UIElement[] = [];
@@ -96,7 +156,9 @@ export class MapUI {
         text = model.features.lakes.find((lake) => lake.id === hover.lakeId)?.name ?? null;
       } else if (hover.siteId !== null) {
         const site = model.features.sites.find((candidate) => candidate.id === hover.siteId);
-        text = site !== undefined ? `${site.kind} site — ${provinceName(site.cityId !== null ? model.cities[site.cityId].provinceId : null)}` : null;
+        text = site !== undefined
+          ? `${SITE_KIND_LABELS[site.kind] ?? site.kind} — ${provinceName(site.cityId !== null ? model.cities[site.cityId].provinceId : null)}`
+          : null;
       } else if (hover.gridCellKey !== null) {
         const gridId = hover.gridCellKey.slice(hover.gridCellKey.indexOf('#') + 1);
         text = `${gridId} — ${provinceName(hover.provinceId)}`;
@@ -120,7 +182,7 @@ export class MapUI {
     // —— header: flag + title ——
     const header = this.create('div', 'map-info-header');
     const flagImg = this.create('img', 'map-info-flag');
-    flagImg.setAttribute('alt', 'flag');
+    flagImg.setAttribute('alt', 'پرچم');
     header.appendChild(flagImg);
     const title = this.create('div', 'map-info-title');
     header.appendChild(title);
@@ -133,8 +195,8 @@ export class MapUI {
     detail.appendChild(detailName);
     panel.appendChild(detail);
 
-    const addRow = (parent: UIElement, key: string, className = 'map-info-row'): UIElement => {
-      const row = this.create('div', className);
+    const addRow = (parent: UIElement, key: string): UIElement => {
+      const row = this.create('div', 'map-info-row');
       const keyEl = this.create('span', 'map-info-key');
       keyEl.setText(key);
       const valueEl = this.create('span', 'map-info-value');
@@ -152,20 +214,20 @@ export class MapUI {
     };
 
     const rows = new Map<string, UIElement>();
-    rows.set('Capital', addRow(detail, 'Capital'));
-    rows.set('Population', addRow(detail, 'Population'));
-    section('Economy');
-    for (const key of ['GDP', 'Treasury', 'Income', 'Expenses'] as const) {
+    rows.set('پایتخت', addRow(detail, 'پایتخت'));
+    rows.set('جمعیت', addRow(detail, 'جمعیت'));
+    section('اقتصاد');
+    for (const key of ['تولید ناخالص', 'خزانه', 'درآمد', 'هزینه‌ها'] as const) {
       rows.set(key, addRow(detail, key));
     }
-    section('Military');
-    for (const key of ['Manpower', 'Army', 'Equipment', 'Aircraft', 'Navy'] as const) {
+    section('نظامی');
+    for (const key of ['نیروی انسانی', 'ارتش', 'تجهیزات', 'هواپیماها', 'نیروی دریایی'] as const) {
       rows.set(key, addRow(detail, key));
     }
-    section('Resources');
+    section('منابع');
     const resources = this.create('div', 'map-resource-chips');
     detail.appendChild(resources);
-    section('Foreign Relations');
+    section('روابط خارجی');
     const relations = this.create('div', 'map-relations');
     detail.appendChild(relations);
 
@@ -183,7 +245,7 @@ export class MapUI {
     // —— basic rows (no country selected) ——
     const basic = this.create('div', 'map-country-basic');
     panel.appendChild(basic);
-    for (const label of ['Country', 'Provinces', 'Cities', 'Selection']) {
+    for (const label of ['کشور', 'استان‌ها', 'شهرها', 'انتخاب']) {
       const row = this.create('div', 'map-info-row');
       const key = this.create('span', 'map-info-key');
       key.setText(label);
@@ -203,7 +265,7 @@ export class MapUI {
 
     // —— layer toggles (generated from the data-driven registry) ——
     const layerTitle = this.create('div', 'map-layers-title');
-    layerTitle.setText('Layers');
+    layerTitle.setText('لایه‌ها');
     panel.appendChild(layerTitle);
 
     const groupOrder: readonly MapLayerGroup[] = ['geography', 'infrastructure', 'society', 'base'];
@@ -214,7 +276,7 @@ export class MapUI {
       for (const def of defs) {
         const button = this.create('button', 'map-layer-toggle');
         button.setText(def.label);
-        button.setAttribute('title', `${def.label} (${group})`);
+        button.setAttribute('title', def.label);
         button.onClick(() => {
           const current = this.context?.state.map.layerVisibility[def.id] ?? true;
           this.commands.send({ type: 'map.setLayerVisible', layer: def.id, visible: !current });
@@ -224,6 +286,27 @@ export class MapUI {
       }
       panel.appendChild(groupRow);
     }
+
+    // —— region-selection mode (country ⇄ province land-click pick) ——
+    // Pure UI preference wired through a command: the CORE owns the mode
+    // (state.map.selectionMode), the pick resolves it, the highlight level
+    // follows the stored selection automatically.
+    const modeTitle = this.create('div', 'map-layers-title');
+    modeTitle.setText('حالت انتخاب');
+    panel.appendChild(modeTitle);
+    const modeRow = this.create('div', 'map-selectmode');
+    const countryButton = this.create('button', 'map-mode-btn');
+    countryButton.setText('کشور');
+    countryButton.setAttribute('title', 'کلیک روی خشکی، کشور را انتخاب می‌کند');
+    countryButton.onClick(() => this.commands.send({ type: 'map.setSelectionMode', mode: 'country' }));
+    const provinceButton = this.create('button', 'map-mode-btn');
+    provinceButton.setText('استان');
+    provinceButton.setAttribute('title', 'کلیک روی خشکی، استانِ همان نقطه را انتخاب می‌کند');
+    provinceButton.onClick(() => this.commands.send({ type: 'map.setSelectionMode', mode: 'province' }));
+    modeRow.appendChild(countryButton);
+    modeRow.appendChild(provinceButton);
+    panel.appendChild(modeRow);
+    this.modeButtons = { country: countryButton, province: provinceButton };
   }
 
   // —— feature detail blocks (Part 3.5 shared interaction) ——
@@ -271,7 +354,7 @@ export class MapUI {
       const chips = this.create('span', 'map-resource-chips');
       if (values.length === 0) {
         const empty = this.create('span', 'map-resource-chip empty');
-        empty.setText('None');
+        empty.setText('هیچ');
         chips.appendChild(empty);
       } else {
         for (const value of values) {
@@ -295,28 +378,28 @@ export class MapUI {
       const info = describeProvince(model, map.selectedProvinceId);
       if (info !== null) {
         featureVisible = true;
-        this.featureTitle?.setText(`PROVINCE — ${info.name}`);
-        addRow('Province', info.name);
-        addRow('Country', model.countries[info.countryId]?.name ?? info.countryId);
-        addRow('Capital', info.capitalCityId !== null ? (model.cities[info.capitalCityId]?.name ?? info.capitalCityId) : 'None');
+        this.featureTitle?.setText(`استان — ${info.name}`);
+        addRow('استان', info.name);
+        addRow('کشور', model.countries[info.countryId]?.name ?? info.countryId);
+        addRow('پایتخت', info.capitalCityId !== null ? (model.cities[info.capitalCityId]?.name ?? info.capitalCityId) : 'هیچ');
         addChips(
-          'Cities',
+          'شهرها',
           info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
         );
-        addRow('Population', formatCompact(info.population));
-        addRow('Terrain', info.terrainType);
-        addRow('Area', `${info.areaCells} cells`);
-        addChips('Resources', [...info.resourceIds]);
-        addRow('Buildings', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'None');
+        addRow('جمعیت', formatCompact(info.population));
+        addRow('زمین', TERRAIN_LABELS[info.terrainType] ?? info.terrainType);
+        addRow('مساحت', `${info.areaCells} سلول`);
+        addChips('منابع', [...info.resourceIds]);
+        addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow(
-          'Infrastructure',
-          `Roads ${info.infrastructure.roads} · Railways ${info.infrastructure.railways} · ` +
-            `Airports ${info.infrastructure.airports} · Ports ${info.infrastructure.ports}`
+          'زیرساخت',
+          `جاده ${info.infrastructure.roads} · راه‌آهن ${info.infrastructure.railways} · ` +
+            `فرودگاه ${info.infrastructure.airports} · بندر ${info.infrastructure.ports}`
         );
-        addRow('Development', `${Math.round(info.developmentLevel * 100)}%`);
-        addRow('Strategic Value', String(info.strategicValue));
+        addRow('توسعه', `${Math.round(info.developmentLevel * 100)}٪`);
+        addRow('ارزش راهبردی', String(info.strategicValue));
         addChips(
-          'Neighbors',
+          'همسایه‌ها',
           info.neighborProvinceIds.map((neighborId) => model.provinces[neighborId]?.name ?? neighborId)
         );
       }
@@ -327,20 +410,20 @@ export class MapUI {
       const info = describeGridCell(model, map.selectedGridKey, columns, rows);
       if (info !== null) {
         featureVisible = true;
-        this.featureTitle?.setText(`GRID CELL — ${info.gridId}`);
-        addRow('Grid ID', info.gridId);
-        addRow('Country', model.countries[info.countryId]?.name ?? info.countryId);
-        addRow('Province', info.provinceId !== null ? (model.provinces[info.provinceId]?.name ?? info.provinceId) : 'None');
-        addRow('Terrain', info.terrainId);
-        addRow('Population', info.population > 0 ? formatCompact(info.population) : '0');
+        this.featureTitle?.setText(`خانهٔ شبکه — ${info.gridId}`);
+        addRow('شناسهٔ خانه', info.gridId);
+        addRow('کشور', model.countries[info.countryId]?.name ?? info.countryId);
+        addRow('استان', info.provinceId !== null ? (model.provinces[info.provinceId]?.name ?? info.provinceId) : 'هیچ');
+        addRow('زمین', TERRAIN_LABELS[info.terrainId] ?? info.terrainId);
+        addRow('جمعیت', info.population > 0 ? formatCompact(info.population) : '۰');
         addChips(
-          'Cities',
+          'شهرها',
           info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
         );
-        addChips('Resources', [...info.resourceIds]);
-        addRow('Buildings', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'None');
-        addRow('Infrastructure', `${info.roadIds.length} roads · ${info.railwayIds.length} railways`);
-        addRow('Strategic Value', String(info.strategicValue));
+        addChips('منابع', [...info.resourceIds]);
+        addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
+        addRow('زیرساخت', `${info.roadIds.length} جاده · ${info.railwayIds.length} راه‌آهن`);
+        addRow('ارزش راهبردی', String(info.strategicValue));
       }
     }
 
@@ -349,36 +432,36 @@ export class MapUI {
       const city = model.cities[map.selectedCityId];
       if (city !== undefined) {
         featureVisible = true;
-        this.featureTitle?.setText(`CITY — ${city.name}`);
-        addRow('Name', city.name);
-        addRow('Province', model.provinces[city.provinceId]?.name ?? city.provinceId);
-        addRow('Country', model.countries[city.countryId]?.name ?? city.countryId);
-        addRow('Grid', city.gridId !== '' ? city.gridId : '—');
-        addRow('Population', formatCompact(city.population));
-        addRow('Type', city.type);
-        addRow('Importance', `${Math.round(city.importance * 100)}%`);
+        this.featureTitle?.setText(`شهر — ${city.name}`);
+        addRow('نام', city.name);
+        addRow('استان', model.provinces[city.provinceId]?.name ?? city.provinceId);
+        addRow('کشور', model.countries[city.countryId]?.name ?? city.countryId);
+        addRow('شبکه', city.gridId !== '' ? city.gridId : '—');
+        addRow('جمعیت', formatCompact(city.population));
+        addRow('نوع', CITY_TYPE_LABELS[city.type] ?? city.type);
+        addRow('اهمیت', `${Math.round(city.importance * 100)}٪`);
         // Real City Areas data (state.cityAreas) — the urban core's
         // development and the city's actual network connections. No
         // parallel city data: resolved live from the network slice.
         const network = context.state.cityAreas.network;
         const core = network.areas[`area_${city.id}_core`];
-        if (core !== undefined) addRow('Development', `${Math.round(core.development * 100)}%`);
+        if (core !== undefined) addRow('توسعه', `${Math.round(core.development * 100)}٪`);
         const connections = cityConnectionsOf(network);
         addChips(
-          'Connections',
+          'اتصال‌ها',
           connectionsOfCity(connections, city.id).map((connection) => {
             const otherId = connectionOtherCity(connection, city.id);
             const other = model.cities[otherId];
-            return `${other?.name ?? otherId} (${connectionLengthKm(connection)} km)`;
+            return `${other?.name ?? otherId} (${connectionLengthKm(connection)} کیلومتر)`;
           })
         );
-        addChips('Resources', [...city.resourceIds]);
+        addChips('منابع', [...city.resourceIds]);
         addRow(
-          'Infrastructure',
-          `Road ${yesNo(city.infrastructure.roadIds.length > 0)} · Railway ${yesNo(city.infrastructure.railwayIds.length > 0)} · ` +
-            `Airport ${yesNo(city.infrastructure.airportId !== null)} · Port ${yesNo(city.infrastructure.portId !== null)}`
+          'زیرساخت',
+          `جاده ${yesNo(city.infrastructure.roadIds.length > 0)} · راه‌آهن ${yesNo(city.infrastructure.railwayIds.length > 0)} · ` +
+            `فرودگاه ${yesNo(city.infrastructure.airportId !== null)} · بندر ${yesNo(city.infrastructure.portId !== null)}`
         );
-        addRow('Strategic Value', String(city.strategicValue));
+        addRow('ارزش راهبردی', String(city.strategicValue));
       }
     }
 
@@ -390,17 +473,17 @@ export class MapUI {
         featureVisible = true;
         const nameA = model.cities[connection.cityA]?.name ?? connection.cityA;
         const nameB = model.cities[connection.cityB]?.name ?? connection.cityB;
-        this.featureTitle?.setText(`CITY CONNECTION — ${nameA} → ${nameB}`);
-        addRow('From', nameA);
-        addRow('To', nameB);
-        addRow('Provinces',
+        this.featureTitle?.setText(`اتصال شهری — ${nameA} ← ${nameB}`);
+        addRow('از', nameA);
+        addRow('به', nameB);
+        addRow('استان‌ها',
           connection.provinceA === connection.provinceB
             ? (model.provinces[connection.provinceA]?.name ?? connection.provinceA)
             : `${model.provinces[connection.provinceA]?.name ?? connection.provinceA} ↔ ${model.provinces[connection.provinceB]?.name ?? connection.provinceB}`
         );
-        addRow('Distance', `${connectionLengthKm(connection).toLocaleString('en-US')} km`);
-        addRow('Type', connection.kind === 'railway' ? 'Railway' : 'Road');
-        addRow('Scope', connection.crossProvince ? 'Inter-province' : 'Intra-province');
+        addRow('فاصله', `${connectionLengthKm(connection).toLocaleString('en-US')} کیلومتر`);
+        addRow('نوع', connection.kind === 'railway' ? 'راه‌آهن' : 'جاده');
+        addRow('گستره', connection.crossProvince ? 'بین‌استانی' : 'درون‌استانی');
         // Link condition = the network's live maintenance state (0..1).
         const conditions = connection.linkIds
           .map((linkId) => context.state.cityAreas.network.links[linkId]?.condition)
@@ -409,10 +492,10 @@ export class MapUI {
           ? conditions.reduce((sum, value) => sum + value, 0) / conditions.length
           : 0;
         addRow(
-          'Infrastructure',
-          condition >= 0.75 ? 'Developed' : condition >= 0.5 ? 'Good' : condition >= 0.25 ? 'Worn' : 'Poor'
+          'زیرساخت',
+          condition >= 0.75 ? 'توسعه‌یافته' : condition >= 0.5 ? 'خوب' : condition >= 0.25 ? 'فرسوده' : 'ضعیف'
         );
-        addRow('Waypoints', String(connection.path.length));
+        addRow('نقاط مسیر', String(connection.path.length));
       }
     }
 
@@ -421,15 +504,19 @@ export class MapUI {
       const river = model.features.rivers.find((candidate) => candidate.id === map.selectedRiverId);
       if (river !== undefined) {
         featureVisible = true;
-        this.featureTitle?.setText(`RIVER — ${river.name}`);
-        addRow('Name', river.name);
-        addRow('Length', `${Math.round(river.length)} u`);
-        addRow('Mouth', river.mouthType + (river.parentRiverId !== null ? ' (tributary)' : ''));
-        addRow('Provinces', String(river.provinceIds.length));
-        addChips('Cities', river.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
-        addChips('Tributaries', [...river.tributaryIds]);
-        addRow('Navigable', yesNo(river.navigable));
-        addRow('Importance', `${Math.round(river.importance * 100)}%`);
+        this.featureTitle?.setText(`رودخانه — ${river.name}`);
+        addRow('نام', river.name);
+        addRow('طول', `${Math.round(river.length)} واحد`);
+        addRow(
+          'دهانه',
+          (RIVER_MOUTH_LABELS[river.mouthType] ?? river.mouthType) +
+            (river.parentRiverId !== null ? ' (شاخه)' : '')
+        );
+        addRow('استان‌ها', String(river.provinceIds.length));
+        addChips('شهرها', river.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
+        addChips('شاخه‌ها', [...river.tributaryIds]);
+        addRow('قابل کشتیرانی', yesNo(river.navigable));
+        addRow('اهمیت', `${Math.round(river.importance * 100)}٪`);
       }
     }
 
@@ -438,14 +525,14 @@ export class MapUI {
       const lake = model.features.lakes.find((candidate) => candidate.id === map.selectedLakeId);
       if (lake !== undefined) {
         featureVisible = true;
-        this.featureTitle?.setText(`LAKE — ${lake.name}`);
-        addRow('Name', lake.name);
-        addRow('Area', `${lake.areaCells} cells`);
-        addRow('Depth', `${Math.round(lake.depth * 100)}%`);
-        addChips('Inflow', [...lake.inflowRiverIds]);
-        addChips('Outflow', [...lake.outflowRiverIds]);
-        addRow('Provinces', String(lake.provinceIds.length));
-        addChips('Cities', lake.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
+        this.featureTitle?.setText(`دریاچه — ${lake.name}`);
+        addRow('نام', lake.name);
+        addRow('مساحت', `${lake.areaCells} سلول`);
+        addRow('ژرفا', `${Math.round(lake.depth * 100)}٪`);
+        addChips('رودهای ورودی', [...lake.inflowRiverIds]);
+        addChips('رودهای خروجی', [...lake.outflowRiverIds]);
+        addRow('استان‌ها', String(lake.provinceIds.length));
+        addChips('شهرها', lake.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId));
       }
     }
 
@@ -454,13 +541,13 @@ export class MapUI {
       const site = model.features.sites.find((candidate) => candidate.id === map.selectedSiteId);
       if (site !== undefined) {
         featureVisible = true;
-        this.featureTitle?.setText(`SITE — ${site.kind}`);
-        addRow('Kind', site.kind);
-        if (site.resourceId !== null) addRow('Resource', site.resourceId);
+        this.featureTitle?.setText(`محوطه — ${SITE_KIND_LABELS[site.kind] ?? site.kind}`);
+        addRow('نوع', SITE_KIND_LABELS[site.kind] ?? site.kind);
+        if (site.resourceId !== null) addRow('منبع', site.resourceId);
         const deposit = model.features.deposits.find((candidate) => candidate.siteId === site.id);
-        if (deposit !== undefined) addRow('Quantity', String(deposit.quantity));
-        addRow('Country', model.countries[site.countryId]?.name ?? site.countryId);
-        addRow('City', site.cityId !== null ? (model.cities[site.cityId]?.name ?? site.cityId) : 'None');
+        if (deposit !== undefined) addRow('مقدار', String(deposit.quantity));
+        addRow('کشور', model.countries[site.countryId]?.name ?? site.countryId);
+        addRow('شهر', site.cityId !== null ? (model.cities[site.cityId]?.name ?? site.cityId) : 'هیچ');
       }
     }
 
@@ -471,11 +558,11 @@ export class MapUI {
       );
       if (building !== undefined) {
         featureVisible = true;
-        this.featureTitle?.setText(`BUILDING — ${building.kind}`);
-        addRow('Kind', building.kind);
-        addRow('Level', String(building.level));
-        addRow('Province', model.provinces[building.provinceId]?.name ?? building.provinceId);
-        addRow('City', building.cityId !== null ? (model.cities[building.cityId]?.name ?? building.cityId) : 'None');
+        this.featureTitle?.setText(`ساختمان — ${BUILDING_KIND_LABELS[building.kind] ?? building.kind}`);
+        addRow('نوع', BUILDING_KIND_LABELS[building.kind] ?? building.kind);
+        addRow('سطح', String(building.level));
+        addRow('استان', model.provinces[building.provinceId]?.name ?? building.provinceId);
+        addRow('شهر', building.cityId !== null ? (model.cities[building.cityId]?.name ?? building.cityId) : 'هیچ');
       }
     }
 
@@ -505,9 +592,9 @@ export class MapUI {
     // Exclusive surface layers → at most ONE section is ever active.
     const sections: { title: string; rows?: MapLegendEntry[]; gradient?: ElevationLegendData }[] = [];
     if (visibility.biomes === true) {
-      sections.push({ title: 'BIOMES', rows: buildBiomeLegend(context.map, context.data.mapTheme) });
+      sections.push({ title: 'زیست‌بوم‌ها', rows: buildBiomeLegend(context.map, context.data.mapTheme) });
     } else if (visibility.terrain === true) {
-      sections.push({ title: 'ELEVATION', gradient: buildElevationLegend(context.data.mapTheme) });
+      sections.push({ title: 'ارتفاع', gradient: buildElevationLegend(context.data.mapTheme) });
     }
     const visible = sections.length > 0;
     this.legendContainer.setVisible(visible);
@@ -587,17 +674,17 @@ export class MapUI {
       };
       const capital =
         countryState.capitalId !== null ? model.cities[countryState.capitalId] : undefined;
-      fill('Capital', capital !== undefined ? capital.name : '—');
-      fill('Population', formatCompact(countryState.population));
-      fill('GDP', `${countryState.economy.gdp}B`);
-      fill('Treasury', `${countryState.economy.treasury}`);
-      fill('Income', `+${countryState.economy.income}`);
-      fill('Expenses', `-${countryState.economy.expenses}`);
-      fill('Manpower', formatCompact(countryState.military.manpower));
-      fill('Army', formatCompact(countryState.military.armySize));
-      fill('Equipment', `${countryState.military.equipment}`);
-      fill('Aircraft', `${countryState.military.aircraft}`);
-      fill('Navy', `${countryState.military.navy}`);
+      fill('پایتخت', capital !== undefined ? capital.name : '—');
+      fill('جمعیت', formatCompact(countryState.population));
+      fill('تولید ناخالص', `${countryState.economy.gdp} میلیارد دلار`);
+      fill('خزانه', `${countryState.economy.treasury} میلیون دلار`);
+      fill('درآمد', `+${countryState.economy.income} میلیون دلار`);
+      fill('هزینه‌ها', `-${countryState.economy.expenses} میلیون دلار`);
+      fill('نیروی انسانی', formatCompact(countryState.military.manpower));
+      fill('ارتش', formatCompact(countryState.military.armySize));
+      fill('تجهیزات', `${countryState.military.equipment}`);
+      fill('هواپیماها', `${countryState.military.aircraft}`);
+      fill('نیروی دریایی', `${countryState.military.navy}`);
 
       this.detailNodes.resources.setText('');
       for (const chip of this.detailChips) chip.remove();
@@ -617,26 +704,35 @@ export class MapUI {
 
     // Basic rows (only visible without a selection, but keep them fresh).
     const values: Record<string, string> = {
-      Country: country !== undefined ? country.name : '—',
-      Provinces: country !== undefined ? String(country.provinceIds.length) : '—',
-      Cities: country !== undefined ? String(country.cityIds.length) : '—',
+      'کشور': country !== undefined ? country.name : '—',
+      'استان‌ها': country !== undefined ? String(country.provinceIds.length) : '—',
+      'شهرها': country !== undefined ? String(country.cityIds.length) : '—',
       // ONE central summary for EVERY selection kind — the same state (and
       // the same resolver) the feature detail block uses, so the panels can
       // never contradict each other.
-      Selection: selectionSummary(state, model, cityConnectionsOf(context.state.cityAreas.network))
+      'انتخاب': selectionSummary(state, model, cityConnectionsOf(context.state.cityAreas.network))
     };
     for (const row of this.infoRows) {
       row.value.setText(values[row.label] ?? '');
     }
 
-    const title = this.context !== null ? model.continentName.toUpperCase() : 'STRATEGIC MAP';
-    this.infoTitle?.setText(`STRATEGIC MAP — ${title}`);
+    const title = this.context !== null ? model.continentName : 'نقشهٔ راهبردی';
+    this.infoTitle?.setText(`نقشهٔ راهبردی — ${title}`);
 
     this.refreshFeatureBlock(state);
 
     for (const [layerId, button] of this.layerButtons) {
       const visible = state.layerVisibility[layerId] !== false;
       button.setClass(visible ? 'map-layer-toggle on' : 'map-layer-toggle off');
+    }
+    // Region-selection segment mirrors the CORE-owned mode.
+    if (this.modeButtons !== null) {
+      this.modeButtons.country.setClass(
+        state.selectionMode === 'country' ? 'map-mode-btn on' : 'map-mode-btn'
+      );
+      this.modeButtons.province.setClass(
+        state.selectionMode === 'province' ? 'map-mode-btn on' : 'map-mode-btn'
+      );
     }
     this.refreshLegend();
     if (this.confirmButton !== null) {
@@ -659,7 +755,7 @@ export class MapUI {
   private buildMapScreen(container: UIElement): void {
     const context = this.context;
     const title = this.create('h2');
-    title.setText('Countries');
+    title.setText('کشورها');
     container.appendChild(title);
     if (context === null) return;
     this.buildCountryRows(container, (countryId) => {
@@ -677,10 +773,10 @@ export class MapUI {
   private buildCountrySelectScreen(container: UIElement): void {
     const context = this.context;
     const title = this.create('h2');
-    title.setText('Choose Your Country');
+    title.setText('کشور خود را انتخاب کنید');
     container.appendChild(title);
     const subtitle = this.create('div', 'screen-subtitle');
-    subtitle.setText('Click a country on the map or pick it from the list, then confirm.');
+    subtitle.setText('روی نقشه یک کشور کلیک کنید یا از فهرست انتخابش کنید، سپس تأیید کنید.');
     container.appendChild(subtitle);
     if (context === null) return;
 
@@ -691,7 +787,7 @@ export class MapUI {
 
     const actions = this.create('div', 'screen-actions');
     const confirm = this.create('button', 'screen-confirm');
-    confirm.setText('Confirm & Start');
+    confirm.setText('تأیید و شروع');
     confirm.onClick(() => {
       const selected = this.context?.state.map.selectedCountryId ?? null;
       if (selected === null) return;
@@ -701,7 +797,7 @@ export class MapUI {
     actions.appendChild(confirm);
 
     const cancel = this.create('button', 'screen-cancel');
-    cancel.setText('Back');
+    cancel.setText('بازگشت');
     cancel.onClick(() => {
       this.screens.close('countrySelect');
       this.screens.open('mainMenu');
@@ -731,8 +827,8 @@ export class MapUI {
       button.appendChild(flag);
       const label = this.create('span');
       label.setText(
-        `${countryState.name} — capital ${capital.name}, ${formatCompact(countryState.population)}` +
-          `${country.coastal ? '' : ' (landlocked)'}`
+        `${countryState.name} — پایتخت ${capital.name}، ${formatCompact(countryState.population)}` +
+          `${country.coastal ? '' : ' (محصور در خشکی)'}`
       );
       button.appendChild(label);
       button.onClick(() => onPick(country.id));
@@ -744,12 +840,13 @@ export class MapUI {
 
 // —— formatting + small DOM builders (module-scope, DOM-free logic where possible) ——
 
+/** Compact magnitudes with Persian units; Latin digits stay tabular. */
 export function formatCompact(value: number): string {
   if (!Number.isFinite(value)) return '0';
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `${trim(value / 1_000_000_000)}B`;
-  if (abs >= 1_000_000) return `${trim(value / 1_000_000)}M`;
-  if (abs >= 10_000) return `${trim(value / 1_000)}k`;
+  if (abs >= 1_000_000_000) return `${trim(value / 1_000_000_000)} میلیارد`;
+  if (abs >= 1_000_000) return `${trim(value / 1_000_000)} میلیون`;
+  if (abs >= 10_000) return `${trim(value / 1_000)} هزار`;
   return String(Math.round(value));
 }
 
@@ -773,7 +870,7 @@ function rebuildChips(
   }
   if (entries.length === 0) {
     const empty = create('span', 'map-resource-chip empty');
-    empty.setText('none');
+    empty.setText('هیچ');
     container.appendChild(empty);
     tracker.push(empty);
   }
@@ -795,16 +892,17 @@ function rebuildRelations(
     const row = create('div', 'map-relation-row');
     const name = create('span', 'map-relation-name');
     name.setText(otherProfile !== undefined ? otherProfile.name : model.countries[otherId]?.name ?? otherId);
-    const band = create('span', `map-relation-band band-${relationBand(value)}`);
-    band.setText(`${relationBand(value)} ${value > 0 ? '+' : ''}${value}`);
+    const band = relationBand(value);
+    const chip = create('span', `map-relation-band band-${band}`);
+    chip.setText(`${RELATION_BAND_LABELS[band] ?? band} ${value > 0 ? '+' : ''}${value}`);
     row.appendChild(name);
-    row.appendChild(band);
+    row.appendChild(chip);
     container.appendChild(row);
     tracker.push(row);
   }
   if (entries.length === 0) {
     const empty = create('span', 'map-relation-empty');
-    empty.setText('no established relations');
+    empty.setText('روابطی برقرار نشده است');
     container.appendChild(empty);
     tracker.push(empty);
   }

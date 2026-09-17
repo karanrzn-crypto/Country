@@ -273,6 +273,26 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 8,
+    to: 9,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v8→v9: save payload is not an object');
+      }
+      // Region-selection mode (province/country land-click pick) added to
+      // the map slice. Old saves predate the toggle — inject the documented
+      // default ('country') so schema validation passes unchanged.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { map?: Record<string, unknown> };
+      };
+      const map = clone.state?.map;
+      if (map !== undefined && map.selectionMode !== 'country' && map.selectionMode !== 'province') {
+        map.selectionMode = 'country';
+      }
+      return clone;
+    }
   }
 ];
 

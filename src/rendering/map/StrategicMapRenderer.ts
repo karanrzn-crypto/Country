@@ -15,7 +15,6 @@ import {
   createPopulationFillLayer,
   createEconomyFillLayer,
   createStrategicFillLayer,
-  createRoadsLayer,
   createRailwaysLayer,
   createSeaRoutesLayer,
   RiverLayer,
@@ -37,7 +36,7 @@ import type { MapTheme } from './MapTheme';
  *   gestures arrive via the map.zoomGesture event channel);
  * - the label LOD (fade/cull/collision/cap — see LabelLod).
  *
- * Part-3 information layers (biomes/terrain/rivers/roads/sites/population/
+ * Part-3 information layers (biomes/terrain/rivers/sites/population/
  * economy) are LAZY: their GPU objects are created on the first visibility,
  * toggling only flips group.visible. The economy layer rebuilds whenever it
  * is (re)shown, so it always reflects the live country state.
@@ -129,7 +128,6 @@ export class StrategicMapRenderer {
     const lakeLayer = new LakeLayer(this.columns, theme);
     const gridLayer = new GridLayer(this.columns, context.config.map.rows, theme);
     this.gridLayer = gridLayer;
-    const roadsLayer = createRoadsLayer(theme);
     const railwaysLayer = createRailwaysLayer(theme);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
     const portsLayer = new SiteLayer(['port'], 'circle', theme);
@@ -164,7 +162,6 @@ export class StrategicMapRenderer {
       ['rivers', riverLayer],
       ['lakes', lakeLayer],
       ['grid', gridLayer],
-      ['roads', roadsLayer],
       ['railways', railwaysLayer],
       ['airports', airportBuildings],
       ['buildings', cityBuildings],
@@ -241,7 +238,6 @@ export class StrategicMapRenderer {
       // when the network shape changes.
       cityAreas: this.cityNetworkLayer.group,
       countryBorders: this.borderLayer.countryGroup,
-      roads: roadsLayer.group,
       railways: railwaysLayer.group,
       airports: airportBuildings.group,
       ports: portsLayer.group,

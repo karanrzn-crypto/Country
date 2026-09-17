@@ -191,11 +191,11 @@ describe('City Connections — the city-level view of the City Areas network', (
     const nameA = model.cities[connection.cityA].name;
     const nameB = model.cities[connection.cityB].name;
     expect(selectionSummary(state.map, model, connections)).toBe(
-      `${nameA} → ${nameB} (city connection)`
+      `${nameA} → ${nameB} (اتصال شهری)`
     );
     // Unknown connection ids degrade gracefully.
     setFeatureSelection(state.map, { kind: 'cityLink', connectionId: 'conn_ghost' });
-    expect(selectionSummary(state.map, model, connections)).toBe('unknown city connection');
+    expect(selectionSummary(state.map, model, connections)).toBe('اتصال شهری ناشناخته');
 
     // Selecting a city shows the connection count in the summary.
     setFeatureSelection(state.map, { kind: 'grid', gridKey: 'x#A1' });
@@ -203,7 +203,7 @@ describe('City Connections — the city-level view of the City Areas network', (
     game.commandBus.flush();
     const citySummary = selectionSummary(state.map, model, connections);
     expect(citySummary).toContain(nameA);
-    expect(citySummary).toContain('connections');
+    expect(citySummary).toContain('اتصال');
     game.dispose();
   });
 

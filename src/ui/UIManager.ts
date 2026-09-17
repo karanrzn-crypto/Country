@@ -63,10 +63,23 @@ export class UIManager implements PhaseSystem {
     // the dashboard (no screen, no parallel state, no parallel event bus).
     this.statusPanel = new PresidentStatusPanel(this.dashboard, (tag, className) => adapter.create(tag, className));
     this.root.appendChild(this.statusPanel.root);
+    // The panel's open/close button — a clear, standalone control pinned
+    // bottom-center where it collides with no other map control.
+    this.statusPanelToggle = adapter.create('button', 'psp-toggle');
+    this.statusPanelToggle.setText('رئیس‌جمهور');
+    this.statusPanelToggle.setAttribute('title', 'باز و بسته کردن پنل رئیس‌جمهور');
+    this.statusPanelToggle.onClick(() => {
+      const collapsed = this.statusPanel.toggle();
+      this.statusPanelToggle.setClass(collapsed ? 'psp-toggle' : 'psp-toggle on');
+    });
+    this.statusPanelToggle.setVisible(false);
+    this.root.appendChild(this.statusPanelToggle);
   }
 
   private readonly dashboard: PresidentDashboard;
   private readonly statusPanel: PresidentStatusPanel;
+  /** Dedicated open/close button for the permanent status panel. */
+  private readonly statusPanelToggle: UIElement;
 
   private createRoot(adapter: UIDomAdapter): UIElement {
     const root = adapter.create('div', 'ui-root');
@@ -87,10 +100,13 @@ export class UIManager implements PhaseSystem {
         if (this.screens.isOpen('countrySelect')) this.mapUI.refreshCountrySelect();
       }),
       this.events.on('map.layerVisibilityChanged', () => this.mapUI.refreshInfo()),
+      // Region-selection mode (country ⇄ province): the segment mirrors the
+      // core-owned state map.selectionMode.
+      this.events.on('map.selectionModeChanged', () => this.mapUI.refreshInfo()),
       // —— Phase 2 government events: notifications + dashboard refresh ——
       this.events.on('government.eventFired', ({ countryId, title }) => {
         if (countryId === context.state.player.countryId) {
-          this.notify('warn', 'Event', title);
+          this.notify('warn', 'رویداد', title);
         }
         this.dashboard.refresh();
       }),
@@ -107,13 +123,13 @@ export class UIManager implements PhaseSystem {
         if (countryId === context.state.player.countryId) {
           const partyName =
             context.state.government.countries[countryId]?.politics.parties[winnerId]?.name ?? winnerId;
-          this.notify('info', 'Election', `${partyName} wins the election.`);
+          this.notify('info', 'انتخابات', `${partyName} در انتخابات پیروز شد.`);
         }
         this.dashboard.refresh();
       }),
       this.events.on('government.campaignStarted', ({ countryId }) => {
         if (countryId === context.state.player.countryId) {
-          this.notify('info', 'Election Campaign', 'The campaign window has opened.');
+          this.notify('info', 'کارزار انتخاباتی', 'مهلت کارزار انتخاباتی گشوده شد.');
         }
       })
     );
@@ -127,7 +143,7 @@ export class UIManager implements PhaseSystem {
       this.events.on('player.countryConfirmed', ({ countryId }) => {
         this.screens.close('countrySelect');
         const name = context.state.countries.countries[countryId]?.name ?? countryId;
-        this.notify('info', 'Country Selected', `You now lead ${name}.`);
+        this.notify('info', 'کشور انتخاب شد', `اکنون رهبری ${name} را بر عهده دارید.`);
       })
     );
     this.unsubscribes.push(
@@ -158,13 +174,13 @@ export class UIManager implements PhaseSystem {
         }
       }),
       this.events.on('combat.engagementStarted', ({ regionId }) => {
-        this.notify('warn', 'Combat', `Forces clashing in ${regionId}`);
+        this.notify('warn', 'نبرد', `درگیری نیروها در ${regionId}`);
       }),
       this.events.on('save.saved', ({ slot }) => {
-        this.notify('info', 'Saved', `Game saved to "${slot}"`);
+        this.notify('info', 'ذخیره شد', `بازی در «${slot}» ذخیره شد.`);
       }),
       this.events.on('save.loaded', ({ slot }) => {
-        this.notify('info', 'Loaded', `Game restored from "${slot}"`);
+        this.notify('info', 'بارگذاری شد', `بازی از «${slot}» بازیابی شد.`);
       }),
       this.events.on('sim.economyTreasuryChanged', ({ factionId, value }) => {
         if (
@@ -173,7 +189,7 @@ export class UIManager implements PhaseSystem {
           this.frameCounter - this.lastTreasuryWarnFrame > 360
         ) {
           this.lastTreasuryWarnFrame = this.frameCounter;
-          this.notify('warn', 'Treasury Low', 'Income no longer covers upkeep.');
+          this.notify('warn', 'خزانه رو به کسری است', 'درآمد دیگر هزینه‌ها را پوشش نمی‌دهد.');
         }
       })
     );
@@ -189,6 +205,9 @@ export class UIManager implements PhaseSystem {
     if (update.kind !== 'frame') return;
     this.frameCounter = update.frame.frameIndex;
     this.notifications.update(this.frameCounter);
+    // The panel toggle exists only once a country is confirmed (before that
+    // the panel has nothing to show — a dead button would be noise).
+    this.statusPanelToggle.setVisible(context.state.player.countryConfirmed);
     if (this.frameCounter % 10 === 0) {
       this.hud.update(context);
     }

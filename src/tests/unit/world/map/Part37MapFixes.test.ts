@@ -300,14 +300,14 @@ describe('Part 3.7 — §B/§H hit-testing priority (city vs cell vs river)', ()
 describe('Part 3.7 — §C one central selection state (panel synchronization)', () => {
   it('every selection kind reports through selectionSummary and clears the others', () => {
     const slice = createDefaultMapSlice(columns, rows, cellSize);
-    expect(selectionSummary(slice, model)).toBe('nothing — click the map');
+    expect(selectionSummary(slice, model)).toBe('هیچ — روی نقشه کلیک کنید');
 
     const someKey = gridCellKeyAt(model, model.features.cellOwner.findIndex((o) => o >= 0));
     expect(someKey).not.toBeNull();
     setFeatureSelection(slice, { kind: 'grid', gridKey: someKey! });
     expect(slice.selectedGridKey).toBe(someKey);
     expect(selectionSummary(slice, model)).toBe(
-      `${someKey!.slice(someKey!.indexOf('#') + 1)} (grid cell, ${model.countries[someKey!.slice(0, someKey!.indexOf('#'))].name})`
+      `${someKey!.slice(someKey!.indexOf('#') + 1)} (خانهٔ شبکه، ${model.countries[someKey!.slice(0, someKey!.indexOf('#'))].name})`
     );
 
     const city = Object.values(model.cities)[0];
@@ -320,30 +320,30 @@ describe('Part 3.7 — §C one central selection state (panel synchronization)',
     expect(slice.selectedCityId).toBeNull(); // hierarchy cleared
     expect(slice.selectedProvinceId).toBeNull();
     expect(slice.selectedCountryId).toBeNull();
-    expect(selectionSummary(slice, model)).toBe(`${river.name} (river)`);
+    expect(selectionSummary(slice, model)).toBe(`${river.name} (رودخانه)`);
 
     const lake = model.features.lakes[0];
     if (lake !== undefined) {
       setFeatureSelection(slice, { kind: 'lake', lakeId: lake.id });
       expect(slice.selectedRiverId).toBeNull();
-      expect(selectionSummary(slice, model)).toBe(`${lake.name} (lake)`);
+      expect(selectionSummary(slice, model)).toBe(`${lake.name} (دریاچه)`);
     }
 
     const province = model.provinces[Object.keys(model.provinces)[0]];
     setMapSelection(slice, { provinceId: province.id, countryId: province.countryId });
-    expect(selectionSummary(slice, model)).toBe(`${province.name} (province)`);
+    expect(selectionSummary(slice, model)).toBe(`${province.name} (استان)`);
 
     setFeatureSelection(slice, { kind: 'grid', gridKey: someKey! });
     expect(slice.selectedProvinceId).toBeNull();
     expect(slice.selectedCountryId).toBeNull();
-    expect(selectionSummary(slice, model)).toContain('(grid cell');
+    expect(selectionSummary(slice, model)).toContain('(خانهٔ شبکه');
   });
 
   it('stale feature selections re-validate against the model (no phantom panels)', () => {
     const slice = createDefaultMapSlice(columns, rows, cellSize);
     setFeatureSelection(slice, { kind: 'grid', gridKey: 'country_999#Z9' });
     // The summary must not crash or invent data for unknown ids.
-    expect(selectionSummary(slice, model)).toContain('grid cell');
+    expect(selectionSummary(slice, model)).toContain('خانهٔ شبکه');
   });
 });
 

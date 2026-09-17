@@ -74,8 +74,8 @@ export function formatCalendarDate(date: CalendarDate): string {
 
 /** Month names for the campaign-elapsed stamp (calendar months, not counts). */
 const MONTH_NAMES: readonly string[] = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+  'ژانویه', 'فوریه', 'مارس', 'آوریل', 'مه', 'ژوئن',
+  'ژوئیه', 'اوت', 'سپتامبر', 'اکتبر', 'نوامبر', 'دسامبر'
 ];
 
 /** Zero-pads a number to 2 digits ("07:05"). */
@@ -85,15 +85,17 @@ function pad2(n: number): string {
 
 /**
  * Campaign-elapsed stamp shown in the time bar — the player-facing form of
- * the single source of truth, e.g. "Year 1 — January — Day 1 — 08:00".
+ * the single source of truth, e.g. «سال 1 — ژانویه — روز 1 — 08:00».
  *
  * Year counts campaigns years (1-based from the start year), the month is
  * the CALENDAR month of that year (a month COUNT like "Month 24" is noise —
  * the player reads January → February → March), and Day is 1-based within
  * the month, walked through real month lengths (correct for any start date).
+ * Latin digits are kept deliberately: they stay unambiguous inside the RTL
+ * time bar and read tabularly next to the numeric clock.
  */
 export function formatCalendarElapsed(date: CalendarDate, start: CalendarStart): string {
-  return `Year ${date.year - start.year + 1} — ${MONTH_NAMES[date.month - 1]} — Day ${date.day} — ${pad2(date.hour)}:${pad2(date.minute)}`;
+  return `سال ${date.year - start.year + 1} — ${MONTH_NAMES[date.month - 1]} — روز ${date.day} — ${pad2(date.hour)}:${pad2(date.minute)}`;
 }
 
 /** 1-based absolute day index (days since year 0, ignoring leap years). */

@@ -99,15 +99,15 @@ describe('PresidentStatusPanel (quick overview)', () => {
     // Economy rows read the REAL macro state (no invented UI numbers).
     const macro = context.state.economy.macro[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
-    const economyText = sectionText('ECONOMY');
-    expect(economyText).toContain('Treasury');
+    const economyText = sectionText('اقتصاد');
+    expect(economyText).toContain('خزانه');
     expect(economyText).toContain(Math.round(treasury).toLocaleString('en-US'));
     expect(economyText).toContain(Math.round(macro.gdp).toLocaleString('en-US'));
 
     // Military: strength cache + war count (0 in a fresh world).
-    const militaryText = sectionText('MILITARY');
-    expect(militaryText).toContain('Wars');
-    expect(militaryText).toContain('Strength');
+    const militaryText = sectionText('نظامی');
+    expect(militaryText).toContain('جنگ‌ها');
+    expect(militaryText).toContain('قدرت');
   });
 
   it('economy values track state changes (treasury in → panel follows)', () => {
@@ -122,7 +122,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
       delta: 5_000
     });
     panel.refresh();
-    expect(sectionText('ECONOMY')).toContain(Math.round(before + 5_000).toLocaleString('en-US'));
+    expect(sectionText('اقتصاد')).toContain(Math.round(before + 5_000).toLocaleString('en-US'));
     context.state.economy.treasury[countryId] = before;
     panel.refresh();
   });
@@ -142,7 +142,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
       .map((party) => party.support)
       .sort((a, b) => b - a);
     const firstRowText = textOf(partyRows[0]);
-    expect(firstRowText).toContain(`${Math.round(supports[0] * 100)}%`);
+    expect(firstRowText).toContain(`${Math.round(supports[0] * 100)}٪`);
     // The governing party (★ marker) is somewhere in the list.
     const allText = partyRows.map((row) => textOf(row)).join('\n');
     for (const party of Object.values(government.politics.parties)) {
@@ -171,7 +171,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
     });
     panel.refresh();
 
-    expect(sectionText('EVENTS')).toContain('1 pending');
+    expect(sectionText('رویدادها')).toContain('1 در انتظار تصمیم');
     const alertRows = findAll(adapter.rootElement, 'psp-alert');
     expect(alertRows.some((row) => textOf(row).includes(def.title))).toBe(true);
 
@@ -179,7 +179,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
     government.events.pending.length = 0;
     context.events.emit('government.eventResolved', { countryId, instanceId: 'inst-test-1', choiceId: 'a' });
     panel.refresh();
-    expect(sectionText('EVENTS')).not.toContain('1 pending');
+    expect(sectionText('رویدادها')).not.toContain('1 در انتظار تصمیم');
   });
 
   it('election section shows phase and months to the next election; campaign event flips it', () => {
@@ -188,13 +188,13 @@ describe('PresidentStatusPanel (quick overview)', () => {
     government.elections.phase = 'campaigning';
     context.events.emit('government.campaignStarted', { countryId, electionMonth: government.elections.nextElectionMonth });
     panel.refresh();
-    const electionText = sectionText('ELECTION');
-    expect(electionText).toContain('Campaigning ●');
+    const electionText = sectionText('انتخابات');
+    expect(electionText).toContain('کارزار انتخاباتی ●');
     const monthsLeft = Math.max(0, government.elections.nextElectionMonth - government.lastSimMonth);
-    expect(electionText).toContain(`${monthsLeft} month`);
+    expect(electionText).toContain(`${monthsLeft} ماه`);
     government.elections.phase = 'idle';
     panel.refresh();
-    expect(sectionText('ELECTION')).toContain('Idle');
+    expect(sectionText('انتخابات')).toContain('عادی');
   });
 
   it('the OPEN PRESIDENT OFFICE button opens the dashboard ONCE (no parallel screen)', () => {
@@ -209,8 +209,8 @@ describe('PresidentStatusPanel (quick overview)', () => {
 
   it('section deep links open the dashboard at the RIGHT section', () => {
     const titles = findAll(adapter.rootElement, 'psp-section-title');
-    const economyTitle = titles.find((title) => title.text === 'ECONOMY');
-    const eventsTitle = titles.find((title) => title.text === 'EVENTS');
+    const economyTitle = titles.find((title) => title.text === 'اقتصاد');
+    const eventsTitle = titles.find((title) => title.text === 'رویدادها');
     expect(economyTitle).toBeDefined();
     expect(eventsTitle).toBeDefined();
 
@@ -249,7 +249,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
     const alertRows = findAll(adapter.rootElement, 'psp-alert');
     expect(alertRows.length).toBeLessThanOrEqual(3);
     const alertText = alertRows.map((row) => textOf(row)).join('\n');
-    expect(alertText).toContain('Treasury deficit');
+    expect(alertText).toContain('کسری خزانه');
 
     // Calm again → the 'All quiet' state.
     context.state.economy.treasury[countryId] = 1_000;
@@ -268,11 +268,27 @@ describe('PresidentStatusPanel (quick overview)', () => {
     const unit = context.state.military.units[unitId];
     unit.operationalState = 'inCombat';
     panel.refresh();
-    const militaryText = sectionText('MILITARY');
-    expect(militaryText).toContain('In Combat');
+    const militaryText = sectionText('نظامی');
+    expect(militaryText).toContain('در نبرد');
     // Active Units 1 · In Combat 1 · Soldiers = the unit's current soldiers.
     expect(militaryText).toContain(unitTypes[0].soldiers.toLocaleString('en-US'));
     unit.operationalState = 'idle';
     panel.refresh();
+  });
+
+  it('the toggle button collapses and re-opens the panel stably (state persists across refreshes)', () => {
+    const root = panel.root as InMemoryUIElement;
+    // Currently open (country confirmed earlier).
+    expect(root.visible).toBe(true);
+    // Collapse → hidden, and STAYS hidden across cadence refreshes.
+    expect(panel.toggle()).toBe(true);
+    expect(panel.isCollapsed).toBe(true);
+    expect(root.visible).toBe(false);
+    panel.refresh();
+    expect(root.visible).toBe(false);
+    // Re-open → visible again immediately.
+    expect(panel.toggle()).toBe(false);
+    expect(panel.isCollapsed).toBe(false);
+    expect(root.visible).toBe(true);
   });
 });

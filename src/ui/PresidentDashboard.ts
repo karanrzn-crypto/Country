@@ -10,9 +10,10 @@ import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 
 /**
  * President Dashboard (Phase 2) — the head-of-state command center.
+ * All player-facing text is PERSIAN; ids stay technical.
  *
- * Sections (per spec 2.10): Overview · Economy · Budget · Politics ·
- * Government (ministries) · Decisions · Events · Public Opinion · Elections.
+ * Sections (per spec 2.10): نمای کلی · اقتصاد · بودجه · سیاست ·
+ * دولت (وزارتخانه‌ها) · تصمیم‌ها · رویدادها · افکار عمومی · انتخابات.
  *
  * The UI owns NO simulation state: every value is read from GameState at
  * refresh time, every action goes out as a command (tax/spending/decision/
@@ -34,15 +35,15 @@ export type SectionId =
   | 'elections';
 
 const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
-  overview: 'Overview',
-  economy: 'Economy',
-  budget: 'Budget',
-  politics: 'Politics',
-  government: 'Government',
-  decisions: 'Decisions',
-  events: 'Events',
-  opinion: 'Opinion',
-  elections: 'Elections'
+  overview: 'نمای کلی',
+  economy: 'اقتصاد',
+  budget: 'بودجه',
+  politics: 'سیاست',
+  government: 'دولت',
+  decisions: 'تصمیم‌ها',
+  events: 'رویدادها',
+  opinion: 'افکار عمومی',
+  elections: 'انتخابات'
 };
 
 const TAB_ORDER: readonly SectionId[] = [
@@ -58,11 +59,11 @@ const TAB_ORDER: readonly SectionId[] = [
 ];
 
 const TOPIC_LABELS: Readonly<Record<OpinionTopic, string>> = {
-  economy: 'Economy',
-  taxes: 'Taxes',
-  services: 'Public services',
-  corruption: 'Corruption',
-  security: 'Security'
+  economy: 'اقتصاد',
+  taxes: 'مالیات‌ها',
+  services: 'خدمات عمومی',
+  corruption: 'فساد',
+  security: 'امنیت'
 };
 
 const SECTOR_ORDER: readonly string[] = [
@@ -75,6 +76,66 @@ const SECTOR_ORDER: readonly string[] = [
   'services',
   'trade'
 ];
+
+const SECTOR_LABELS: Readonly<Record<string, string>> = {
+  agriculture: 'کشاورزی',
+  industry: 'صنعت',
+  energy: 'انرژی',
+  mining: 'معدن',
+  technology: 'فناوری',
+  construction: 'ساخت‌وساز',
+  services: 'خدمات',
+  trade: 'بازرگانی'
+};
+
+/** Budget stepper rows: technical category ids → Persian display labels. */
+const TAX_LABELS: Readonly<Record<TaxCategory, string>> = {
+  income: 'مالیات بر درآمد',
+  corporate: 'مالیات شرکتی',
+  trade: 'عوارض تجاری'
+};
+
+const SPENDING_LABELS: Readonly<Record<SpendingCategory, string>> = {
+  military: 'نظامی',
+  healthcare: 'بهداشت',
+  education: 'آموزش',
+  infrastructure: 'زیرساخت',
+  welfare: 'رفاه',
+  government: 'ادارهٔ کشور',
+  other: 'سایر'
+};
+
+/** Effect-target metric ids → Persian labels (unknown ids pass through). */
+const TARGET_LABELS: Readonly<Record<string, string>> = {
+  approval: 'محبوبیت',
+  corruption: 'فساد',
+  executiveAuthority: 'اقتدار اجرایی',
+  gdpGrowth: 'رشد اقتصادی',
+  inflation: 'تورم',
+  militaryPower: 'قدرت نظامی',
+  politicalSupport: 'حمایت سیاسی',
+  protestPressure: 'فشار اعتراض',
+  publicTrust: 'اعتماد عمومی',
+  stability: 'ثبات',
+  strikePressure: 'فشار اعتصاب',
+  treasury: 'خزانه',
+  unemployment: 'بیکاری'
+};
+
+/** Decision block-reason ids → Persian labels. */
+const BLOCK_REASON_LABELS: Readonly<Record<string, string>> = {
+  'no-country': 'کشوری انتخاب نشده است',
+  cooldown: 'در دورهٔ انتظار تصمیم قبلی',
+  preconditions: 'پیش‌شرط‌ها برقرار نیست',
+  treasury: 'خزانه به اندازهٔ کافی پر نیست'
+};
+
+const PROTEST_LABELS: Readonly<Record<string, string>> = {
+  none: 'هیچ',
+  minor: 'جزئی',
+  significant: 'قابل توجه',
+  massive: 'گسترده'
+};
 
 export class PresidentDashboard {
   private context: SystemContext | null = null;
@@ -138,10 +199,10 @@ export class PresidentDashboard {
 
     const header = this.create('div', 'pd-header');
     const title = this.create('h2');
-    title.setText('PRESIDENTIAL OFFICE');
+    title.setText('دفتر رئیس‌جمهور');
     header.appendChild(title);
     const closeButton = this.create('button', 'pd-close');
-    closeButton.setText('Close');
+    closeButton.setText('بستن');
     closeButton.onClick(() => this.send({ type: 'ui.closeScreen', screenId: 'president' }));
     header.appendChild(closeButton);
     container.appendChild(header);
@@ -185,18 +246,18 @@ export class PresidentDashboard {
 
   private buildOverview(container: UIElement): UIElement {
     const section = this.section(container, 'pd-overview');
-    this.addRows(section, ['President', 'Party', 'Term', 'Approval', 'Political support', 'Executive authority', 'Public trust', 'Corruption', 'Protests', 'Urban network'], 'overview.');
+    this.addRows(section, ['رئیس‌جمهور', 'حزب', 'دورهٔ ریاست', 'محبوبیت', 'حمایت سیاسی', 'اقتدار اجرایی', 'اعتماد عمومی', 'فساد', 'اعتراض‌ها', 'شبکهٔ شهری'], 'overview.');
     return section;
   }
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    this.addRows(section, ['GDP (annual)', 'Growth', 'Inflation', 'Unemployment', 'Debt', 'Treasury', 'Revenue / month', 'Spending / month', 'Balance / month', 'Trade balance', 'Population', 'Workforce'], 'economy.');
+    this.addRows(section, ['تولید ناخالص (سالانه)', 'رشد', 'تورم', 'بیکاری', 'بدهی', 'خزانه', 'درآمد ماهانه', 'هزینهٔ ماهانه', 'تراز ماهانه', 'تراز تجاری', 'جمعیت', 'نیروی کار'], 'economy.');
     const sectorTitle = this.create('div', 'pd-subtitle');
-    sectorTitle.setText('SECTORS — output · jobs · productivity');
+    sectorTitle.setText('بخش‌ها — تولید · شغل · بهره‌وری');
     section.appendChild(sectorTitle);
     for (const sectorId of SECTOR_ORDER) {
-      this.addRow(section, `sector.${sectorId}`, sectorId);
+      this.addRow(section, `sector.${sectorId}`, SECTOR_LABELS[sectorId] ?? sectorId);
     }
     return section;
   }
@@ -205,26 +266,26 @@ export class PresidentDashboard {
     const section = this.section(container, 'pd-budget');
 
     const taxTitle = this.create('div', 'pd-subtitle');
-    taxTitle.setText('TAX RATES');
+    taxTitle.setText('نرخ مالیات‌ها');
     section.appendChild(taxTitle);
     for (const category of TAX_CATEGORIES) {
-      section.appendChild(this.buildStepperRow(category, 'tax', 0.01));
+      section.appendChild(this.buildStepperRow(TAX_LABELS[category], 'tax', category, 0.01));
     }
 
     const spendTitle = this.create('div', 'pd-subtitle');
-    spendTitle.setText('SPENDING — annual share of GDP');
+    spendTitle.setText('هزینه‌ها — سهم سالانه از تولید ناخالص');
     section.appendChild(spendTitle);
     for (const category of SPENDING_CATEGORIES) {
-      section.appendChild(this.buildStepperRow(category, 'spending', 0.005));
+      section.appendChild(this.buildStepperRow(SPENDING_LABELS[category], 'spending', category, 0.005));
     }
     return section;
   }
 
   private buildPolitics(container: UIElement): UIElement {
     const section = this.section(container, 'pd-politics');
-    this.addRows(section, ['Government', 'Parliament seats', 'Protests', 'Strikes'], 'politics.');
+    this.addRows(section, ['دولت', 'کرسی‌های پارلمان', 'اعتراض‌ها', 'اعتصاب‌ها'], 'politics.');
     const partiesTitle = this.create('div', 'pd-subtitle');
-    partiesTitle.setText('PARTIES — support · seats · role');
+    partiesTitle.setText('احزاب — حمایت · کرسی · نقش');
     section.appendChild(partiesTitle);
     const parties = this.create('div', 'pd-parties');
     section.appendChild(parties);
@@ -235,7 +296,7 @@ export class PresidentDashboard {
   private buildGovernment(container: UIElement): UIElement {
     const section = this.section(container, 'pd-government');
     const title = this.create('div', 'pd-subtitle');
-    title.setText('MINISTRIES — funding drives efficiency');
+    title.setText('وزارتخانه‌ها — بودجه، کارایی می‌سازد');
     section.appendChild(title);
     const list = this.create('div', 'pd-ministries');
     section.appendChild(list);
@@ -246,7 +307,7 @@ export class PresidentDashboard {
   private buildDecisions(container: UIElement): UIElement {
     const section = this.section(container, 'pd-decisions');
     const title = this.create('div', 'pd-subtitle');
-    title.setText('PRESIDENTIAL DECISIONS — data-driven registry');
+    title.setText('تصمیم‌های ریاست‌جمهوری — فهرست داده‌محور');
     section.appendChild(title);
     const list = this.create('div', 'pd-decision-list');
     section.appendChild(list);
@@ -257,7 +318,7 @@ export class PresidentDashboard {
   private buildEvents(container: UIElement): UIElement {
     const section = this.section(container, 'pd-events');
     const title = this.create('div', 'pd-subtitle');
-    title.setText('PENDING EVENTS — your choice shapes the outcome');
+    title.setText('رویدادهای در انتظار — انتخاب شما سرنوشت را می‌سازد');
     section.appendChild(title);
     const list = this.create('div', 'pd-event-list');
     section.appendChild(list);
@@ -268,7 +329,7 @@ export class PresidentDashboard {
   private buildOpinion(container: UIElement): UIElement {
     const section = this.section(container, 'pd-opinion');
     const title = this.create('div', 'pd-subtitle');
-    title.setText('PUBLIC OPINION — what the country thinks');
+    title.setText('افکار عمومی — نظر کشور دربارهٔ چه می‌گذرد');
     section.appendChild(title);
     this.addRows(section, OPINION_TOPICS.map((topic) => TOPIC_LABELS[topic]), 'opinion.');
     return section;
@@ -276,7 +337,7 @@ export class PresidentDashboard {
 
   private buildElections(container: UIElement): UIElement {
     const section = this.section(container, 'pd-elections');
-    this.addRows(section, ['Status', 'Next election', 'Last election', 'Winner', 'Your party support'], 'elections.');
+    this.addRows(section, ['وضعیت', 'انتخابات بعدی', 'انتخابات گذشته', 'برنده', 'حمایت از حزب شما'], 'elections.');
     const results = this.create('div', 'pd-election-results');
     section.appendChild(results);
     this.track(results, 'results');
@@ -284,12 +345,12 @@ export class PresidentDashboard {
   }
 
   /** A labeled row with −/+ steppers wired to a budget command. */
-  private buildStepperRow(category: string, kind: 'tax' | 'spending', step: number): UIElement {
+  private buildStepperRow(label: string, kind: 'tax' | 'spending', category: string, step: number): UIElement {
     const row = this.create('div', 'pd-stepper');
-    const label = this.create('span', 'pd-stepper-label');
-    label.setText(category);
+    const rowLabel = this.create('span', 'pd-stepper-label');
+    rowLabel.setText(label);
     const value = this.create('span', 'pd-stepper-value');
-    row.appendChild(label);
+    row.appendChild(rowLabel);
     row.appendChild(value);
     const minus = this.create('button', 'pd-step-btn');
     minus.setText('−');
@@ -313,37 +374,37 @@ export class PresidentDashboard {
     const summary = networkSummary(this.context?.state.cityAreas.network ?? { areas: {}, links: {} }, countryId);
     const termMonthsLeft = Math.max(0, government.president.termEndMonth - month);
 
-    this.rows.get('overview.President')?.setText(government.president.name);
-    this.rows.get('overview.Party')?.setText(partyName(government, government.president.partyId));
-    this.rows.get('overview.Term')?.setText(`${Math.floor(termMonthsLeft / 12)}y ${termMonthsLeft % 12}m left · term ${government.president.termsServed}`);
-    this.rows.get('overview.Approval')?.setText(percent(government.president.approval));
-    this.rows.get('overview.Political support')?.setText(percent(government.president.politicalSupport));
-    this.rows.get('overview.Executive authority')?.setText(percent(government.president.executiveAuthority));
-    this.rows.get('overview.Public trust')?.setText(percent(government.politics.publicTrust));
-    this.rows.get('overview.Corruption')?.setText(percent(government.politics.corruption));
-    this.rows.get('overview.Protests')?.setText(`${government.politics.protests} (pressure ${percent(government.politics.protestPressure)})`);
-    this.rows.get('overview.Urban network')?.setText(`${summary.areas} areas · ${summary.links} links · connectivity ${percent(summary.connectivity)}`);
+    this.rows.get('overview.رئیس‌جمهور')?.setText(government.president.name);
+    this.rows.get('overview.حزب')?.setText(partyName(government, government.president.partyId));
+    this.rows.get('overview.دورهٔ ریاست')?.setText(`${Math.floor(termMonthsLeft / 12)} سال و ${termMonthsLeft % 12} ماه مانده · دورهٔ ${government.president.termsServed}`);
+    this.rows.get('overview.محبوبیت')?.setText(percent(government.president.approval));
+    this.rows.get('overview.حمایت سیاسی')?.setText(percent(government.president.politicalSupport));
+    this.rows.get('overview.اقتدار اجرایی')?.setText(percent(government.president.executiveAuthority));
+    this.rows.get('overview.اعتماد عمومی')?.setText(percent(government.politics.publicTrust));
+    this.rows.get('overview.فساد')?.setText(percent(government.politics.corruption));
+    this.rows.get('overview.اعتراض‌ها')?.setText(`${PROTEST_LABELS[government.politics.protests] ?? government.politics.protests} (فشار ${percent(government.politics.protestPressure)})`);
+    this.rows.get('overview.شبکهٔ شهری')?.setText(`${summary.areas} ناحیه · ${summary.links} پیوند · اتصال ${percent(summary.connectivity)}`);
   }
 
   private refreshEconomy(countryId: string): void {
     const macro = this.context?.state.economy.macro[countryId];
     if (macro === undefined) return;
     const treasury = this.context?.state.economy.treasury[countryId] ?? 0;
-    this.rows.get('economy.GDP (annual)')?.setText(money(macro.gdp));
-    this.rows.get('economy.Growth')?.setText(percentSigned(macro.gdpGrowth));
-    this.rows.get('economy.Inflation')?.setText(percentSigned(macro.inflation));
-    this.rows.get('economy.Unemployment')?.setText(percent(macro.unemployment));
-    this.rows.get('economy.Debt')?.setText(money(macro.debt));
-    this.rows.get('economy.Treasury')?.setText(money(treasury));
-    this.rows.get('economy.Revenue / month')?.setText(money(macro.lastRevenue));
-    this.rows.get('economy.Spending / month')?.setText(money(macro.lastSpending));
-    this.rows.get('economy.Balance / month')?.setText(moneySigned(macro.lastBalance));
-    this.rows.get('economy.Trade balance')?.setText(moneySigned(macro.trade.balance));
-    this.rows.get('economy.Population')?.setText(number(this.context?.state.countries.countries[countryId]?.population ?? 0));
-    this.rows.get('economy.Workforce')?.setText(number(Math.round((this.context?.state.countries.countries[countryId]?.population ?? 0) * 0.52)));
+    this.rows.get('economy.تولید ناخالص (سالانه)')?.setText(money(macro.gdp));
+    this.rows.get('economy.رشد')?.setText(percentSigned(macro.gdpGrowth));
+    this.rows.get('economy.تورم')?.setText(percentSigned(macro.inflation));
+    this.rows.get('economy.بیکاری')?.setText(percent(macro.unemployment));
+    this.rows.get('economy.بدهی')?.setText(money(macro.debt));
+    this.rows.get('economy.خزانه')?.setText(money(treasury));
+    this.rows.get('economy.درآمد ماهانه')?.setText(money(macro.lastRevenue));
+    this.rows.get('economy.هزینهٔ ماهانه')?.setText(money(macro.lastSpending));
+    this.rows.get('economy.تراز ماهانه')?.setText(moneySigned(macro.lastBalance));
+    this.rows.get('economy.تراز تجاری')?.setText(moneySigned(macro.trade.balance));
+    this.rows.get('economy.جمعیت')?.setText(number(this.context?.state.countries.countries[countryId]?.population ?? 0));
+    this.rows.get('economy.نیروی کار')?.setText(number(Math.round((this.context?.state.countries.countries[countryId]?.population ?? 0) * 0.52)));
     for (const [sectorId, sector] of Object.entries(macro.sectors)) {
       this.rows.get(`sector.${sectorId}`)?.setText(
-        `${money(sector.output)} · ${number(Math.round(sector.jobs))} jobs · ${number(Math.round(sector.productivity))}$/yr`
+        `${money(sector.output)} · ${number(Math.round(sector.jobs))} شغل · ${number(Math.round(sector.productivity))} دلار/سال`
       );
     }
   }
@@ -363,15 +424,15 @@ export class PresidentDashboard {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
     const coalitionNames = government.politics.coalition.map((partyId) => partyName(government, partyId)).join(' + ');
-    this.rows.get('politics.Government')?.setText(coalitionNames || 'caretaker');
+    this.rows.get('politics.دولت')?.setText(coalitionNames || 'دولت موقت');
     const seats = government.politics.parliament.seats;
     const seatSummary = Object.keys(seats).length
       ? Object.entries(seats).map(([partyId, count]) => `${partyName(government, partyId)}: ${count}`).join(' · ')
-      : 'not elected yet';
-    this.rows.get('politics.Parliament seats')?.setText(seatSummary);
-    this.rows.get('politics.Protests')?.setText(government.politics.protests);
-    this.rows.get('politics.Strikes')?.setText(
-      government.politics.generalStrikeUntilMonth !== null ? `general strike until month ${government.politics.generalStrikeUntilMonth}` : `pressure ${percent(government.politics.strikePressure)}`
+      : 'هنوز انتخاباتی برگزار نشده است';
+    this.rows.get('politics.کرسی‌های پارلمان')?.setText(seatSummary);
+    this.rows.get('politics.اعتراض‌ها')?.setText(PROTEST_LABELS[government.politics.protests] ?? government.politics.protests);
+    this.rows.get('politics.اعتصاب‌ها')?.setText(
+      government.politics.generalStrikeUntilMonth !== null ? `اعتصاب سراسری تا ماه ${government.politics.generalStrikeUntilMonth}` : `فشار ${percent(government.politics.strikePressure)}`
     );
     this.rebuildParties(government);
   }
@@ -385,7 +446,7 @@ export class PresidentDashboard {
       for (const party of parties) {
         const row = this.create('div', party.inGovernment ? 'pd-party in-gov' : 'pd-party');
         row.setText(
-          `${party.name} — ${percent(party.support)} support · ${Math.round(party.seatShare * government.politics.parliament.seatsTotal)} seats${party.inGovernment ? ' · in government' : ''}`
+          `${party.name} — ${percent(party.support)} حمایت · ${Math.round(party.seatShare * government.politics.parliament.seatsTotal)} کرسی${party.inGovernment ? ' · در دولت' : ''}`
         );
         rows.push(row);
       }
@@ -399,11 +460,12 @@ export class PresidentDashboard {
     if (context === undefined || context === null || government === undefined) return;
     this.rebuild('ministries', this.parents.get('ministries'), () => {
       const rows: UIElement[] = [];
-      for (const [ministryId, ministry] of Object.entries(government.ministries)) {
+      for (const ministryId of Object.keys(government.ministries)) {
+        const ministry = government.ministries[ministryId];
         const def = context.data.ministryTemplateList.find((candidate) => candidate.id === ministryId);
         const row = this.create('div', 'pd-ministry-row');
         const label = this.create('span', 'pd-ministry-name');
-        label.setText(`${def?.name ?? ministryId} — efficiency ${percent(ministry.efficiency)}`);
+        label.setText(`${def?.name ?? ministryId} — کارایی ${percent(ministry.efficiency)}`);
         const minus = this.create('button', 'pd-step-btn');
         minus.setText('−');
         const plus = this.create('button', 'pd-step-btn');
@@ -432,19 +494,19 @@ export class PresidentDashboard {
         const row = this.create('div', reason === null ? 'pd-decision ok' : 'pd-decision blocked');
         const name = this.create('div', 'pd-decision-name');
         const cost = decision.cost.treasury ?? 0;
-        name.setText(`${decision.name} — cost ${money(cost)}${decision.durationMonths > 0 ? ` · ${decision.durationMonths} months` : ''}`);
+        name.setText(`${decision.name} — هزینه ${money(cost)}${decision.durationMonths > 0 ? ` · ${decision.durationMonths} ماه` : ''}`);
         const description = this.create('div', 'pd-decision-desc');
-        description.setText(`${decision.description}  Effects: ${describeEffects(decision.effects)}`);
+        description.setText(`${decision.description}  اثرها: ${describeEffects(decision.effects)}`);
         row.appendChild(name);
         row.appendChild(description);
         if (reason === null) {
           const enact = this.create('button', 'pd-enact');
-          enact.setText('Enact');
+          enact.setText('اجرا');
           enact.onClick(() => this.send({ type: 'government.enactDecision', countryId, decisionId: decision.id }));
           row.appendChild(enact);
         } else {
           const reasonText = this.create('div', 'pd-decision-reason');
-          reasonText.setText(`Blocked: ${reason}`);
+          reasonText.setText(`مسدود: ${BLOCK_REASON_LABELS[reason] ?? reason}`);
           row.appendChild(reasonText);
         }
         rows.push(row);
@@ -461,7 +523,7 @@ export class PresidentDashboard {
       const rows: UIElement[] = [];
       if (government.events.pending.length === 0) {
         const empty = this.create('div', 'pd-empty');
-        empty.setText('No pending events — the country is calm.');
+        empty.setText('رویداد در انتظاری وجود ندارد — کشور در آرامش است.');
         rows.push(empty);
         return rows;
       }
@@ -470,7 +532,7 @@ export class PresidentDashboard {
         if (def === undefined) continue;
         const block = this.create('div', 'pd-event');
         const title = this.create('div', 'pd-event-title');
-        title.setText(`${def.title} — expires month ${pending.expiresMonth}`);
+        title.setText(`${def.title} — مهلت تا ماه ${pending.expiresMonth}`);
         const description = this.create('div', 'pd-event-desc');
         description.setText(def.description);
         block.appendChild(title);
@@ -501,11 +563,11 @@ export class PresidentDashboard {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
     const elections = government.elections;
-    this.rows.get('elections.Status')?.setText(elections.phase === 'campaigning' ? 'CAMPAIGNING' : 'idle');
-    this.rows.get('elections.Next election')?.setText(`month ${elections.nextElectionMonth}`);
-    this.rows.get('elections.Last election')?.setText(elections.lastElectionMonth >= 0 ? `month ${elections.lastElectionMonth}` : '—');
-    this.rows.get('elections.Winner')?.setText(elections.lastWinnerId !== null ? partyName(government, elections.lastWinnerId) : '—');
-    this.rows.get('elections.Your party support')?.setText(percent(government.politics.parties[government.president.partyId]?.support ?? 0));
+    this.rows.get('elections.وضعیت')?.setText(elections.phase === 'campaigning' ? 'در حال کارزار' : 'عادی');
+    this.rows.get('elections.انتخابات بعدی')?.setText(`ماه ${elections.nextElectionMonth}`);
+    this.rows.get('elections.انتخابات گذشته')?.setText(elections.lastElectionMonth >= 0 ? `ماه ${elections.lastElectionMonth}` : '—');
+    this.rows.get('elections.برنده')?.setText(elections.lastWinnerId !== null ? partyName(government, elections.lastWinnerId) : '—');
+    this.rows.get('elections.حمایت از حزب شما')?.setText(percent(government.politics.parties[government.president.partyId]?.support ?? 0));
 
     this.rebuild('results', this.parents.get('results'), () => {
       const rows: UIElement[] = [];
@@ -514,7 +576,7 @@ export class PresidentDashboard {
           const row = this.create('div', 'pd-result-row');
           const party = government.politics.parties[partyId];
           const seats = Math.round((party?.seatShare ?? 0) * government.politics.parliament.seatsTotal);
-          row.setText(`${partyName(government, partyId)}: ${percent(share)} · ${seats} seats`);
+          row.setText(`${partyName(government, partyId)}: ${percent(share)} · ${seats} کرسی`);
           rows.push(row);
         }
       }
@@ -591,16 +653,16 @@ function partyName(government: GovernmentCountryState, partyId: string): string 
 }
 
 function percent(value: number): string {
-  return `${Math.round(value * 100)}%`;
+  return `${Math.round(value * 100)}٪`;
 }
 
 function percentSigned(value: number): string {
-  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}٪`;
 }
 
 function money(value: number): string {
-  if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)}B$`;
-  return `${Math.round(value)}M$`;
+  if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)} میلیارد دلار`;
+  return `${Math.round(value)} میلیون دلار`;
 }
 
 function moneySigned(value: number): string {
@@ -608,7 +670,7 @@ function moneySigned(value: number): string {
 }
 
 function sentiment(value: number): string {
-  const label = value > 0.15 ? 'pleased' : value < -0.15 ? 'angry' : 'content';
+  const label = value > 0.15 ? 'راضی' : value < -0.15 ? 'خشمگین' : 'میانه‌رو';
   return `${label} (${value >= 0 ? '+' : ''}${Math.round(value * 100)})`;
 }
 
@@ -616,22 +678,26 @@ function number(value: number): string {
   return value.toLocaleString('en-US');
 }
 
-/** Effect summary: 'mul' always reads as %, money targets in M$, rates in %. */
+/** Effect summary: 'mul' always reads as %, money targets in Persian units,
+ *  rates in %. Known metric ids get Persian labels; unknown pass through. */
 function describeEffects(effects: readonly EffectDef[]): string {
   return effects
     .map((effect) => {
       const sign = effect.value >= 0 ? '+' : '−';
       const magnitude = Math.abs(effect.value);
-      const duration = effect.durationMonths !== undefined && effect.durationMonths > 0 ? ` (${effect.durationMonths}m)` : '';
+      const duration = effect.durationMonths !== undefined && effect.durationMonths > 0 ? ` (${effect.durationMonths} ماه)` : '';
       // 'mul' is always a percentage modifier; 'add' is M$ for money/sector
       // targets and percentage points for rates (approval, growth, …).
+      const targetLabel = effect.target.startsWith('sector.')
+        ? (SECTOR_LABELS[effect.target.slice('sector.'.length)] ?? effect.target)
+        : (TARGET_LABELS[effect.target] ?? effect.target);
       if (effect.mode === 'mul') {
-        return `${effect.target} ${sign}${(magnitude * 100).toFixed(0)}%${duration}`;
+        return `${targetLabel} ${sign}${(magnitude * 100).toFixed(0)}٪${duration}`;
       }
       const moneyTargets = ['treasury', 'debt'];
       const isMoney = moneyTargets.includes(effect.target) || effect.target.startsWith('sector.');
-      const amount = isMoney ? `${sign}${money(magnitude)}` : `${sign}${(magnitude * 100).toFixed(1)}%`;
-      return `${effect.target} ${amount}${duration}`;
+      const amount = isMoney ? `${sign}${money(magnitude)}` : `${sign}${(magnitude * 100).toFixed(1)}٪`;
+      return `${targetLabel} ${amount}${duration}`;
     })
     .join(', ');
 }

@@ -60,7 +60,7 @@ describe('MapUI country-select screen', () => {
   it('lists every country from the model with flags (data-driven, none hardcoded)', () => {
     const rows = findAll(adapter.rootElement, 'map-country-row');
     expect(rows.length).toBe(context.map.countryOrder.length);
-    expect(textOf(adapter.rootElement)).toContain('Choose Your Country');
+    expect(textOf(adapter.rootElement)).toContain('کشور خود را انتخاب کنید');
     const flags = findAll(adapter.rootElement, 'map-row-flag');
     expect(flags.length).toBe(rows.length);
     for (const flag of flags) {
@@ -99,27 +99,28 @@ describe('MapUI country-select screen', () => {
 
   it('layer toggles exist for every registered layer with labels', () => {
     const toggles = findAll(adapter.rootElement, 'map-layer-toggle');
-    // Registry order — all 27 layers have a button.
-    expect(toggles.length).toBe(27);
+    // Registry order — 26 layers after the Roads removal.
+    expect(toggles.length).toBe(26);
     const texts = toggles.map((button) => button.text);
-    expect(texts).toContain('Biomes');
-    expect(texts).toContain('Terrain');
-    expect(texts).toContain('Roads');
-    expect(texts).toContain('Rivers');
-    expect(texts).toContain('Lakes / Water');
-    expect(texts).toContain('Geographic Grid');
-    expect(texts).toContain('Airports');
-    expect(texts).toContain('Buildings');
-    expect(texts).toContain('Strategic Value');
-    expect(texts).toContain('Industry');
-    expect(texts).toContain('Resources');
-    expect(texts).toContain('Ports');
-    expect(texts).toContain('Railways');
-    expect(texts).toContain('Military');
-    expect(texts).toContain('Provinces');
-    expect(texts).toContain('Population');
-    expect(texts).toContain('Economy');
-    expect(texts).toContain('Weather');
-    expect(texts).toContain('Intelligence');
+    expect(texts).toContain('زیست‌بوم‌ها');
+    expect(texts).toContain('توپوگرافی');
+    expect(texts).not.toContain('Roads');
+    expect(texts).not.toContain('جاده‌ها');
+    expect(texts).toContain('رودخانه‌ها');
+    expect(texts).toContain('دریاچه‌ها / آب');
+    expect(texts).toContain('شبکهٔ جغرافیایی');
+    expect(texts).toContain('فرودگاه‌ها');
+    expect(texts).toContain('ساختمان‌ها');
+    expect(texts).toContain('ارزش راهبردی');
+    expect(texts).toContain('صنعت');
+    expect(texts).toContain('منابع');
+    expect(texts).toContain('بنادر');
+    expect(texts).toContain('راه‌آهن‌ها');
+    expect(texts).toContain('نظامی');
+    expect(texts).toContain('استان‌ها');
+    expect(texts).toContain('جمعیت');
+    expect(texts).toContain('اقتصاد');
+    expect(texts).toContain('آب‌وهوا');
+    expect(texts).toContain('اطلاعات');
   });
 });

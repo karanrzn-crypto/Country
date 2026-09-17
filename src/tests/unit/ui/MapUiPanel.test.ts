@@ -51,9 +51,9 @@ describe('flag asset pipeline', () => {
 
 describe('formatCompact', () => {
   it('formats large numbers compactly', () => {
-    expect(formatCompact(7_400_000)).toBe('7.4M');
-    expect(formatCompact(960_000)).toBe('960k');
-    expect(formatCompact(2_100_000_000)).toBe('2.1B');
+    expect(formatCompact(7_400_000)).toBe('7.4 میلیون');
+    expect(formatCompact(960_000)).toBe('960 هزار');
+    expect(formatCompact(2_100_000_000)).toBe('2.1 میلیارد');
     expect(formatCompact(850)).toBe('850');
   });
 });
@@ -123,7 +123,7 @@ describe('MapUI country info panel (Part 2)', () => {
     expect(detailText).toContain(context.map.cities[state.capitalId as string].name);
 
     // Economy / military values are rendered from the slice.
-    expect(detailText).toContain(`${state.economy.gdp}B`);
+    expect(detailText).toContain(`${state.economy.gdp} میلیارد دلار`);
     expect(detailText).toContain(formatCompact(state.population));
     expect(detailText).toContain(`${state.military.aircraft}`);
 

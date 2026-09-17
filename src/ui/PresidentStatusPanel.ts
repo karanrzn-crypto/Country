@@ -14,7 +14,9 @@ import type { GovernmentCountryState } from '../government/types';
  * the matching PresidentDashboard section.
  *
  * Architecture contract (spec 13):
- *  - owns NO state: every value is read from GameState at refresh time;
+ *  - owns NO simulation state: every value is read from GameState at
+ *    refresh time (the ONLY UI-session flag is `collapsed`, driven by the
+ *    dedicated toggle button — open/closed stays stable across refreshes);
  *  - sends NO simulation-affecting commands: navigation goes through the
  *    existing PresidentDashboard (UI → CommandBus → Game/Core → GameState
  *    contract is untouched — the dashboard owns the actions);
@@ -64,6 +66,12 @@ export class PresidentStatusPanel {
   private readonly sections = new Map<string, PanelSection>();
   private readonly dynamic = new Map<string, UIElement[]>();
   private readonly dynamicSignatures = new Map<string, string>();
+  /**
+   * UI-session visibility flag for the TOGGLE BUTTON (not simulation
+   * state): the player can collapse the panel; the choice persists across
+   * refreshes until they toggle it back.
+   */
+  private collapsed = false;
   /** The panel element (UIManager appends it to the UI root). */
   readonly root: UIElement;
   private readonly identity: UIElement;
@@ -82,10 +90,10 @@ export class PresidentStatusPanel {
     // —— header: title + the full-office button ——
     const header = create('div', 'psp-header');
     const title = create('span', 'psp-title');
-    title.setText('PRESIDENT');
+    title.setText('رئیس‌جمهور');
     header.appendChild(title);
     const open = create('button', 'psp-open');
-    open.setText('OPEN PRESIDENT OFFICE');
+    open.setText('دفتر رئیس‌جمهور');
     open.onClick(() => this.dashboard.openAt('overview'));
     header.appendChild(open);
     this.root.appendChild(header);
@@ -95,22 +103,22 @@ export class PresidentStatusPanel {
     this.root.appendChild(this.identity);
 
     // —— fixed sections (top → bottom) ——
-    this.addSection('economy', 'ECONOMY', ['Treasury', 'GDP', 'Growth', 'Inflation', 'Unemployment', 'Balance']);
-    this.addSection('military', 'MILITARY', ['Strength', 'Active Units', 'Soldiers', 'In Combat', 'Moving', 'Wars']);
-    this.addSection('politics', 'POLITICS', [
-      'Approval',
-      'Political',
-      'Public Trust',
-      'Authority',
-      'Protests',
-      'Strikes',
-      'Government'
+    this.addSection('economy', 'اقتصاد', ['خزانه', 'تولید ناخالص', 'رشد', 'تورم', 'بیکاری', 'تراز ماهانه']);
+    this.addSection('military', 'نظامی', ['قدرت', 'یگان‌های فعال', 'سربازان', 'در نبرد', 'در حال حرکت', 'جنگ‌ها']);
+    this.addSection('politics', 'سیاست', [
+      'محبوبیت',
+      'حمایت سیاسی',
+      'اعتماد عمومی',
+      'اقتدار اجرایی',
+      'اعتراض‌ها',
+      'اعتصاب‌ها',
+      'دولت'
     ]);
-    this.addSection('parties', 'PARTY INFLUENCE', [], /* dynamicList */ true);
-    this.addSection('government', 'GOVERNMENT', ['Ministries', 'Avg. Efficiency']);
-    this.addSection('events', 'EVENTS', ['Events'], true);
-    this.addSection('election', 'ELECTION', ['Status', 'Next Election', 'Party Support']);
-    this.addSection('alerts', 'ALERTS', [], true);
+    this.addSection('parties', 'نفوذ احزاب', [], /* dynamicList */ true);
+    this.addSection('government', 'دولت', ['وزارتخانه‌ها', 'میانگین کارایی']);
+    this.addSection('events', 'رویدادها', ['رویدادها'], true);
+    this.addSection('election', 'انتخابات', ['وضعیت', 'انتخابات بعدی', 'حمایت از حزب']);
+    this.addSection('alerts', 'هشدارها', [], true);
   }
 
   // ———————————————————————————————————————————————————————————— wiring ——
@@ -149,6 +157,23 @@ export class PresidentStatusPanel {
     this.refresh();
   }
 
+  /**
+   * Toggle button behavior (open ⇄ close). Returns the NEW collapsed flag
+   * so the button label/state can mirror it. Applies immediately — never
+   * waiting for the refresh cadence — so the panel state is always
+   * predictable after a click.
+   */
+  toggle(): boolean {
+    this.collapsed = !this.collapsed;
+    this.refresh();
+    return this.collapsed;
+  }
+
+  /** Whether the panel is currently collapsed (button state mirror). */
+  get isCollapsed(): boolean {
+    return this.collapsed;
+  }
+
   dispose(): void {
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
@@ -169,7 +194,7 @@ export class PresidentStatusPanel {
     // Deep link into the President Office (the section title is the button).
     const deeplink = SECTION_DEEPLINKS[id];
     if (deeplink !== undefined) {
-      title.setAttribute('title', 'Open in the President Office');
+      title.setAttribute('title', 'نمایش در دفتر رئیس‌جمهور');
       const target: SectionId = deeplink;
       title.onClick(() => this.dashboard.openAt(target));
     }
@@ -201,7 +226,7 @@ export class PresidentStatusPanel {
     const countryId = state.player.countryId;
     const government: GovernmentCountryState | undefined =
       countryId !== '' ? state.government.countries[countryId] : undefined;
-    const visible = state.player.countryConfirmed && government !== undefined;
+    const visible = state.player.countryConfirmed && government !== undefined && !this.collapsed;
     this.root.setVisible(visible);
     if (!visible || government === undefined) return;
 
@@ -227,19 +252,19 @@ export class PresidentStatusPanel {
     if (economy === null) return;
     const macro = context.state.economy.macro[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
-    economy.rows.get('Treasury')?.setText(moneyM(treasury));
+    economy.rows.get('خزانه')?.setText(moneyM(treasury));
     if (macro !== undefined) {
-      economy.rows.get('GDP')?.setText(moneyM(macro.gdp));
-      economy.rows.get('Growth')?.setText(percentSigned(macro.gdpGrowth));
-      economy.rows.get('Inflation')?.setText(percentSigned(macro.inflation));
-      economy.rows.get('Unemployment')?.setText(percent(macro.unemployment));
-      economy.rows.get('Balance')?.setText(`${signed(moneyM(Math.abs(macro.lastBalance)), macro.lastBalance >= 0)}/mo`);
+      economy.rows.get('تولید ناخالص')?.setText(moneyM(macro.gdp));
+      economy.rows.get('رشد')?.setText(percentSigned(macro.gdpGrowth));
+      economy.rows.get('تورم')?.setText(percentSigned(macro.inflation));
+      economy.rows.get('بیکاری')?.setText(percent(macro.unemployment));
+      economy.rows.get('تراز ماهانه')?.setText(`${signed(moneyM(Math.abs(macro.lastBalance)), macro.lastBalance >= 0)} ماهانه`);
     } else {
-      economy.rows.get('GDP')?.setText('—');
-      economy.rows.get('Growth')?.setText('—');
-      economy.rows.get('Inflation')?.setText('—');
-      economy.rows.get('Unemployment')?.setText('—');
-      economy.rows.get('Balance')?.setText('—');
+      economy.rows.get('تولید ناخالص')?.setText('—');
+      economy.rows.get('رشد')?.setText('—');
+      economy.rows.get('تورم')?.setText('—');
+      economy.rows.get('بیکاری')?.setText('—');
+      economy.rows.get('تراز ماهانه')?.setText('—');
     }
   }
 
@@ -259,31 +284,31 @@ export class PresidentStatusPanel {
     }
     const strength = context.state.military.strengthCache[countryId] ?? 0;
     const wars = activeWarsInvolving(context.state.war, countryId).length;
-    military.rows.get('Strength')?.setText(strength.toLocaleString('en-US'));
-    military.rows.get('Active Units')?.setText(String(active));
-    military.rows.get('Soldiers')?.setText(soldiers.toLocaleString('en-US'));
-    military.rows.get('In Combat')?.setText(String(inCombat));
-    military.rows.get('Moving')?.setText(String(moving));
-    military.rows.get('Wars')?.setText(String(wars));
+    military.rows.get('قدرت')?.setText(strength.toLocaleString('en-US'));
+    military.rows.get('یگان‌های فعال')?.setText(String(active));
+    military.rows.get('سربازان')?.setText(soldiers.toLocaleString('en-US'));
+    military.rows.get('در نبرد')?.setText(String(inCombat));
+    military.rows.get('در حال حرکت')?.setText(String(moving));
+    military.rows.get('جنگ‌ها')?.setText(String(wars));
   }
 
   private refreshPolitics(government: GovernmentCountryState): void {
     const politics = this.section('politics');
     if (politics === null) return;
-    politics.rows.get('Approval')?.setText(percent(government.president.approval));
-    politics.rows.get('Political')?.setText(percent(government.president.politicalSupport));
-    politics.rows.get('Public Trust')?.setText(percent(government.politics.publicTrust));
-    politics.rows.get('Authority')?.setText(percent(government.president.executiveAuthority));
-    politics.rows.get('Protests')?.setText(protestLabel(government.politics.protests));
-    politics.rows.get('Strikes')?.setText(
+    politics.rows.get('محبوبیت')?.setText(percent(government.president.approval));
+    politics.rows.get('حمایت سیاسی')?.setText(percent(government.president.politicalSupport));
+    politics.rows.get('اعتماد عمومی')?.setText(percent(government.politics.publicTrust));
+    politics.rows.get('اقتدار اجرایی')?.setText(percent(government.president.executiveAuthority));
+    politics.rows.get('اعتراض‌ها')?.setText(protestLabel(government.politics.protests));
+    politics.rows.get('اعتصاب‌ها')?.setText(
       government.politics.generalStrikeUntilMonth !== null
-        ? 'GENERAL STRIKE'
+        ? 'اعتصاب سراسری'
         : percent(government.politics.strikePressure)
     );
     const coalition = government.politics.coalition
       .map((partyId) => government.politics.parties[partyId]?.name ?? partyId)
       .join(' + ');
-    politics.rows.get('Government')?.setText(coalition !== '' ? coalition : 'caretaker');
+    politics.rows.get('دولت')?.setText(coalition !== '' ? coalition : 'دولت موقت');
   }
 
   private refreshParties(government: GovernmentCountryState): void {
@@ -306,7 +331,7 @@ export class PresidentStatusPanel {
       const name = this.create('span', 'psp-party-name');
       name.setText(`${party.inGovernment ? '★ ' : ''}${party.name}`);
       const meta = this.create('span', 'psp-party-meta');
-      meta.setText(`${percent(party.support)} · ${Math.round(party.seatShare * seatsTotal)} seats`);
+      meta.setText(`${percent(party.support)} · ${Math.round(party.seatShare * seatsTotal)} کرسی`);
       const bar = this.create('div', 'psp-bar');
       const fill = this.create('div', 'psp-bar-fill');
       fill.setAttribute('style', `width:${Math.round(party.support * 100)}%`);
@@ -329,9 +354,9 @@ export class PresidentStatusPanel {
       count > 0 ? ministries.reduce((sum, ministry) => sum + ministry.efficiency, 0) / count : 0;
     const spread =
       count > 0 ? Math.max(...ministries.map((ministry) => Math.abs(ministry.efficiency - average))) : 0;
-    section.rows.get('Ministries')?.setText(String(count));
+    section.rows.get('وزارتخانه‌ها')?.setText(String(count));
     section.rows
-      .get('Avg. Efficiency')
+      .get('میانگین کارایی')
       ?.setText(`${percent(average)}${spread > 0.15 ? ' ⚠' : ''}`);
   }
 
@@ -339,7 +364,7 @@ export class PresidentStatusPanel {
     const section = this.section('events');
     if (section === null) return;
     const pending = government.events.pending;
-    section.rows.get('Events')?.setText(pending.length > 0 ? `${pending.length} pending` : 'None');
+    section.rows.get('رویدادها')?.setText(pending.length > 0 ? `${pending.length} در انتظار تصمیم` : 'هیچ');
     const titles = pending
       .map((instance) => context.data.eventList.find((def) => def.id === instance.eventId)?.title ?? instance.eventId)
       .slice(0, 3);
@@ -365,12 +390,12 @@ export class PresidentStatusPanel {
     if (section === null) return;
     const elections = government.elections;
     const monthsLeft = Math.max(0, elections.nextElectionMonth - government.lastSimMonth);
-    section.rows.get('Status')?.setText(
-      elections.phase === 'campaigning' ? 'Campaigning ●' : 'Idle'
+    section.rows.get('وضعیت')?.setText(
+      elections.phase === 'campaigning' ? 'کارزار انتخاباتی ●' : 'عادی'
     );
-    section.rows.get('Next Election')?.setText(`${monthsLeft} month${monthsLeft === 1 ? '' : 's'}`);
+    section.rows.get('انتخابات بعدی')?.setText(`${monthsLeft} ماه دیگر`);
     section.rows
-      .get('Party Support')
+      .get('حمایت از حزب')
       ?.setText(percent(government.politics.parties[government.president.partyId]?.support ?? 0));
   }
 
@@ -388,23 +413,23 @@ export class PresidentStatusPanel {
     const macro = context.state.economy.macro[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     // 2. Hard fiscal alarm.
-    if (treasury < 0 && alerts.length < MAX_ALERTS) alerts.push('⚠ Treasury deficit');
+    if (treasury < 0 && alerts.length < MAX_ALERTS) alerts.push('⚠ کسری خزانه');
     // 3. Active war involving the player's country.
     const wars = activeWarsInvolving(context.state.war, countryId).length;
-    if (wars > 0 && alerts.length < MAX_ALERTS) alerts.push(`⚠ ${wars === 1 ? 'War' : `${wars} wars`} ongoing`);
+    if (wars > 0 && alerts.length < MAX_ALERTS) alerts.push(`⚠ ${wars === 1 ? 'جنگ جاری' : `${wars} جنگ جاری`}`);
     // 4. Civil unrest.
     if (government.politics.generalStrikeUntilMonth !== null && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ General strike');
+      alerts.push('⚠ اعتصاب سراسری');
     }
     if (government.politics.protests === 'massive' && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ Massive protests');
+      alerts.push('⚠ اعتراض‌های گسترده');
     }
     // 5. Economy shocks.
     if (macro !== undefined && macro.unemployment > 0.15 && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ Unemployment crisis');
+      alerts.push('⚠ بحران بیکاری');
     }
     if (macro !== undefined && macro.inflation > 0.12 && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ Inflation crisis');
+      alerts.push('⚠ بحران تورم');
     }
 
     const signature = alerts.join('|');
@@ -414,7 +439,7 @@ export class PresidentStatusPanel {
     const fresh: UIElement[] = [];
     if (alerts.length === 0) {
       const calm = this.create('div', 'psp-calm');
-      calm.setText('All quiet');
+      calm.setText('آرامش کامل');
       parent.appendChild(calm);
       fresh.push(calm);
     } else {
@@ -453,22 +478,22 @@ function signed(text: string, positive: boolean): string {
 }
 
 function percent(value: number): string {
-  return `${Math.round(value * 100)}%`;
+  return `${Math.round(value * 100)}٪`;
 }
 
 function percentSigned(value: number): string {
-  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}٪`;
 }
 
 function protestLabel(level: GovernmentCountryState['politics']['protests']): string {
   switch (level) {
     case 'none':
-      return 'None';
+      return 'هیچ';
     case 'minor':
-      return 'Minor';
+      return 'جزئی';
     case 'significant':
-      return 'Significant';
+      return 'قابل توجه';
     case 'massive':
-      return 'MASSIVE';
+      return 'گسترده';
   }
 }

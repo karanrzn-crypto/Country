@@ -49,10 +49,10 @@ export class DialogSystem {
     };
 
     const okButton = this.adapter.create('button');
-    okButton.setText('Confirm');
+    okButton.setText('تأیید');
     okButton.onClick(() => finish(true));
     const cancelButton = this.adapter.create('button');
-    cancelButton.setText('Cancel');
+    cancelButton.setText('لغو');
     cancelButton.onClick(() => finish(false));
     actions.appendChild(okButton);
     actions.appendChild(cancelButton);

@@ -37,6 +37,9 @@ export interface MapViewport {
   height: number;
 }
 
+/** What a plain land click selects: the country, or the province under it. */
+export type MapSelectionMode = 'country' | 'province';
+
 export interface MapSlice {
   selectedCountryId: CountryId | null;
   selectedProvinceId: ProvinceId | null;
@@ -55,6 +58,14 @@ export interface MapSlice {
    * network view; never copies its geometry (no parallel state).
    */
   selectedCityConnectionId: string | null;
+  /**
+   * Region-selection mode (presentation policy, saved with the map):
+   * 'country' → a land click selects the COUNTRY under the point;
+   * 'province' → a land click selects the PROVINCE under the point (and
+   * its country). Feature kinds (city/river/lake/…) are unaffected —
+   * only the land fallback changes.
+   */
+  selectionMode: MapSelectionMode;
   layerVisibility: Record<MapLayerId, boolean>;
   camera: MapCameraState;
   viewport: MapViewport;
@@ -81,6 +92,7 @@ export function createDefaultMapSlice(columns = 30, rows = 20, cellSize = 10): M
     selectedSiteId: null,
     selectedBuildingId: null,
     selectedCityConnectionId: null,
+    selectionMode: 'country',
     layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
     camera: { x: (columns * cellSize) / 2, z: (rows * cellSize) / 2, viewHeight: rows * cellSize },
     viewport: { width: 1280, height: 720 }
@@ -183,36 +195,36 @@ export function selectionSummary(
     switch (feature.kind) {
       case 'cityLink': {
         const connection = cityConnections.find((entry) => entry.id === feature.connectionId);
-        if (connection === undefined) return 'unknown city connection';
+        if (connection === undefined) return 'اتصال شهری ناشناخته';
         const nameA = model.cities[connection.cityA]?.name ?? connection.cityA;
         const nameB = model.cities[connection.cityB]?.name ?? connection.cityB;
-        return `${nameA} → ${nameB} (city connection)`;
+        return `${nameA} → ${nameB} (اتصال شهری)`;
       }
       case 'grid': {
-        // `countryId#gridId` → "B7 (grid cell, CountryName)".
+        // `countryId#gridId` → "B7 (خانهٔ شبکه، CountryName)".
         const separator = feature.gridKey.indexOf('#');
         const countryId = feature.gridKey.slice(0, separator);
         const gridId = feature.gridKey.slice(separator + 1);
         const country = model.countries[countryId];
-        return `${gridId} (grid cell, ${country?.name ?? countryId})`;
+        return `${gridId} (خانهٔ شبکه، ${country?.name ?? countryId})`;
       }
       case 'river': {
         const river = model.features.rivers.find((candidate) => candidate.id === feature.riverId);
-        return river !== undefined ? `${river.name} (river)` : 'unknown river';
+        return river !== undefined ? `${river.name} (رودخانه)` : 'رودخانهٔ ناشناخته';
       }
       case 'lake': {
         const lake = model.features.lakes.find((candidate) => candidate.id === feature.lakeId);
-        return lake !== undefined ? `${lake.name} (lake)` : 'unknown lake';
+        return lake !== undefined ? `${lake.name} (دریاچه)` : 'دریاچهٔ ناشناخته';
       }
       case 'site': {
         const site = model.features.sites.find((candidate) => candidate.id === feature.siteId);
-        return site !== undefined ? `${site.kind} (site)` : 'unknown site';
+        return site !== undefined ? `${site.kind} (محوطه)` : 'محوطهٔ ناشناخته';
       }
       case 'building': {
         const building = model.features.buildings.find(
           (candidate) => candidate.id === feature.buildingId
         );
-        return building !== undefined ? `${building.kind} (building)` : 'unknown building';
+        return building !== undefined ? `${building.kind} (ساختمان)` : 'ساختمان ناشناخته';
       }
     }
   }
@@ -220,16 +232,16 @@ export function selectionSummary(
     const city = model.cities[slice.selectedCityId];
     if (city !== undefined) {
       const linked = connectionsOfCity(cityConnections, city.id).length;
-      return `${city.name} (city, ${city.isCapital ? 'capital' : 'city'}${linked > 0 ? `, ${linked} connections` : ''})`;
+      return `${city.name} (شهر، ${city.isCapital ? 'پایتخت' : 'شهر'}${linked > 0 ? `، ${linked} اتصال` : ''})`;
     }
   }
   if (slice.selectedProvinceId !== null) {
     const province = model.provinces[slice.selectedProvinceId];
-    if (province !== undefined) return `${province.name} (province)`;
+    if (province !== undefined) return `${province.name} (استان)`;
   }
   if (slice.selectedCountryId !== null) {
     const country = model.countries[slice.selectedCountryId];
-    if (country !== undefined) return `${country.name} (country)`;
+    if (country !== undefined) return `${country.name} (کشور)`;
   }
-  return 'nothing — click the map';
+  return 'هیچ — روی نقشه کلیک کنید';
 }

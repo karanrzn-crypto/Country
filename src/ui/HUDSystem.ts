@@ -47,11 +47,11 @@ export class HUDSystem {
     // —— status panel (bottom-left) ——
     this.panel = adapter.create('div', 'hud');
     const title = adapter.create('div', 'hud-title');
-    title.setText('COUNTRY');
+    title.setText('کشور');
     this.panel.appendChild(title);
     container.appendChild(this.panel);
 
-    for (const key of ['Mode', 'Treasury', 'Population', 'Chunks']) {
+    for (const key of ['حالت', 'خزانه', 'جمعیت', 'بخش‌ها']) {
       const row = adapter.create('div', 'hud-row');
       const keyElement = adapter.create('span', 'hud-key');
       keyElement.setText(key);
@@ -68,11 +68,11 @@ export class HUDSystem {
     if (this.timeBarBuilt) return;
     this.timeBarBuilt = true;
     // —— mode segment: the UNIT the clock advances in ——
-    const modeLabels: Record<TimeMode, string> = { hour: 'Hour', day: 'Day', month: 'Month', year: 'Year' };
+    const modeLabels: Record<TimeMode, string> = { hour: 'ساعت', day: 'روز', month: 'ماه', year: 'سال' };
     for (const mode of context.time.timeModeList) {
       const button = this.adapter.create('button', 'time-btn mode');
       button.setText(modeLabels[mode]);
-      button.setAttribute('title', `Advance by ${modeLabels[mode].toLowerCase()}`);
+      button.setAttribute('title', `پیشروی زمان با گام ${modeLabels[mode]}`);
       const modeValue = mode;
       button.onClick(() => {
         this.commands.send({ type: 'game.setTimeMode', mode: modeValue });
@@ -110,7 +110,7 @@ export class HUDSystem {
     // Campaign-elapsed form of the central clock: "Year 1 — January — Day 1 — 08:00".
     this.dateLabel.setText(formatCalendarElapsed(context.time.date, context.time.startDate));
     const paused = context.time.isPaused;
-    this.pauseButton.setText(paused ? 'Play' : 'Pause');
+    this.pauseButton.setText(paused ? 'ادامه' : 'توقف');
     this.pauseButton.setClass(paused ? 'time-btn pause stopped' : 'time-btn pause');
     const activeModeIndex = context.time.timeModeIndex;
     for (let index = 0; index < this.modeButtons.length; index++) {

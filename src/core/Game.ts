@@ -418,6 +418,12 @@ export class Game {
     for (const [layer, visible] of Object.entries(DEFAULT_LAYER_VISIBILITY)) {
       if (typeof visibility[layer] !== 'boolean') visibility[layer] = visible;
     }
+    // Registry heal: keys that are no longer KNOWN layers (e.g. a layer
+    // removed from the registry since the save was written) are dropped, so
+    // the visibility record always matches the current registry exactly.
+    for (const key of Object.keys(visibility)) {
+      if (!isKnownMapLayer(key)) delete visibility[key];
+    }
     // Exclusivity heal: older saves may carry two exclusive surface layers
     // ON at once (a composite this version no longer renders). Normalize to
     // the registry policy so the loaded state is always a valid surface mode.
@@ -699,7 +705,16 @@ export class Game {
       return;
     }
     if (result.provinceId !== null || result.countryId !== null) {
-      this.mapSelect({ provinceId: result.provinceId, countryId: result.countryId });
+      // Region-selection mode decides what a land click means: 'province'
+      // selects the province under the point (with its country — the
+      // hierarchy stays coherent), 'country' selects only the country.
+      // pickAt resolves both deterministically (ring containment, registry
+      // order) so border clicks always behave predictably.
+      if (this.state.map.selectionMode === 'province') {
+        this.mapSelect({ provinceId: result.provinceId, countryId: result.countryId });
+      } else {
+        this.mapSelect({ countryId: result.countryId });
+      }
       return;
     }
     this.mapClearSelection();
@@ -860,6 +875,22 @@ export class Game {
         this.events.emit('map.layerVisibilityChanged', { layer: id, visible: next[id] });
       }
     }
+  }
+
+  /**
+   * THE single mutation path for the region-selection mode (command →
+   * here). Invalid values are rejected with a warning; a no-op switch does
+   * not emit. One event keeps every listener (map UI) in sync.
+   */
+  mapSetSelectionMode(mode: string): void {
+    this.assertInitialized();
+    if (mode !== 'country' && mode !== 'province') {
+      this.logger.warn(`mapSetSelectionMode: unknown mode "${mode}"`);
+      return;
+    }
+    if (this.state.map.selectionMode === mode) return;
+    this.state.map.selectionMode = mode;
+    this.events.emit('map.selectionModeChanged', { mode });
   }
 
   /**

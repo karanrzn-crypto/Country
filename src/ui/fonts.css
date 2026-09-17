@@ -1,0 +1,27 @@
+/*
+ * Persian UI font — Vazirmatn (OFL, rastikerdar).
+ * Bundled locally (woff2) so the game renders correct, fully JOINED
+ * Persian letterforms offline — no CDN, no reliance on system fonts.
+ * Regular 400 · Medium 500 · Bold 700.
+ */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../assets/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../assets/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../assets/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

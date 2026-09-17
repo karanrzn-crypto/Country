@@ -16,9 +16,10 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v5 → v6: shared feature selection fields (Part 3.5)
  * - v6 → v7: Phase 2 — government + cityAreas + macro economy
  * - v7 → v8: city-network connection selection field (City Areas view)
+ * - v8 → v9: region-selection mode field (province/country land-click pick)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v8)', () => {
+describe('save migrations (v1 → … → v9)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -30,7 +31,7 @@ describe('save migrations (v1 → … → v8)', () => {
 
   it('v1 → current injects the default map slice AND the country slice', () => {
     const { data, version } = applyMigrations(v1, 1, SAVE_VERSION);
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     const migrated = data as typeof v1 & {
       state: { map?: Record<string, unknown>; countries?: Record<string, unknown> };
     };
@@ -74,7 +75,7 @@ describe('save migrations (v1 → … → v8)', () => {
       runtime: { tick: 5 }
     };
     const { data, version } = applyMigrations(v2, 2, SAVE_VERSION);
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     const migrated = data as { state: Record<string, unknown> };
     expect(migrated.state.a).toBe(1);
     expect((migrated.state.map as Record<string, unknown>).selectedCountryId).toBe('country_3');
@@ -95,7 +96,7 @@ describe('save migrations (v1 → … → v8)', () => {
       runtime: { tick: 77 }
     };
     const { data, version } = applyMigrations(v3, 3, SAVE_VERSION);
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     const migrated = data as { state: { player: Record<string, unknown> } };
     expect(migrated.state.player.countryConfirmed).toBe(true);
     expect(migrated.state.player.countryId).toBe('country_2');
@@ -109,7 +110,7 @@ describe('save migrations (v1 → … → v8)', () => {
       runtime: { tick: 100, rngState: 7, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v4, 4, SAVE_VERSION);
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     expect((data as typeof v4).runtime.tick).toBe(1500);
   });
 
@@ -133,7 +134,7 @@ describe('save migrations (v1 → … → v8)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v5, 5, SAVE_VERSION);
-    expect(version).toBe(8);
+    expect(version).toBe(9);
     const map = (data as typeof v5).state.map as Record<string, unknown>;
     for (const key of [
       'selectedGridKey',
@@ -147,6 +148,28 @@ describe('save migrations (v1 → … → v8)', () => {
     }
     // Existing selection state is untouched.
     expect(map.selectedCountryId).toBe('country_1');
+  });
+
+  it('v8 → v9 injects the region-selection mode default', () => {
+    const v8 = {
+      state: {
+        map: {
+          selectedCountryId: 'country_2',
+          selectedProvinceId: null,
+          selectedCityId: null,
+          layerVisibility: {},
+          camera: { x: 0, z: 0, viewHeight: 200 },
+          viewport: { width: 1280, height: 720 }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v8, 8, SAVE_VERSION);
+    expect(version).toBe(9);
+    const map = (data as typeof v8).state.map as Record<string, unknown>;
+    expect(map.selectionMode).toBe('country');
+    // Existing selection state is untouched.
+    expect(map.selectedCountryId).toBe('country_2');
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {
@@ -167,6 +190,7 @@ describe('save migrations (v1 → … → v8)', () => {
         'selectedProvinceId',
         'selectedRiverId',
         'selectedSiteId',
+        'selectionMode',
         'viewport'
       ].sort()
     );
@@ -209,7 +233,7 @@ describe('save migrations (v1 → … → v8)', () => {
     // Toggle a spread of Part-3 layers to NON-default values.
     game.mapSetLayerVisible('grid', true);
     game.mapSetLayerVisible('resources', true);
-    game.mapSetLayerVisible('roads', true);
+    game.mapSetLayerVisible('industry', true);
     game.mapSetLayerVisible('railways', true);
     game.mapSetLayerVisible('population', true);
     game.mapSetLayerVisible('biomes', true); // exclusive group: terrain forced off
