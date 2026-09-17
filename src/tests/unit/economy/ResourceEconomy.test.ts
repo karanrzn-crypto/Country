@@ -18,6 +18,8 @@ import {
   recomputeResourceEconomies,
   resourceStatusOf,
   resourceBalanceOf,
+  resourceRawBalanceOf,
+  resourceDisplayStatusOf,
   cityResourceProduction,
   countryResourceProduction,
   countryResourceConsumption,
@@ -346,5 +348,66 @@ describe('strategic resource economy', () => {
     game.mapSetLayerVisible('roads', true);
     expect(context.state.map.layerVisibility.roads).toBe(true);
     expect(mapModel.features.lines.length).toBe(linesBefore.length);
+  });
+
+  // ———————————— Balance display + the three display statuses (spec §2/§5) ————————————
+  it('Balance = Production − Consumption — imports/exports NEVER distort it', () => {
+    // The spec's exact example: production 14, consumption 29 → balance −15.
+    const record = emptyCountryResourceState();
+    record.production['iron'] = 14;
+    record.consumption['iron'] = 29;
+    expect(resourceRawBalanceOf(record, 'iron')).toBe(-15);
+    // 15 imported → 14 + 15 − 29 = 0 post-trade … but the raw balance that
+    // the Economy page shows stays production − consumption.
+    record.imports['iron'] = 15;
+    record.exports['iron'] = 0;
+    expect(resourceRawBalanceOf(record, 'iron')).toBe(-15);
+    // Exports never distort it either (oil: 26 − 20 = +6 while selling 3).
+    record.production['oil'] = 26;
+    record.consumption['oil'] = 20;
+    record.exports['oil'] = 3;
+    expect(resourceRawBalanceOf(record, 'oil')).toBe(6);
+  });
+
+  it('display status: surplus / balanced / shortage — covered shortage reads balanced', () => {
+    const record = emptyCountryResourceState();
+    // Surplus: production above consumption.
+    record.production['a'] = 26;
+    record.consumption['a'] = 20;
+    expect(resourceDisplayStatusOf(record, 'a')).toBe('surplus');
+    // Exact balance.
+    record.production['b'] = 10;
+    record.consumption['b'] = 10;
+    expect(resourceDisplayStatusOf(record, 'b')).toBe('balanced');
+    // Shortage: uncovered deficit.
+    record.production['c'] = 14;
+    record.consumption['c'] = 29;
+    expect(resourceDisplayStatusOf(record, 'c')).toBe('shortage');
+    // Fully covered by imports → the FINAL status is balanced (14+15−29=0).
+    record.imports['c'] = 15;
+    expect(resourceDisplayStatusOf(record, 'c')).toBe('balanced');
+    // Partially covered → still a shortage.
+    record.imports['c'] = 5;
+    expect(resourceDisplayStatusOf(record, 'c')).toBe('shortage');
+  });
+
+  it('every live record agrees: raw balance + display status derived from real numbers', () => {
+    recomputeResourceEconomies(context.state, mapModel, config);
+    for (const countryId of mapModel.countryOrder) {
+      const record = context.state.economy.resources[countryId]!;
+      for (const resource of config.resources) {
+        const production = record.production[resource.id] ?? 0;
+        const consumption = record.consumption[resource.id] ?? 0;
+        const imports = record.imports[resource.id] ?? 0;
+        expect(resourceRawBalanceOf(record, resource.id)).toBeCloseTo(production - consumption, 6);
+        const expected =
+          production > consumption + 1e-6
+            ? 'surplus'
+            : production + imports >= consumption - 1e-4
+              ? 'balanced'
+              : 'shortage';
+        expect(resourceDisplayStatusOf(record, resource.id)).toBe(expected);
+      }
+    }
   });
 });

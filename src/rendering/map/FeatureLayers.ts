@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { StrategicMapModel, MapSite, MapRiver, MapBuilding, MapPoint } from '../../world/map/MapTypes';
 import { cellCornerPoints } from '../../world/map/MapFeatures';
-import { visibleCellPolygon } from '../../world/map/MapQueries';
+import { visibleCellPolygon, cellIndexAtPoint } from '../../world/map/MapQueries';
 import { type MapTheme } from './MapTheme';
 import {
   type RGB,
@@ -176,7 +176,8 @@ export function createEconomyFillLayer(
 function lineSegmentsFromPolylines(
   polylines: readonly (readonly { x: number; z: number }[])[],
   color: RGB,
-  y: number
+  y: number,
+  yAt?: (point: { x: number; z: number }) => number
 ): THREE.BufferGeometry | null {
   const positions: number[] = [];
   const colors: number[] = [];
@@ -184,7 +185,9 @@ function lineSegmentsFromPolylines(
     for (let i = 1; i < polyline.length; i++) {
       const a = polyline[i - 1];
       const b = polyline[i];
-      positions.push(a.x, y, a.z, b.x, y, b.z);
+      const yA = yAt !== undefined ? yAt(a) : y;
+      const yB = yAt !== undefined ? yAt(b) : y;
+      positions.push(a.x, yA, a.z, b.x, yB, b.z);
       colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
     }
   }
@@ -196,9 +199,23 @@ function lineSegmentsFromPolylines(
   return geometry;
 }
 
+/** Terrain-following lines ride this hair above the local surface top
+ *  (same max-corner convention as tints/water — never buried in relief). */
+const TERRAIN_LINE_LIFT = 0.03;
+
+/** Optional grid context that makes line features FOLLOW THE TERRAIN. */
+interface LineGridContext {
+  readonly columns: number;
+  readonly rows: number;
+  readonly cellSize: number;
+}
+
 /**
  * Line-feature layer (roads vertex-colored by class, railways, sea routes) —
  * ONE merged LineSegments per color group, built lazily, disposed as one.
+ * With a grid context the vertices follow the terrain surface (roads and
+ * railways stay ON the ground — and visible — in biomes/terrain relief
+ * mode); without it they render on one flat plane (sea routes).
  */
 export class LineFeatureLayer {
   readonly group = new THREE.Group();
@@ -210,11 +227,21 @@ export class LineFeatureLayer {
       model: StrategicMapModel
     ) => readonly { color: RGB; polyline: readonly { x: number; z: number }[] }[],
     private readonly opacity: number,
-    private readonly y: number
+    private readonly y: number,
+    private readonly grid?: LineGridContext
   ) {}
 
   ensureBuilt(model: StrategicMapModel): void {
     if (this.geometries.length > 0) return;
+    const heights = this.grid !== undefined ? buildVertexElevationGrid(model, this.grid.columns) : null;
+    const grid = this.grid;
+    const yAt = grid !== undefined && heights !== null
+      ? (point: { x: number; z: number }): number => {
+          const cellIndex = cellIndexAtPoint(model, point, grid.columns, grid.rows, grid.cellSize);
+          if (cellIndex < 0) return this.y;
+          return surfaceTopY(heights, grid.columns, cellIndex) + TERRAIN_LINE_LIFT;
+        }
+      : undefined;
     const byColor = new Map<string, { color: RGB; polylines: (readonly { x: number; z: number }[])[] }>();
     for (const line of this.pickLines(model)) {
       const key = `${line.color.r.toFixed(4)}|${line.color.g.toFixed(4)}|${line.color.b.toFixed(4)}`;
@@ -227,7 +254,7 @@ export class LineFeatureLayer {
     }
     if (byColor.size === 0) return;
     for (const entry of byColor.values()) {
-      const geometry = lineSegmentsFromPolylines(entry.polylines, entry.color, this.y);
+      const geometry = lineSegmentsFromPolylines(entry.polylines, entry.color, this.y, yAt);
       if (geometry === null) continue;
       this.geometries.push(geometry);
     }
@@ -260,7 +287,7 @@ export class LineFeatureLayer {
  * the built mesh and the underlying map data are NEVER rebuilt or dropped,
  * so OFF = hide, ON = exactly the same roads again.
  */
-export function createRoadsLayer(theme: MapTheme): LineFeatureLayer {
+export function createRoadsLayer(theme: MapTheme, grid?: LineGridContext): LineFeatureLayer {
   const colors: Record<string, RGB> = {};
   for (const [kind, hex] of Object.entries(theme.layerColors.roadColors)) {
     colors[kind] = rgb(hex);
@@ -271,12 +298,13 @@ export function createRoadsLayer(theme: MapTheme): LineFeatureLayer {
         .filter((line) => line.kind !== 'railway' && line.kind !== 'seaRoute')
         .map((line) => ({ color: colors[line.kind] ?? colors.secondary, polyline: line.polyline })),
     theme.layerColors.roadOpacity,
-    0.85
+    0.85,
+    grid
   );
 }
 
 /** Railways: single theme color. */
-export function createRailwaysLayer(theme: MapTheme): LineFeatureLayer {
+export function createRailwaysLayer(theme: MapTheme, grid?: LineGridContext): LineFeatureLayer {
   const color = rgb(theme.layerColors.railwayStroke);
   return new LineFeatureLayer(
     (model) =>
@@ -284,7 +312,8 @@ export function createRailwaysLayer(theme: MapTheme): LineFeatureLayer {
         .filter((line) => line.kind === 'railway')
         .map((line) => ({ color, polyline: line.polyline })),
     theme.layerColors.railwayOpacity,
-    0.87
+    0.87,
+    grid
   );
 }
 

@@ -5,7 +5,10 @@
 
 import type { FactoryRecord } from '../../economy/types';
 import type { MacroEconomyState } from '../../economy/macro';
-import type { CountryResourceState } from '../../economy/resources';
+// LEAF types module — importing from economy/resources here would close the
+// cycle GameState → economySlice → resources → GameState (resources reads
+// live GameState). The record SHAPE has no such dependency.
+import type { CountryResourceState } from '../../economy/resourceTypes';
 
 export interface EconomySlice {
   /** faction/country id → treasury amount. */

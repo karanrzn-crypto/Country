@@ -32,51 +32,20 @@ import type { StrategicMapModel, MapResourceDeposit } from '../world/map/MapType
 import type { StrategicResourcesConfig } from './types';
 import { liveUnits } from '../state/slices/militarySlice';
 import { roundTo } from '../utils/math';
+import {
+  emptyCountryResourceState,
+  type CountryResourceState,
+  type ResourceStatus
+} from './resourceTypes';
 
-/** Clear visual status of ONE resource (derived, never stored by hand). */
-export type ResourceStatus = 'surplus' | 'balanced' | 'shortage' | 'imported' | 'exported';
-
-/** Per-country resource economy record — fully JSON-safe (save-friendly). */
-export interface CountryResourceState {
-  /** Monthly production per resource id (Σ attributed city deposits). */
-  production: Record<string, number>;
-  /** Monthly consumption per resource id (population/sectors/military). */
-  consumption: Record<string, number>;
-  /** Active monthly imports per resource id (after world-market capping). */
-  imports: Record<string, number>;
-  /** Active monthly exports per resource id (surplus × exportShare). */
-  exports: Record<string, number>;
-  /** Player policies — import/export toggles (mutually exclusive per resource). */
-  importPolicy: Record<string, boolean>;
-  exportPolicy: Record<string, boolean>;
-  /** resourceId → the supplier country the market routes the import through. */
-  suppliers: Record<string, string | null>;
-  /** Last computed monthly import cost (M$) — enters the ledger as spending. */
-  importCost: number;
-  /** Last computed monthly export income (M$) — enters the ledger as revenue. */
-  exportIncome: number;
-}
+// Record shapes live in the LEAF types module (state imports them without
+// reaching this logic — keeps GameState → economySlice → resourceTypes
+// acyclic). Public surface is unchanged: they are re-exported here.
+export { emptyCountryResourceState } from './resourceTypes';
+export type { CountryResourceState, ResourceStatus } from './resourceTypes';
 
 /** Tolerance for floating-point balance comparisons (units are ~1e-2). */
 const EPSILON = 1e-6;
-
-/** Empty record with the given policies preserved (defaults off). */
-export function emptyCountryResourceState(
-  importPolicy: Record<string, boolean> = {},
-  exportPolicy: Record<string, boolean> = {}
-): CountryResourceState {
-  return {
-    production: {},
-    consumption: {},
-    imports: {},
-    exports: {},
-    importPolicy: { ...importPolicy },
-    exportPolicy: { ...exportPolicy },
-    suppliers: {},
-    importCost: 0,
-    exportIncome: 0
-  };
-}
 
 /** The ids of the strategic resources in canonical (config) order. */
 export function strategicResourceIds(config: StrategicResourcesConfig): string[] {
@@ -259,6 +228,46 @@ export function resourceBalanceOf(record: CountryResourceState, resourceId: stri
       (record.exports[resourceId] ?? 0),
     2
   );
+}
+
+/**
+ * RAW monthly balance of ONE resource — the number the Economy page shows:
+ *
+ *   Balance = Production − Consumption
+ *
+ * Trade NEVER distorts it (production 14, consumption 29 → −15 even while
+ * 15/month are imported — 14 + 15 − 29 = 0 is the POST-trade state, which
+ * is expressed by the STATUS, not by this number).
+ */
+export function resourceRawBalanceOf(record: CountryResourceState, resourceId: string): number {
+  return roundTo(
+    (record.production[resourceId] ?? 0) - (record.consumption[resourceId] ?? 0),
+    2
+  );
+}
+
+/** The THREE user-facing statuses (spec: Surplus / Balanced / Shortage). */
+export type ResourceDisplayStatus = 'surplus' | 'balanced' | 'shortage';
+
+/**
+ * Derives the clear display status of ONE resource from the REAL numbers —
+ * never hand-set, recomputed with every recompute pass:
+ * - production > consumption                          → surplus (exportable);
+ * - covered (exact, or shortage fully imported away)  → balanced;
+ * - still uncovered deficit                           → shortage.
+ * Example: 14 produced, 29 consumed, 15 imported → 14 + 15 − 29 = 0 →
+ * the FINAL status reads balanced (while the raw balance stays −15).
+ */
+export function resourceDisplayStatusOf(
+  record: CountryResourceState,
+  resourceId: string
+): ResourceDisplayStatus {
+  const production = record.production[resourceId] ?? 0;
+  const consumption = record.consumption[resourceId] ?? 0;
+  const imports = record.imports[resourceId] ?? 0;
+  if (production > consumption + EPSILON) return 'surplus';
+  if (production + imports >= consumption - 1e-4) return 'balanced';
+  return 'shortage';
 }
 
 /**

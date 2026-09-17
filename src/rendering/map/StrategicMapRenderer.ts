@@ -129,8 +129,15 @@ export class StrategicMapRenderer {
     const lakeLayer = new LakeLayer(this.columns, theme);
     const gridLayer = new GridLayer(this.columns, context.config.map.rows, theme);
     this.gridLayer = gridLayer;
-    const roadsLayer = createRoadsLayer(theme);
-    const railwaysLayer = createRailwaysLayer(theme);
+    // Roads/railways FOLLOW THE TERRAIN (grid context) — visible in every
+    // surface mode, never buried under lifted relief.
+    const lineGrid = {
+      columns: this.columns,
+      rows: context.config.map.rows,
+      cellSize: context.config.map.cellSize
+    };
+    const roadsLayer = createRoadsLayer(theme, lineGrid);
+    const railwaysLayer = createRailwaysLayer(theme, lineGrid);
     const seaRoutesLayer = createSeaRoutesLayer(theme);
     const portsLayer = new SiteLayer(['port'], 'circle', theme);
     const industryLayer = new SiteLayer(['farm', 'factory'], 'square', theme);
@@ -324,11 +331,15 @@ export class StrategicMapRenderer {
     }
 
     // 2c. City Areas network: lazy + signature-guarded rebuild on show;
-    // visibility follows the layer flag like every other layer.
+    //     visibility follows the layer flag like every other layer. The
+    //     ROADS flag is forwarded: the network's ROAD ribbons ARE the roads
+    //     the player sees (they cover the thin roads-layer lines), so Roads
+    //     OFF must hide them too — visibility only, data never touched.
     this.cityNetworkLayer.sync(
       this.model,
       state.cityAreas.network,
-      map.layerVisibility.cityAreas !== false
+      map.layerVisibility.cityAreas !== false,
+      map.layerVisibility.roads !== false
     );
 
     // 3. Selection (country highlight, city ring, border emphasis, grid-cell

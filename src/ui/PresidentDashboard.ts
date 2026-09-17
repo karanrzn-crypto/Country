@@ -7,7 +7,7 @@ import type { EffectDef, GovernmentCountryState, OpinionTopic, SpendingCategory,
 import { OPINION_TOPICS, SPENDING_CATEGORIES, TAX_CATEGORIES } from '../government/types';
 import { decisionBlockReason } from '../government/DecisionEngine';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
-import { resourceStatusOf, resourceBalanceOf, type ResourceStatus } from '../economy/resources';
+import { resourceDisplayStatusOf, resourceRawBalanceOf, type ResourceDisplayStatus } from '../economy/resources';
 
 /**
  * President Dashboard (Phase 2) — the head-of-state command center.
@@ -138,13 +138,13 @@ const PROTEST_LABELS: Readonly<Record<string, string>> = {
   massive: 'گسترده'
 };
 
-/** Resource status → Persian label + CSS status class (color-coded). */
-const RESOURCE_STATUS: Readonly<Record<ResourceStatus, { label: string; css: string }>> = {
-  surplus: { label: 'مازاد — قابل صادرات', css: 'st-surplus' },
+/** Resource display status → Persian label + CSS status class (color-coded).
+ *  Exactly THREE user-facing statuses (spec): مازاد / متعادل / کمبود —
+ *  derived from the real production/consumption/imports, never hand-set. */
+const RESOURCE_STATUS: Readonly<Record<ResourceDisplayStatus, { label: string; css: string }>> = {
+  surplus: { label: 'مازاد', css: 'st-surplus' },
   balanced: { label: 'متعادل', css: 'st-balanced' },
-  shortage: { label: 'کمبود — نیاز به واردات', css: 'st-shortage' },
-  imported: { label: 'وارداتی', css: 'st-imported' },
-  exported: { label: 'صادراتی', css: 'st-exported' }
+  shortage: { label: 'کمبود', css: 'st-shortage' }
 };
 
 export class PresidentDashboard {
@@ -262,19 +262,39 @@ export class PresidentDashboard {
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    this.addRows(section, ['تولید ناخالص (سالانه)', 'رشد', 'تورم', 'بیکاری', 'بدهی', 'خزانه', 'درآمد ماهانه', 'هزینهٔ ماهانه', 'تراز ماهانه', 'تراز تجاری', 'تجارت منابع', 'جمعیت', 'نیروی کار'], 'economy.');
+    // Financial summary — EXACTLY four rows (spec): خزانه · درآمد · هزینه ·
+    // رشد اقتصاد. GDP/inflation/unemployment/debt/trade balance stay in the
+    // GameState (never deleted) — they are just not shown on THIS page.
+    this.addRows(section, ['💰 خزانه', '📈 درآمد', '💸 هزینه', '📊 رشد اقتصاد'], 'economy.');
+    // Resources — production · consumption · balance · status per resource.
+    const resourcesTitle = this.create('div', 'pd-subtitle');
+    resourcesTitle.setText('منابع');
+    section.appendChild(resourcesTitle);
+    const resourcesList = this.create('div', 'pd-resources');
+    section.appendChild(resourcesList);
+    this.track(resourcesList, 'resources');
+    // Imports — ONLY the resources the country is short of (empty state:
+    // «نیاز به واردات نیست» instead of a big table).
+    const importsTitle = this.create('div', 'pd-subtitle');
+    importsTitle.setText('واردات');
+    section.appendChild(importsTitle);
+    const importsList = this.create('div', 'pd-trades');
+    section.appendChild(importsList);
+    this.track(importsList, 'imports');
+    // Exports — ONLY the resources with a surplus (empty state when none).
+    const exportsTitle = this.create('div', 'pd-subtitle');
+    exportsTitle.setText('صادرات');
+    section.appendChild(exportsTitle);
+    const exportsList = this.create('div', 'pd-trades');
+    section.appendChild(exportsList);
+    this.track(exportsList, 'exports');
+    // Sectors stay at the bottom (existing data, out of the way).
     const sectorTitle = this.create('div', 'pd-subtitle');
     sectorTitle.setText('بخش‌ها — تولید · شغل · بهره‌وری');
     section.appendChild(sectorTitle);
     for (const sectorId of SECTOR_ORDER) {
       this.addRow(section, `sector.${sectorId}`, SECTOR_LABELS[sectorId] ?? sectorId);
     }
-    const resourcesTitle = this.create('div', 'pd-subtitle');
-    resourcesTitle.setText('منابع راهبردی — تولید · مصرف · تراز · واردات/صادرات');
-    section.appendChild(resourcesTitle);
-    const resourcesList = this.create('div', 'pd-resources');
-    section.appendChild(resourcesList);
-    this.track(resourcesList, 'resources');
     return section;
   }
 
@@ -407,33 +427,23 @@ export class PresidentDashboard {
     const macro = context?.state.economy.macro[countryId];
     if (context === undefined || context === null || macro === undefined) return;
     const treasury = context.state.economy.treasury[countryId] ?? 0;
-    this.rows.get('economy.تولید ناخالص (سالانه)')?.setText(money(macro.gdp));
-    this.rows.get('economy.رشد')?.setText(percentSigned(macro.gdpGrowth));
-    this.rows.get('economy.تورم')?.setText(percentSigned(macro.inflation));
-    this.rows.get('economy.بیکاری')?.setText(percent(macro.unemployment));
-    this.rows.get('economy.بدهی')?.setText(money(macro.debt));
-    this.rows.get('economy.خزانه')?.setText(money(treasury));
-    this.rows.get('economy.درآمد ماهانه')?.setText(money(macro.lastRevenue));
-    this.rows.get('economy.هزینهٔ ماهانه')?.setText(money(macro.lastSpending));
-    this.rows.get('economy.تراز ماهانه')?.setText(moneySigned(macro.lastBalance));
-    this.rows.get('economy.تراز تجاری')?.setText(moneySigned(macro.trade.balance));
-    const resources = context.state.economy.resources[countryId];
-    this.rows.get('economy.تجارت منابع')?.setText(
-      resources === undefined
-        ? '—'
-        : `هزینهٔ واردات ${money(resources.importCost)} · درآمد صادرات ${money(resources.exportIncome)} (ماهانه)`
-    );
-    this.rows.get('economy.جمعیت')?.setText(number(context.state.countries.countries[countryId]?.population ?? 0));
-    this.rows.get('economy.نیروی کار')?.setText(number(Math.round((context.state.countries.countries[countryId]?.population ?? 0) * 0.52)));
+    // Exactly the four financial rows (macro GDP/inflation/debt/… remain in
+    // state — a future Statistics section can show them).
+    this.rows.get('economy.💰 خزانه')?.setText(money(treasury));
+    this.rows.get('economy.📈 درآمد')?.setText(`${money(macro.lastRevenue)} / ماه`);
+    this.rows.get('economy.💸 هزینه')?.setText(`${money(macro.lastSpending)} / ماه`);
+    this.rows.get('economy.📊 رشد اقتصاد')?.setText(percentSigned(macro.gdpGrowth));
     for (const [sectorId, sector] of Object.entries(macro.sectors)) {
       this.rows.get(`sector.${sectorId}`)?.setText(
         `${money(sector.output)} · ${number(Math.round(sector.jobs))} شغل · ${number(Math.round(sector.productivity))} دلار/سال`
       );
     }
     this.rebuildResources(countryId);
+    this.rebuildTrades(countryId);
   }
 
-  /** The strategic resource cards: production/use/balance + status + trade actions. */
+  /** The resource cards: name + status badge + تولید / مصرف / تراز lines.
+   *  Balance = Production − Consumption (raw — trade never distorts it). */
   private rebuildResources(countryId: string): void {
     const context = this.context;
     if (context === undefined || context === null) return;
@@ -446,10 +456,8 @@ export class PresidentDashboard {
         const resourceId = resource.id;
         const production = record.production[resourceId] ?? 0;
         const consumption = record.consumption[resourceId] ?? 0;
-        const imports = record.imports[resourceId] ?? 0;
-        const exports = record.exports[resourceId] ?? 0;
-        const status = resourceStatusOf(record, resourceId);
-        const balance = resourceBalanceOf(record, resourceId);
+        const status = resourceDisplayStatusOf(record, resourceId);
+        const balance = resourceRawBalanceOf(record, resourceId);
         const statusInfo = RESOURCE_STATUS[status];
 
         const card = this.create('div', `pd-resource ${statusInfo.css}`);
@@ -462,61 +470,121 @@ export class PresidentDashboard {
         head.appendChild(badge);
         card.appendChild(head);
 
-        const detail = this.create('div', 'pd-resource-detail');
-        detail.setText(
-          `تولید ${units(production)} · مصرف ${units(consumption)} · تراز ${unitsSigned(balance)}`
-        );
-        card.appendChild(detail);
-
-        // —— trade line + action (import when short, export when surplus) ——
-        const importing = record.importPolicy[resourceId] === true;
-        const exporting = record.exportPolicy[resourceId] === true;
-        if (imports > 0 || importing) {
-          const supplierId = record.suppliers[resourceId] ?? null;
-          const supplierName = supplierId !== null
-            ? (context.state.countries.countries[supplierId]?.name ?? supplierId)
-            : null;
-          const line = this.create('div', 'pd-resource-trade');
-          line.setText(
-            imports > 0
-              ? `واردات ${units(imports)} در ماه${supplierName !== null ? ` از ${supplierName}` : ''} — هزینه ${money(imports * resource.price * config.importMarkup)}`
-              : 'درخواست واردات ثبت شده — عرضه‌کننده‌ای با مازاد پیدا نشد'
-          );
-          card.appendChild(line);
+        for (const line of [
+          `تولید: ${units(production)}`,
+          `مصرف: ${units(consumption)}`,
+          `تراز: ${unitsSigned(balance)}`
+        ]) {
+          const detail = this.create('div', 'pd-resource-detail');
+          detail.setText(line);
+          card.appendChild(detail);
         }
-        if (exports > 0 || exporting) {
-          const line = this.create('div', 'pd-resource-trade');
-          line.setText(`صادرات ${units(exports)} در ماه — درآمد ${money(exports * resource.price)}`);
-          card.appendChild(line);
-        }
-
-        const actions = this.create('div', 'pd-resource-actions');
-        let hasAction = false;
-        const canImport = status === 'shortage' || importing;
-        const canExport = (status === 'surplus' || status === 'exported') || exporting;
-        if (canImport) {
-          hasAction = true;
-          const button = this.create('button', importing ? 'pd-resource-btn on' : 'pd-resource-btn');
-          button.setText(importing ? 'توقف واردات' : 'واردات');
-          button.onClick(() =>
-            this.send({ type: 'economy.setImportPolicy', countryId, resourceId, active: !importing })
-          );
-          actions.appendChild(button);
-        }
-        if (canExport) {
-          hasAction = true;
-          const button = this.create('button', exporting ? 'pd-resource-btn on' : 'pd-resource-btn');
-          button.setText(exporting ? 'توقف صادرات' : 'صادرات');
-          button.onClick(() =>
-            this.send({ type: 'economy.setExportPolicy', countryId, resourceId, active: !exporting })
-          );
-          actions.appendChild(button);
-        }
-        if (hasAction) card.appendChild(actions);
         rows.push(card);
       }
       return rows;
     });
+  }
+
+  /**
+   * The two trade sections: Imports lists ONLY short resources (what is
+   * bought each month + its cost), Exports ONLY surplus ones (what is sold
+   * + the income). No shortage → «نیاز به واردات نیست»; no surplus →
+   * «مازادی برای صادرات نیست». The policy toggles live here (the same
+   * import/export commands as before — the SYSTEM is unchanged).
+   */
+  private rebuildTrades(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const record = context.state.economy.resources[countryId];
+
+    this.rebuild('imports', this.parents.get('imports'), () => {
+      const rows: UIElement[] = [];
+      if (record !== undefined) {
+        for (const resource of config.resources) {
+          const resourceId = resource.id;
+          if (resourceRawBalanceOf(record, resourceId) >= 0) continue; // not short
+          const imports = record.imports[resourceId] ?? 0;
+          const importing = record.importPolicy[resourceId] === true;
+          const cost = imports * resource.price * config.importMarkup;
+          rows.push(
+            this.tradeRow(
+              resource.name,
+              `${units(imports)} / ماه`,
+              imports > 0 ? money(cost) : null,
+              importing,
+              importing ? 'توقف واردات' : 'واردات',
+              () => this.send({ type: 'economy.setImportPolicy', countryId, resourceId, active: !importing })
+            )
+          );
+        }
+      }
+      if (rows.length === 0) {
+        const empty = this.create('div', 'pd-trade-empty');
+        empty.setText('نیاز به واردات نیست');
+        rows.push(empty);
+      }
+      return rows;
+    });
+
+    this.rebuild('exports', this.parents.get('exports'), () => {
+      const rows: UIElement[] = [];
+      if (record !== undefined) {
+        for (const resource of config.resources) {
+          const resourceId = resource.id;
+          if (resourceRawBalanceOf(record, resourceId) <= 0) continue; // no surplus
+          const exports = record.exports[resourceId] ?? 0;
+          const exporting = record.exportPolicy[resourceId] === true;
+          const income = exports * resource.price;
+          rows.push(
+            this.tradeRow(
+              resource.name,
+              `${units(exports)} / ماه`,
+              exports > 0 ? money(income) : null,
+              exporting,
+              exporting ? 'توقف صادرات' : 'صادرات',
+              () => this.send({ type: 'economy.setExportPolicy', countryId, resourceId, active: !exporting })
+            )
+          );
+        }
+      }
+      if (rows.length === 0) {
+        const empty = this.create('div', 'pd-trade-empty');
+        empty.setText('مازادی برای صادرات نیست');
+        rows.push(empty);
+      }
+      return rows;
+    });
+  }
+
+  /** ONE trade row: name + [toggle] · «N / ماه» · monthly cost/income. */
+  private tradeRow(
+    name: string,
+    amount: string,
+    moneyText: string | null,
+    active: boolean,
+    actionLabel: string,
+    onToggle: () => void
+  ): UIElement {
+    const row = this.create('div', 'pd-trade');
+    const head = this.create('div', 'pd-trade-head');
+    const nameElement = this.create('span', 'pd-trade-name');
+    nameElement.setText(name);
+    head.appendChild(nameElement);
+    const button = this.create('button', active ? 'pd-resource-btn on' : 'pd-resource-btn');
+    button.setText(actionLabel);
+    button.onClick(onToggle);
+    head.appendChild(button);
+    row.appendChild(head);
+    const amountElement = this.create('div', 'pd-trade-amount');
+    amountElement.setText(amount);
+    row.appendChild(amountElement);
+    if (moneyText !== null) {
+      const moneyElement = this.create('div', 'pd-trade-money');
+      moneyElement.setText(moneyText);
+      row.appendChild(moneyElement);
+    }
+    return row;
   }
 
   private refreshBudget(countryId: string): void {
@@ -773,10 +841,6 @@ function percentSigned(value: number): string {
 function money(value: number): string {
   if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)} میلیارد دلار`;
   return `${Math.round(value)} میلیون دلار`;
-}
-
-function moneySigned(value: number): string {
-  return `${value >= 0 ? '+' : '−'}${money(Math.abs(value))}`;
 }
 
 /** Resource units (whole numbers, thousands-separated). */
