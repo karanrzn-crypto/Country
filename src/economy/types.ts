@@ -1,7 +1,9 @@
 /**
- * Economy domain model — the SIMPLE economy (spec §1-§8): three resources
- * (غذا / آهن / نفت), one stockpile per country, one transparent monthly
- * cycle, base prices, money-paid construction. Leaf module.
+ * Economy domain model — the SIMPLE economy (spec §1-§9): four goods
+ * (غذا / آهن / نفت / کالاهای صنعتی), one stockpile per country, one
+ * transparent monthly cycle, base prices, money-paid construction on
+ * geographic grid cells, country specialization, a 0-100 economy level and
+ * graded shortage satisfaction. Leaf module.
  */
 
 /** Data-driven resource definition (src/data/economy.json). */
@@ -83,21 +85,20 @@ export interface DomesticBaselineConfig {
 }
 
 /**
- * One BUILDABLE building (spec §8) — exactly ONE main economic effect:
- *  - production: adds `output` monthly units of `resource` when complete;
- *  - income: adds `income` money to the monthly treasury balance.
- * The cost is ONE-TIME money, paid fully at start (never re-drawn).
+ * One BUILDABLE building (spec §1) — production of exactly ONE good:
+ * adds `output` monthly units of `resource` when complete. The real output
+ * is scaled by the country's ECONOMY LEVEL (spec §3 — a healthy economy
+ * builds/works better, a weak one worse). The cost is ONE-TIME money, paid
+ * fully at start (never re-drawn), and the building sits on exactly ONE
+ * grid cell of its owner (one economic building per region).
  */
 export interface BuildingDef {
   readonly id: string;
   readonly name: string;
-  readonly effect: 'production' | 'income';
-  /** Production buildings only: which resource this building produces. */
-  readonly resource?: string;
-  /** Production buildings only: monthly units added while active. */
-  readonly output?: number;
-  /** Income buildings only: monthly money added while active. */
-  readonly income?: number;
+  /** Which good this building produces (config resource id). */
+  readonly resource: string;
+  /** BASE monthly units added while active (before the economy level). */
+  readonly output: number;
   /** ONE-TIME money cost, deducted from the treasury at start. */
   readonly cost: number;
   /** Base build time in months (the economic budget scales the speed). */
@@ -118,6 +119,59 @@ export interface EconomyFinanceConfig {
   readonly armyCostPerThousandSoldiers: number;
   /** هزینه زیرساخت = تعداد نواحی شهری × THIS (spec §3). */
   readonly infrastructureCostPerArea: number;
+}
+
+/**
+ * Country SPECIALIZATION (spec §4): every country is BETTER at some goods
+ * and WEAKER at others — ranked against its own geography-derived baseline
+ * (best / second / weakest). Multipliers stay moderate so every country
+ * still produces every good (specialization ≠ inability).
+ */
+export interface EconomySpecializationConfig {
+  /** Multiplier bonus for the country's strongest good (e.g. 0.5 → ×1.5). */
+  readonly boostBest: number;
+  /** Multiplier bonus for the second good (e.g. 0.15 → ×1.15). */
+  readonly boostSecond: number;
+  /** Multiplier cut for the weakest good (e.g. 0.35 → ×0.65). */
+  readonly reduceWeakest: number;
+}
+
+/**
+ * The country ECONOMY LEVEL (spec §3) — one 0-100 number for the overall
+ * state of the economy. It drifts GRADUALLY (max maxStepPerMonth) toward a
+ * target derived from the real month (positive balance ↑, uncovered
+ * shortages ↓) and scales BUILDING production by
+ * (level − 50) × buildingBonusPerPoint around 50 (never multi-fold).
+ */
+export interface EconomyLevelConfig {
+  /** Starting level of every country (the neutral midpoint). */
+  readonly start: number;
+  /** Maximum change per month (spec §3 — تدریجی, never a jump). */
+  readonly maxStepPerMonth: number;
+  /** Building production per point away from 50 (e.g. 0.006 → ±30% at 0/100). */
+  readonly buildingBonusPerPoint: number;
+  /** The neutral target (no balance, no shortages). */
+  readonly targetBase: number;
+  /** Monthly balance → target points (lastBalance × balanceFactor). */
+  readonly balanceFactor: number;
+  /** The balance term's magnitude cap (points). */
+  readonly balanceCap: number;
+  /** Target points lost PER uncovered resource. */
+  readonly shortagePenalty: number;
+}
+
+/**
+ * Graded SHORTAGE → SATISFACTION penalties (spec §7): the penalty is a
+ * piecewise-linear function of the supply COVERAGE ratio (تولید + واردات
+ * against مصرف). Full coverage costs nothing; 90% hurts a little; 70%
+ * moderately; 40% badly. Breakpoints stay sorted descending by coverage.
+ */
+export interface SatisfactionConfig {
+  readonly breakpoints: readonly { readonly coverage: number; readonly penalty: number }[];
+  /** Penalty ceiling (deep below the last breakpoint). */
+  readonly maxPenalty: number;
+  /** Share of the total penalty applied to political stability per month. */
+  readonly stabilityFactor: number;
 }
 
 /** Data-driven tuning of the simple economy (economy.json). */
@@ -142,6 +196,12 @@ export interface StrategicResourcesConfig {
   readonly finance: EconomyFinanceConfig;
   /** Geography-driven minimum domestic production (§4). */
   readonly domesticBaseline: DomesticBaselineConfig;
+  /** Country specialization multipliers over the baseline (§4). */
+  readonly specialization: EconomySpecializationConfig;
+  /** The 0-100 economy level that scales building production (§3). */
+  readonly economyLevel: EconomyLevelConfig;
+  /** Graded shortage → satisfaction penalties (§7). */
+  readonly satisfaction: SatisfactionConfig;
   /** The strategic resources themselves (id, Persian name, base price). */
   readonly resources: readonly StrategicResourceDef[];
   /** Per-resource consumption drivers. */

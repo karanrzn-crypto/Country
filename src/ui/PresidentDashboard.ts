@@ -10,6 +10,7 @@ import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 import { resourceDisplayStatusOf } from '../economy/resources';
 import { sellersOf, unitPriceOf } from '../economy/purchase';
+import type { StrategicResourcesConfig } from '../economy/types';
 import { faNum, faSigned, faPopulation, toFaDigits } from '../utils/format';
 
 /**
@@ -254,20 +255,30 @@ export class PresidentDashboard {
     return section;
   }
 
+  /** The strategic-economy config shortcut (null before registration). */
+  private economyConfig(): StrategicResourcesConfig | null {
+    return this.context?.data.economyData.strategicResources ?? null;
+  }
+
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    // The ECONOMY page (spec §12/§16) — the whole country's money story at
+    // The ECONOMY page (spec §12) — the whole country's money story at
     // a glance: the §1 rows, the INCOME lines, the EXPENSE lines and the
-    // treasury change — followed by the three resource cards, construction
-    // and the on-demand market. No GDP, no accounting tables.
+    // treasury change — followed by the resource cards, construction and
+    // the on-demand market. No GDP, no accounting tables.
     const ledgerTitle = this.create('div', 'pd-subtitle');
     ledgerTitle.setText('اقتصاد کشور');
     section.appendChild(ledgerTitle);
-    this.addRows(section, ['پول خزانه', 'جمعیت', 'غذا', 'آهن', 'نفت', 'نرخ مالیات'], 'ledger.');
+    // The §1 rows — the good rows are CONFIG-driven (the world may carry
+    // any set of goods); the economy level and specialization ride along.
+    const ledgerKeys = ['پول خزانه', 'جمعیت', 'وضعیت اقتصاد', 'تخصص'];
+    for (const resource of this.economyConfig()?.resources ?? []) ledgerKeys.push(resource.name);
+    ledgerKeys.push('نرخ مالیات');
+    this.addRows(section, ledgerKeys, 'ledger.');
     const incomeTitle = this.create('div', 'pd-subtitle');
     incomeTitle.setText('درآمد (این ماه)');
     section.appendChild(incomeTitle);
-    this.addRows(section, ['مالیات', 'تجارت', 'کارخانه‌ها'], 'income.');
+    this.addRows(section, ['مالیات', 'تجارت'], 'income.');
     const expenseTitle = this.create('div', 'pd-subtitle');
     expenseTitle.setText('هزینه‌ها (این ماه)');
     section.appendChild(expenseTitle);
@@ -433,15 +444,28 @@ export class PresidentDashboard {
     if (context === undefined || context === null) return;
     // The §12 ledger — every number straight from the ONE finance record.
     const state = context.state;
+    const config = context.data.economyData.strategicResources;
     const finance = state.economy.finance[countryId];
     const treasury = state.economy.treasury[countryId] ?? 0;
     const country = state.countries.countries[countryId];
     const government = state.government.countries[countryId];
     const taxRate = government !== undefined ? TAX_LEVEL_SPECS[government.budget.tax].rate : 0;
+    const record = state.economy.resources[countryId];
     this.rows.get('ledger.پول خزانه')?.setText(faNum(Math.round(treasury)));
     this.rows.get('ledger.جمعیت')?.setText(faPopulation(country?.population ?? 0));
-    const record = state.economy.resources[countryId];
-    for (const resource of context.data.economyData.strategicResources.resources) {
+    // The 0-100 ECONOMY LEVEL (spec §3) + the country's strongest good
+    // (spec §4) — both read straight from state/config, never stored twice.
+    const level = Math.round(state.economy.economyLevel[countryId] ?? config.economyLevel.start);
+    this.rows.get('ledger.وضعیت اقتصاد')?.setText(`${faNum(level)} از ۱۰۰`);
+    const production = record?.production ?? {};
+    const best = [...config.resources].sort(
+      (a, b) => (production[b.id] ?? 0) - (production[a.id] ?? 0)
+    )[0];
+    const bestAmount = best !== undefined ? Math.round(production[best.id] ?? 0) : 0;
+    this.rows.get('ledger.تخصص')?.setText(
+      best !== undefined && bestAmount > 0 ? `${best.name} (+${faNum(bestAmount)} / ماه)` : '—'
+    );
+    for (const resource of config.resources) {
       const stock = Math.round(record?.stock[resource.id] ?? 0);
       this.rows.get(`ledger.${resource.name}`)?.setText(faNum(stock));
     }
@@ -449,7 +473,6 @@ export class PresidentDashboard {
     if (finance !== undefined) {
       this.rows.get('income.مالیات')?.setText(faSigned(Math.round(finance.lastTaxIncome)));
       this.rows.get('income.تجارت')?.setText(faSigned(Math.round(finance.lastTradeIncome)));
-      this.rows.get('income.کارخانه‌ها')?.setText(finance.lastFactoryIncome > 0 ? faSigned(Math.round(finance.lastFactoryIncome)) : '—');
       this.rows.get('expense.ارتش')?.setText(faSigned(-Math.round(finance.lastArmyExpense)));
       this.rows.get('expense.دولت')?.setText(faSigned(-Math.round(finance.lastGovernmentExpense)));
       this.rows.get('expense.زیرساخت')?.setText(faSigned(-Math.round(finance.lastInfrastructureExpense)));
@@ -537,11 +560,11 @@ export class PresidentDashboard {
   }
 
   /**
-   * The CONSTRUCTION section (spec §8) — simple: every active project
-   * shows its build progress % (the money cost was paid ONCE at start —
-   * time is all that remains), and the buildable list shows the ONE-TIME
-   * money cost + build time + the single effect. A project the country
-   * cannot afford is disabled with the reason.
+   * The CONSTRUCTION section (spec §1) — the build flow is EXACTLY the
+   * directive's: click ساخت → the build mode activates (the dashboard
+   * closes so the map is free) → the player clicks ONE grid cell of their
+   * OWN country → the building is placed exactly there. Cost and effect
+   * are shown BEFORE the click; one region holds one economic building.
    */
   private rebuildConstruction(countryId: string): void {
     const context = this.context;
@@ -551,21 +574,38 @@ export class PresidentDashboard {
     const construction = state.economy.construction[countryId];
     const projects = construction?.projects ?? [];
     const treasury = Math.floor(state.economy.treasury[countryId] ?? 0);
+    const gridIdOf = (cellKey: string): string => cellKey.slice(cellKey.indexOf('#') + 1);
     const signature =
-      JSON.stringify(projects.map((project) => [project.id, project.typeId, project.progress])) +
-      `#${projects.length}#${treasury}`;
+      JSON.stringify(projects.map((project) => [project.id, project.typeId, project.progress, project.cellKey])) +
+      `#${projects.length}#${treasury}#${state.map.buildMode ?? ''}`;
     if (signature === this.dynamicSignatures.get('construction')) return;
     this.dynamicSignatures.set('construction', signature);
     this.rebuild('construction', this.parents.get('construction'), () => {
       const rows: UIElement[] = [];
-      // — active projects (top) — building by TIME alone (paid in full) —
+      // — the ACTIVE BUILD MODE hint (spec §1.1/1.2) — the placement is
+      //   done ON THE MAP; the hint names the building and the cost again.
+      const buildModeType = state.map.buildMode;
+      if (buildModeType !== null) {
+        const def = config.buildings.find((candidate) => candidate.id === buildModeType);
+        const hint = this.create('div', 'pd-build-hint');
+        hint.setText(
+          `حالت ساخت فعال: ${def?.name ?? buildModeType} — یک خانهٔ شبکه از کشور خود را روی نقشه انتخاب کنید` +
+            (def !== undefined ? ` (هزینه ${faNum(def.cost)})` : '')
+        );
+        const cancel = this.create('button', 'pd-build-cancel');
+        cancel.setText('لغو ساخت');
+        cancel.onClick(() => this.send({ type: 'economy.buildMode', typeId: null }));
+        hint.appendChild(cancel);
+        rows.push(hint);
+      }
+      // — active projects (top): progress + the cell they are built on —
       for (const project of projects) {
         const def = config.buildings.find((candidate) => candidate.id === project.typeId);
         if (def === undefined) continue;
         const card = this.create('div', 'pd-project');
         const head = this.create('div', 'pd-project-head');
         const name = this.create('span', 'pd-project-name');
-        name.setText(def.name);
+        name.setText(`${def.name} — منطقه ${gridIdOf(project.cellKey)}`);
         head.appendChild(name);
         const progress = this.create('span', 'pd-project-progress');
         progress.setText(`${Math.round(project.progress * 100)}٪`);
@@ -576,16 +616,15 @@ export class PresidentDashboard {
         card.appendChild(status);
         rows.push(card);
       }
-      // — the buildable buildings (bottom) — one effect each (spec §8) —
+      // — the buildable buildings (bottom) — cost + effect BEFORE building
+      //   (spec §1.7), then ساخت starts the placement mode —
       for (const def of config.buildings) {
         const row = this.create('div', 'pd-buildable');
         const info = this.create('div', 'pd-buildable-info');
         const name = this.create('span', 'pd-buildable-name');
         name.setText(def.name);
         info.appendChild(name);
-        const effect = def.effect === 'income'
-          ? `درآمد +${faNum(def.income ?? 0)} / ماه`
-          : `تولید +${faNum(def.output ?? 0)} ${this.resourceName(config, def.resource ?? '')} / ماه`;
+        const effect = `تولید +${faNum(def.output)} ${this.resourceName(config, def.resource)} / ماه`;
         const detail = this.create('div', 'pd-buildable-detail');
         detail.setText(
           `هزینهٔ ساخت (یک‌بار): ${faNum(def.cost)} · مدت ساخت ${faNum(def.buildMonths)} ماه → ${effect}`
@@ -595,7 +634,10 @@ export class PresidentDashboard {
         const build = this.create('button', 'pd-build');
         const atCap = projects.length >= config.construction.maxProjects;
         const tooExpensive = treasury < def.cost;
-        if (atCap) {
+        if (state.map.buildMode === def.id) {
+          build.setText('در حال انتخاب منطقه…');
+          build.setAttribute('disabled', 'true');
+        } else if (atCap) {
           build.setText('ظرفیت ساخت پُر است');
           build.setAttribute('disabled', 'true');
         } else if (tooExpensive) {
@@ -603,7 +645,12 @@ export class PresidentDashboard {
           build.setAttribute('disabled', 'true');
         } else {
           build.setText('ساخت');
-          build.onClick(() => this.send({ type: 'economy.startConstruction', countryId, typeId: def.id }));
+          build.onClick(() => {
+            // ACTIVATE THE BUILD MODE (core state): map clicks now place
+            // the building. The dashboard closes so the map is reachable.
+            this.send({ type: 'economy.buildMode', typeId: def.id });
+            this.send({ type: 'ui.closeScreen', screenId: 'president' });
+          });
         }
         row.appendChild(build);
         rows.push(row);

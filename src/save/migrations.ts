@@ -702,6 +702,64 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v16 → v17: the WIDER simple economy (spec §1-§9). Per country:
+    //  - buildings/projects anchor to GRID CELLS: the migration keeps the
+    //    legacy `cityId` next to a provisional `cellKey: ""` so the session
+    //    heal can resolve the real cell from the LIVE map (the save has no
+    //    map), then strips the stale field;
+    //  - finance: `lastFactoryIncome` is GONE (buildings produce goods —
+    //    no building prints money any more);
+    //  - `economyLevel` is added (the heal fills the neutral config start).
+    from: 16,
+    to: 17,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v16\u2192v17: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: {
+          economy?: {
+            economyLevel?: Record<string, number>;
+            finance?: Record<string, Record<string, unknown>>;
+            construction?: Record<string, { projects?: unknown[] }>;
+            buildings?: Record<string, Record<string, unknown>>;
+          };
+        };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined) {
+        if (economy.economyLevel === undefined) economy.economyLevel = {};
+        if (economy.finance !== undefined && typeof economy.finance === 'object') {
+          for (const record of Object.values(economy.finance)) {
+            if (record === null || typeof record !== 'object') continue;
+            delete record['lastFactoryIncome'];
+          }
+        }
+        if (economy.buildings !== undefined && typeof economy.buildings === 'object') {
+          for (const buildings of Object.values(economy.buildings)) {
+            if (buildings === null || typeof buildings !== 'object') continue;
+            for (const building of Object.values(buildings as Record<string, Record<string, unknown>>)) {
+              if (building === null || typeof building !== 'object') continue;
+              if (typeof building['cellKey'] !== 'string') building['cellKey'] = '';
+            }
+          }
+        }
+        if (economy.construction !== undefined && typeof economy.construction === 'object') {
+          for (const record of Object.values(economy.construction)) {
+            if (record === null || typeof record !== 'object') continue;
+            const projects = Array.isArray(record['projects']) ? record['projects'] : [];
+            for (const project of projects) {
+              if (project === null || typeof project !== 'object') continue;
+              const entry = project as Record<string, unknown>;
+              if (typeof entry['cellKey'] !== 'string') entry['cellKey'] = '';
+            }
+          }
+        }
+      }
+      return clone;
+    }
   }
 ];
 

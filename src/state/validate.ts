@@ -35,15 +35,15 @@ const pointSchema: FieldSchema = {
 };
 
 /**
- * The SIMPLE monthly ledger (spec §3/§12): tax + trade + factories against
- * army + government + infrastructure. No GDP/debt/inflation/customs fields.
+ * The SIMPLE monthly ledger (spec §3/§12): tax + trade against army +
+ * government + infrastructure. No GDP/debt/inflation/customs fields (and no
+ * factory income — buildings produce GOODS, not money).
  */
 export const FINANCE_STATE_SCHEMA: FieldSchema = {
   type: 'object',
   fields: {
     lastTaxIncome: { type: 'number', min: 0 },
     lastTradeIncome: { type: 'number' },
-    lastFactoryIncome: { type: 'number', min: 0 },
     lastArmyExpense: { type: 'number', min: 0 },
     lastGovernmentExpense: { type: 'number', min: 0 },
     lastInfrastructureExpense: { type: 'number', min: 0 },
@@ -56,7 +56,11 @@ const constructionProjectSchema: FieldSchema = {
   fields: {
     id: { type: 'string' },
     typeId: { type: 'string' },
-    cityId: { type: 'string' },
+    // Canonical grid-cell key `countryId#gridId` (spec §1). `cityId` is a
+    // LEGACY tolerated field: the v16→v17 migration keeps it so the session
+    // heal can resolve the cell from the live map, then strips it.
+    cellKey: { type: 'string' },
+    cityId: { type: 'optional', inner: { type: 'string' } },
     startedMonth: { type: 'number', min: 0, integer: true },
     progress: { type: 'number', min: 0, max: 1 }
   }
@@ -359,6 +363,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
           }
         },
         finance: { type: 'record', values: FINANCE_STATE_SCHEMA },
+        economyLevel: { type: 'record', values: { type: 'number', min: 0, max: 100 } },
         construction: {
           type: 'record',
           values: {
@@ -377,7 +382,10 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               fields: {
                 id: { type: 'string' },
                 typeId: { type: 'string' },
-                cityId: { type: 'string' }
+                // Canonical grid-cell key (spec §1/§2) + the same LEGACY
+                // tolerated cityId the heal strips after resolving.
+                cellKey: { type: 'string' },
+                cityId: { type: 'optional', inner: { type: 'string' } }
               }
             }
           }
@@ -509,6 +517,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         selectedBuildingId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectedCityConnectionId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectionMode: { type: 'enum', values: ['country', 'province'] },
+        buildMode: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         layerVisibility: { type: 'record', values: { type: 'boolean' } },
         camera: {
           type: 'object',

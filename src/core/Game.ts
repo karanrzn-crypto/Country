@@ -675,6 +675,12 @@ export class Game {
    *  the country hierarchy — the panel always shows ONE coherent selection. */
   mapPick(x: number, z: number): void {
     this.assertInitialized();
+    // BUILD MODE (spec §1): while the player is placing a building, the
+    // click resolves as the placement — never as a selection.
+    if (this.state.map.buildMode !== null) {
+      this.resolveBuildClick(x, z, this.state.map.buildMode);
+      return;
+    }
     const result = pickAt(this.mapModel, { x, z }, this.pickOptions());
     if (result.cityId !== null) {
       this.mapSelect({ cityId: result.cityId });
@@ -1122,33 +1128,105 @@ export class Game {
     return true;
   }
 
-  /** Starts ONE building construction project (spec §8 — money paid once). */
-  economyStartConstruction(countryId: string, typeId: string): boolean {
+  /** Starts ONE building construction project (spec §1 — money paid once,
+   *  placed on ONE grid cell of the caller's OWN country). */
+  economyStartConstruction(countryId: string, typeId: string, cellKey: string): boolean {
     this.assertInitialized();
-    const capital = this.state.countries.countries[countryId]?.capitalId ?? null;
-    if (capital === null) {
-      this.log.debug(`startConstruction blocked: ${countryId} has no capital`);
+    const config = this.data.economyData.strategicResources;
+    if (!config.buildings.some((candidate) => candidate.id === typeId)) {
+      this.log.debug(`startConstruction blocked: unknown type "${typeId}"`);
+      return false;
+    }
+    // The cell must be REAL land of the caller's OWN country (spec §1.4 —
+    // no building on other countries or invalid regions).
+    const owner = this.cellOwnerCountry(cellKey);
+    if (owner === null) {
+      this.log.debug(`startConstruction blocked: invalid cell "${cellKey}"`);
+      return false;
+    }
+    if (owner !== countryId) {
+      this.log.debug(`startConstruction blocked: "${cellKey}" belongs to ${owner}, not ${countryId}`);
       return false;
     }
     const result = startProject(
       this.state,
       countryId,
-      this.data.economyData.strategicResources,
+      config,
       typeId,
-      capital,
+      cellKey,
       this.currentMonth(),
       () => this.ids.next('building')
     );
     if (!result.ok) {
-      this.log.debug(`startConstruction blocked: ${result.reason} (${typeId})`);
+      this.log.debug(`startConstruction blocked: ${result.reason} (${typeId} @ ${cellKey})`);
       return false;
     }
     this.events.emit('economy.constructionStarted', {
       countryId,
       projectId: result.project.id,
-      typeId
+      typeId,
+      cellKey
     });
     return true;
+  }
+
+  /**
+   * BUILD MODE (spec §1.1-1.3): activates (typeId) or cancels (null) the
+   * build placement mode. While active, map clicks place the building on
+   * the clicked grid cell instead of selecting. The geographic grid layer
+   * is force-enabled so the regions the player picks among are VISIBLE —
+   * you build on what you can see.
+   */
+  economyBuildMode(typeId: string | null): boolean {
+    this.assertInitialized();
+    if (typeId !== null && !this.data.economyData.strategicResources.buildings.some((candidate) => candidate.id === typeId)) {
+      this.log.debug(`buildMode blocked: unknown type "${typeId}"`);
+      return false;
+    }
+    this.state.map.buildMode = typeId;
+    if (typeId !== null) {
+      this.state.map.layerVisibility.grid = true;
+    }
+    this.events.emit('economy.buildModeChanged', { typeId });
+    return true;
+  }
+
+  /** Owner country id of a canonical cell key, or null when invalid. */
+  private cellOwnerCountry(cellKey: string): string | null {
+    const cellIndex = findGridCell(this.mapModel, cellKey);
+    if (cellIndex < 0) return null;
+    const owner = this.mapModel.features.cellOwner[cellIndex];
+    if (owner < 0 || owner >= this.mapModel.countryOrder.length) return null;
+    return this.mapModel.countryOrder[owner];
+  }
+
+  /**
+   * Resolves a map click WHILE build mode is active (spec §1): the clicked
+   * grid cell becomes the building site. A click on anything but a valid
+   * cell of the player's own country keeps the mode alive and reports the
+   * reason as an event (the UI shows the hint) — the mode exits only on a
+   * successful placement (or an explicit cancel).
+   */
+  private resolveBuildClick(x: number, z: number, typeId: string): void {
+    const result = pickAt(this.mapModel, { x, z }, this.pickOptions());
+    const countryId = this.state.player.countryId;
+    if (result.gridCellKey === null) {
+      this.events.emit('economy.buildRejected', { reason: 'no-cell', typeId });
+      return;
+    }
+    const owner = this.cellOwnerCountry(result.gridCellKey);
+    if (owner !== countryId) {
+      this.events.emit('economy.buildRejected', { reason: 'foreign-cell', typeId });
+      return;
+    }
+    if (this.economyStartConstruction(countryId, typeId, result.gridCellKey)) {
+      this.state.map.buildMode = null;
+      this.events.emit('economy.buildModeChanged', { typeId: null });
+    } else {
+      // Occupied cell / project cap / no funds — the mode stays active so
+      // the player can pick another cell (or cancel from the hint).
+      this.events.emit('economy.buildRejected', { reason: 'start-failed', typeId });
+    }
   }
 
   private emitSelectionChanged(): void {

@@ -202,8 +202,18 @@ export interface GameEventMap {
     readonly amount: number;
     readonly cost: number;
   };
-  'economy.constructionStarted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
+  'economy.constructionStarted': {
+    readonly countryId: string;
+    readonly projectId: string;
+    readonly typeId: string;
+    /** The grid cell the building is placed on (spec §1). */
+    readonly cellKey: string;
+  };
   'economy.constructionCompleted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
+  /** BUILD MODE (spec §1): activated (typeId) or cancelled (null). */
+  'economy.buildModeChanged': { readonly typeId: string | null };
+  /** A build click did NOT place a building — the mode stays active. */
+  'economy.buildRejected': { readonly reason: 'no-cell' | 'foreign-cell' | 'start-failed'; readonly typeId: string };
 }
 
 export type GameEventName = keyof GameEventMap;

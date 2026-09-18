@@ -115,7 +115,7 @@ describe('Metrics + PublicOpinion + monthly finance (Phase 2 causality, light mo
     highGame.dispose();
   });
 
-  it('finance: the ledger has exactly THREE income lines and THREE expense lines (§3)', () => {
+  it('finance: the ledger has exactly TWO income lines and THREE expense lines (§3)', () => {
     const game = createTestGame({ seed: 97 });
     const countryId = game.strategicMap.countryOrder[0];
     const state = game.gameState;
@@ -124,8 +124,7 @@ describe('Metrics + PublicOpinion + monthly finance (Phase 2 causality, light mo
     const finance = state.economy.finance[countryId]!;
     expect(finance.lastTaxIncome).toBeGreaterThan(0);
     expect(finance.lastTradeIncome).toBeLessThanOrEqual(finance.lastTradeIncome + 1);
-    expect(finance.lastFactoryIncome).toBeGreaterThanOrEqual(0);
-    const income = finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome;
+    const income = finance.lastTaxIncome + finance.lastTradeIncome;
     const expenses = finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense;
     expect(finance.lastBalance).toBeCloseTo(income - expenses, 2);
     // The treasury received EXACTLY one balance application this month.

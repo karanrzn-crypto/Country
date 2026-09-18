@@ -101,23 +101,34 @@
         "id": "oil",
         "name": "نفت",
         "price": 2
+      },
+      {
+        "id": "industrial",
+        "name": "کالاهای صنعتی",
+        "price": 3
       }
     ],
     "productionScale": 2.4,
     "startingStock": {
       "food": 4000,
       "iron": 1200,
-      "oil": 600
+      "oil": 600,
+      "industrial": 600
     },
     "consumption": {
       "food": {
         "perMillionPopulation": 50
       },
       "iron": {
+        "perMillionPopulation": 12,
         "perMilitaryUnit": 0.6
       },
       "oil": {
+        "perMillionPopulation": 3,
         "perMilitaryUnit": 0.9
+      },
+      "industrial": {
+        "perMillionPopulation": 12
       }
     },
     "militaryMaterials": {
@@ -132,6 +143,30 @@
       "surplusBufferMonths": 2,
       "minSurplusShare": 0.1
     },
+    "specialization": {
+      "boostBest": 0.5,
+      "boostSecond": 0.15,
+      "reduceWeakest": 0.35
+    },
+    "economyLevel": {
+      "start": 50,
+      "maxStepPerMonth": 1.5,
+      "buildingBonusPerPoint": 0.006,
+      "targetBase": 50,
+      "balanceFactor": 0.15,
+      "balanceCap": 15,
+      "shortagePenalty": 12
+    },
+    "satisfaction": {
+      "breakpoints": [
+        { "coverage": 1, "penalty": 0 },
+        { "coverage": 0.9, "penalty": 0.03 },
+        { "coverage": 0.7, "penalty": 0.1 },
+        { "coverage": 0.4, "penalty": 0.22 }
+      ],
+      "maxPenalty": 0.3,
+      "stabilityFactor": 0.4
+    },
     "construction": {
       "maxProjects": 3
     },
@@ -139,7 +174,6 @@
       {
         "id": "farm",
         "name": "مزرعه",
-        "effect": "production",
         "resource": "food",
         "output": 150,
         "cost": 600,
@@ -148,7 +182,6 @@
       {
         "id": "iron_mine",
         "name": "معدن آهن",
-        "effect": "production",
         "resource": "iron",
         "output": 100,
         "cost": 900,
@@ -157,7 +190,6 @@
       {
         "id": "oil_field",
         "name": "میدان نفتی",
-        "effect": "production",
         "resource": "oil",
         "output": 80,
         "cost": 1200,
@@ -166,8 +198,8 @@
       {
         "id": "factory",
         "name": "کارخانه",
-        "effect": "income",
-        "income": 60,
+        "resource": "industrial",
+        "output": 60,
         "cost": 1500,
         "buildMonths": 6
       }
@@ -237,6 +269,10 @@
             "valley": 0.3,
             "lowland": 0.25
           }
+        },
+        "industrial": {
+          "base": 40,
+          "cityFactor": 2.0
         }
       }
     }

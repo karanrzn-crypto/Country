@@ -8,21 +8,27 @@
  *     ↓
  *   ۲. محاسبه درآمد مالیاتی — جمعیت × نرخ (سطح مالیات) — recorded, not applied
  *     ↓
- *   ۳. تولید منابع          — deposits + baseline + buildings → stock += P
+ *   ۳. تولید منابع          — deposits + specialized baseline + buildings
+ *                             (× economy level) → stock += P
  *     ↓
- *   ۴. مصرف غذا             — population food + military wear → stock −= C
+ *   ۴. مصرف کالاها          — population base for EVERY good (§6) + military
+ *                             wear → stock −= C, honest shortage
  *     ↓
  *   ۵. هزینه ارتش/دولت/زیرساخت — recorded, not applied
  *     ↓
  *   ۶. تجارت               — world trade: shortage countries buy from
  *                             surplus countries at the BASE price (§6/§7);
- *                             units AND ledger lines move, treasury not yet
+ *                             units AND ledger lines move, treasury not yet;
+ *                             the shortage record becomes the POST-trade
+ *                             uncovered deficit (imports compensated — §8)
  *     ↓
- *   ۷. محاسبه پول نهایی     — treasury += tax + trade + factories − expenses
+ *   ۷. محاسبه پول نهایی     — treasury += tax + trade − expenses
  *                             (ONE treasury write per country, floored at 0)
  *     ↓
- *   ۸. ثبات و توسعه         — food shortage drops stability; opinion and
- *                             development read the same shortage numbers
+ *   ۸. ثبات و سطح اقتصاد    — graded shortage → satisfaction penalty (§7)
+ *                             drops stability; the 0-100 economy level drifts
+ *                             toward its target (balance ↑, shortages ↓) —
+ *                             next month's building production follows (§3)
  *     ↓
  *   پایان ماه
  *
@@ -50,10 +56,10 @@ import {
   countryResourceProduction,
   countryResourceConsumption,
   buildingProductionOf,
-  buildingIncomeOf,
-  safetyReserveUnits
+  safetyReserveUnits,
+  specializedBaselineProduction,
+  satisfactionPenaltyTotalOf
 } from './resources';
-import { countryBaselineProduction } from './domesticBaseline';
 import { emptyCountryResourceState, emptyCountryFinanceState } from './resourceTypes';
 import { roundTo } from '../utils/math';
 
@@ -167,7 +173,7 @@ export function runEconomyCycle(
     for (const [resourceId, amount] of Object.entries(buildingProductionOf(state, countryId, config))) {
       record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
     }
-    const baseline = countryBaselineProduction(mapModel, countryId, config.domesticBaseline);
+    const baseline = specializedBaselineProduction(mapModel, countryId, config);
     for (const [resourceId, amount] of Object.entries(baseline)) {
       record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
     }
@@ -210,7 +216,6 @@ export function runEconomyCycle(
     finance.lastArmyExpense = applyStep ? armyExpenseOf(soldiers, config) : 0;
     finance.lastGovernmentExpense = applyStep ? governmentExpenseOf(country.population, config) : 0;
     finance.lastInfrastructureExpense = applyStep ? infrastructureExpenseOf(areas, config) : 0;
-    finance.lastFactoryIncome = applyStep ? buildingIncomeOf(state, countryId, config) : 0;
     // تجارت (خالص): فروش‌ها − خریدها — the §12 ledger's single trade line.
     const tradeNet = applyStep
       ? roundTo(
@@ -232,8 +237,7 @@ export function runEconomyCycle(
     for (const countryId of order) {
       const finance = state.economy.finance[countryId]!;
       const treasury = state.economy.treasury[countryId] ?? 0;
-      const income =
-        finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome;
+      const income = finance.lastTaxIncome + finance.lastTradeIncome;
       const expenses =
         finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense;
       const balance = roundTo(income - expenses, 2);
@@ -242,20 +246,58 @@ export function runEconomyCycle(
     }
   }
 
-  // —— ۸. ثبات (spec §5: کمبود غذا → کاهش ثبات) ——
+  // —— ۸. ثبات و سطح اقتصاد (spec §7/§3) ——
   if (applyStep) {
     for (const countryId of order) {
-      const record = state.economy.resources[countryId]!;
+      // (a) the GRADED satisfaction penalty (spec §7): coverage per good
+      //     (production + imports vs consumption) → a piecewise penalty —
+      //     100% none · 90% tiny · 70% moderate · 40% severe. Stability
+      //     takes the stabilityFactor share while the shortage lasts.
       const political = state.political.countries[countryId];
-      if (political === undefined) continue;
-      const shortageMonths = Object.values(record.shortage).reduce((sum, value) => sum + (value > 0 ? 1 : 0), 0);
-      if (shortageMonths > 0) {
-        political.stability = Math.max(0, political.stability - 0.01 * shortageMonths);
-      } else {
-        political.stability = Math.min(1, political.stability + 0.002);
+      const penalty = satisfactionPenaltyTotalOf(state, countryId, config);
+      if (political !== undefined) {
+        if (penalty > 0) {
+          political.stability = Math.max(0, political.stability - penalty * config.satisfaction.stabilityFactor);
+        } else {
+          political.stability = Math.min(1, political.stability + 0.002);
+        }
       }
+      // (b) the ECONOMY LEVEL (spec §3): drifts GRADUALLY toward a target
+      //     derived from the real month — positive balance lifts it, every
+      //     uncovered shortage drags it down. Next month's buildings read it.
+      const target = economyLevelTargetOf(state, countryId, config);
+      const current = state.economy.economyLevel[countryId] ?? config.economyLevel.start;
+      const step = Math.max(
+        -config.economyLevel.maxStepPerMonth,
+        Math.min(config.economyLevel.maxStepPerMonth, target - current)
+      );
+      state.economy.economyLevel[countryId] = Math.min(100, Math.max(0, roundTo(current + step, 2)));
     }
   }
+}
+
+/**
+ * The ECONOMY-LEVEL target of ONE country this month (spec §3): 50 by
+ * default, lifted by the monthly balance (capped) and dragged down by every
+ * resource the country could not cover (post-trade). Config-driven — the
+ * drift toward it is capped at maxStepPerMonth so the level moves gradually.
+ */
+export function economyLevelTargetOf(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): number {
+  const spec = config.economyLevel;
+  const balance = state.economy.finance[countryId]?.lastBalance ?? 0;
+  const balanceTerm = Math.max(
+    -spec.balanceCap,
+    Math.min(spec.balanceCap, balance * spec.balanceFactor)
+  );
+  const uncovered = strategicResourceIds(config).filter(
+    (resourceId) => (state.economy.resources[countryId]?.shortage[resourceId] ?? 0) > 0
+  ).length;
+  const target = spec.targetBase + balanceTerm - uncovered * spec.shortagePenalty;
+  return Math.min(100, Math.max(0, target));
 }
 
 /**
@@ -274,6 +316,11 @@ export function runEconomyCycle(
  * id), largest seller stock first (tie → country id). A buyer with no money
  * simply buys nothing (no debt exists). Sellers never dip below their
  * safety reserve (food keeps the larger buffer — §5's anti-famine guard).
+ *
+ * POST-trade honesty (spec §8): whatever the imports covered is no longer a
+ * shortage — every buyer's record keeps only the UNCOVERED deficit, the ONE
+ * number the coverage ratio, the satisfaction penalty, opinion and the
+ * population-growth guard all read.
  */
 export function resolveWorldTrade(
   state: GameState,
@@ -346,6 +393,21 @@ export function resolveWorldTrade(
         seller.spare -= amount;
         needed -= amount;
       }
+    }
+  }
+
+  // POST-trade deficit bookkeeping (spec §8): imports shrink the shortage;
+  // only the UNCOVERED part survives as the record's shortage.
+  for (const countryId of order) {
+    const record = state.economy.resources[countryId];
+    if (record === undefined) continue;
+    for (const resourceId of resourceIds) {
+      const remaining = Math.max(
+        0,
+        Math.round((record.shortage[resourceId] ?? 0) - (record.imports[resourceId] ?? 0))
+      );
+      if (remaining > 0) record.shortage[resourceId] = remaining;
+      else delete record.shortage[resourceId];
     }
   }
 }

@@ -179,7 +179,7 @@ describe('simple economy (14-section spec)', () => {
     const finance = state.economy.finance[countryId]!;
     const before = state.economy.treasury[countryId] ?? 0;
     const expectedChange =
-      finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome -
+      finance.lastTaxIncome + finance.lastTradeIncome -
       finance.lastArmyExpense - finance.lastGovernmentExpense - finance.lastInfrastructureExpense;
 
     runEconomyCycle(state, context.map, config, { applyStep: true });
@@ -194,7 +194,7 @@ describe('simple economy (14-section spec)', () => {
 
   // ———————————————————————— §5 — کمبود غذا ——————————————————————————————
 
-  it('T9 food shortage → recorded deficit, slower population growth, lower stability (§5)', () => {
+  it('T9 food shortage → recorded deficit, slower population growth, lower stability (§5/§7)', () => {
     const state = context.state;
     // The most food-deficit country (production < consumption) becomes the
     // famine candidate; the honest inputs (empty warehouse) do the rest.
@@ -210,18 +210,23 @@ describe('simple economy (14-section spec)', () => {
     const country = state.countries.countries[countryId]!;
     const political = state.political.countries[countryId]!;
 
-    // Engineer the acute shortage HONESTLY: the warehouse is simply empty.
+    // Engineer the acute shortage HONESTLY: the warehouse is empty AND the
+    // world market cannot help (zero prices — no trade path, spec §6), so
+    // the uncovered deficit stays exactly what the land could not cover.
+    const frozen: StrategicResourcesConfig = {
+      ...config,
+      resources: config.resources.map((resource) => ({ ...resource, price: 0 }))
+    };
     record.stock.food = 0;
     record.shortage = {};
     const populationBefore = country.population;
     const stabilityBefore = political.stability;
     const expectedShortage = deficit.gap;
 
-    runEconomyCycle(state, context.map, config, { applyStep: true });
+    runEconomyCycle(state, context.map, frozen, { applyStep: true });
 
     const after = state.economy.resources[countryId]!;
-    // The uncovered deficit is recorded (§5) — the gap the world trade could
-    // not fully cover stays visible.
+    // The uncovered deficit is recorded (§5).
     expect(after.shortage.food ?? 0).toBeGreaterThan(0);
     // (±a few units: consumption re-derives from the population grown in step ۱)
     expect(after.shortage.food ?? 0).toBeLessThanOrEqual(expectedShortage + 10);
@@ -229,8 +234,10 @@ describe('simple economy (14-section spec)', () => {
     const growth = country.population - populationBefore;
     const normalGrowth = populationBefore * config.finance.populationGrowthPerMonth;
     expect(growth).toBeCloseTo(normalGrowth * 0.25, -1);
-    // Stability dropped (§5's کاهش ثبات).
+    // Stability dropped through the GRADED satisfaction penalty (§7) —
+    // proportional, never a sudden collapse from one short month.
     expect(political.stability).toBeLessThan(stabilityBefore);
+    expect(stabilityBefore - political.stability).toBeLessThan(0.05);
   });
 
   it('T10 zero population / zero production — no NaN, no negative stock (§14)', () => {
@@ -380,10 +387,16 @@ describe('simple economy (14-section spec)', () => {
 
     // Poor countries cannot start (§14: expenses over treasury are blocked).
     state.economy.treasury[countryId] = def.cost / 2;
-    const broke = startProject(state, countryId, config, def.id, 'city_test', 10, () => 'p2');
+    const broke = startProject(state, countryId, config, def.id, 'cell_poor', 10, () => 'p2');
     expect(broke.ok).toBe(false);
     if (!broke.ok) expect(broke.reason).toBe('no-funds');
     state.economy.treasury[countryId] = def.cost; // restore for the build phase
+
+    // ONE economic building per region (spec §1): the SAME cell is taken
+    // while the first project is still building on it.
+    const sameCell = startProject(state, countryId, config, def.id, 'city_test', 10, () => 'p3');
+    expect(sameCell.ok).toBe(false);
+    if (!sameCell.ok) expect(sameCell.reason).toBe('occupied');
 
     // Build time advances; the project never draws money or resources again.
     const speed = constructionSpeedFactorOf(state, countryId);
@@ -393,7 +406,8 @@ describe('simple economy (14-section spec)', () => {
     const buildings = Object.values(state.economy.buildings[countryId] ?? {});
     expect(buildings.some((building) => building.typeId === def.id)).toBe(true);
     expect(state.economy.treasury[countryId]).toBe(before - def.cost); // still exactly once
-    // The completed building adds its single production effect.
-    expect(def.effect).toBe('production');
+    // The completed building is production-only (goods, never money).
+    expect(def.output).toBeGreaterThan(0);
+    expect(buildings.find((building) => building.typeId === def.id)?.cellKey).toBeTruthy();
   });
 });

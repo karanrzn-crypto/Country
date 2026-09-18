@@ -64,6 +64,48 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       allowUnknown: false,
       fields: {
         productionScale: positiveNumber,
+        specialization: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            boostBest: { type: 'number', min: 0, max: 2 },
+            boostSecond: { type: 'number', min: 0, max: 2 },
+            reduceWeakest: { type: 'number', min: 0, max: 1 }
+          }
+        },
+        economyLevel: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            start: { type: 'number', min: 0, max: 100 },
+            maxStepPerMonth: { type: 'number', min: 0, max: 50 },
+            buildingBonusPerPoint: { type: 'number', min: 0, max: 0.1 },
+            targetBase: { type: 'number', min: 0, max: 100 },
+            balanceFactor: { type: 'number', min: 0, max: 10 },
+            balanceCap: { type: 'number', min: 0, max: 50 },
+            shortagePenalty: { type: 'number', min: 0, max: 50 }
+          }
+        },
+        satisfaction: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            breakpoints: {
+              type: 'array',
+              minLength: 1,
+              items: {
+                type: 'object',
+                allowUnknown: false,
+                fields: {
+                  coverage: { type: 'number', min: 0, max: 1 },
+                  penalty: { type: 'number', min: 0, max: 1 }
+                }
+              }
+            },
+            maxPenalty: { type: 'number', min: 0, max: 1 },
+            stabilityFactor: { type: 'number', min: 0, max: 1 }
+          }
+        },
         finance: {
           type: 'object',
           allowUnknown: false,
@@ -85,10 +127,8 @@ export const ECONOMY_SCHEMA: FieldSchema = {
             fields: {
               id: idField,
               name: nameField,
-              effect: { type: 'enum', values: ['production', 'income'] },
-              resource: { type: 'optional', inner: idField },
-              output: { type: 'optional', inner: { type: 'number', min: 0 } },
-              income: { type: 'optional', inner: { type: 'number', min: 0 } },
+              resource: idField,
+              output: { type: 'number', min: 0 },
               cost: { type: 'number', min: 0 },
               buildMonths: { type: 'number', min: 1, max: 60, integer: true }
             }
@@ -138,7 +178,7 @@ export const ECONOMY_SCHEMA: FieldSchema = {
                   biomeNeutral: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } },
                   terrain: { type: 'optional', inner: { type: 'record', values: { type: 'number', min: 0, max: 1 } } },
                   terrainNeutral: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } },
-                  cityFactor: { type: 'optional', inner: { type: 'number', min: 0, max: 1 } }
+                  cityFactor: { type: 'optional', inner: { type: 'number', min: 0, max: 10 } }
                 }
               }
             }

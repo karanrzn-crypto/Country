@@ -9,7 +9,13 @@ import { flagDataUrl } from './flags';
 import { describeGridCell, describeProvince } from '../world/map/MapGeography';
 import { faNum, faPopulation } from '../utils/format';
 import { selectionSummary } from '../state/slices/mapSlice';
-import { cityResourceProduction, depositMonthlyProduction, provinceResourceProduction } from '../economy/resources';
+import {
+  cityResourceProduction,
+  depositMonthlyProduction,
+  provinceResourceProduction,
+  economicBuildingAtCell,
+  economyLevelBuildingFactor
+} from '../economy/resources';
 import type { StrategicResourcesConfig } from '../economy/types';
 import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
 import type { CityConnection } from '../world/cityareas/CityConnections';
@@ -109,6 +115,14 @@ export class MapUI {
   private featureRows: UIElement[] = [];
   private featureSignature = '';
   private hoverTip: UIElement | null = null;
+  /**
+   * The BUILD MODE hint chip (spec §1.1-1.3): visible while the core's
+   * build mode is active — names the building, offers the cancel, and
+   * reports WHY a click was rejected. One chip, one source (the core state).
+   */
+  private buildTip: UIElement | null = null;
+  private buildTipText: UIElement | null = null;
+  private buildTipReason: string | null = null;
   private detailNodes: {
     flagImg: UIElement;
     name: UIElement;
@@ -144,6 +158,37 @@ export class MapUI {
     this.buildLegend(root);
     this.screens.registerScreen('map', (container) => this.buildMapScreen(container));
     this.screens.registerScreen('countrySelect', (container) => this.buildCountrySelectScreen(container));
+    // —— BUILD MODE (spec §1) — the chip follows the CORE state; the map
+    // click itself is resolved by the core (mapPick → build placement).
+    const buildingName = (typeId: string): string =>
+      context.data.economyData.strategicResources.buildings.find((candidate) => candidate.id === typeId)?.name ?? typeId;
+    const refreshBuildTip = (): void => {
+      if (this.buildTip === null || this.buildTipText === null) return;
+      const typeId = context.state.map.buildMode;
+      if (typeId === null) {
+        this.buildTip.setVisible(false);
+        this.buildTipReason = null;
+        return;
+      }
+      const reason = this.buildTipReason !== null ? ` — ${this.buildTipReason}` : '';
+      this.buildTipText.setText(`حالت ساخت: ${buildingName(typeId)} — یک خانهٔ شبکه از کشور خود را انتخاب کنید${reason}`);
+      this.buildTip.setVisible(true);
+    };
+    context.events.on('economy.buildModeChanged', ({ typeId }) => {
+      this.buildTipReason = null;
+      refreshBuildTip();
+      void typeId;
+    });
+    context.events.on('economy.buildRejected', ({ reason }) => {
+      this.buildTipReason =
+        reason === 'foreign-cell' ? 'فقط روی کشور خودتان می‌توانید بسازید'
+        : reason === 'no-cell' ? 'اینجا خانهٔ معتبری از شبکه نیست'
+        : 'ساخت در این خانه ممکن نشد — خانهٔ دیگری را انتخاب کنید';
+      refreshBuildTip();
+    });
+    // A mode restored from a save (or set before registration) must show
+    // its chip on the first frame too.
+    refreshBuildTip();
     // Ephemeral hover tip (event-driven — the core resolves, the UI shows):
     // `A3 — Province X`, a river/lake/city name, or hidden when over nothing.
     context.events.on('map.hoverChanged', ({ hover }) => {
@@ -274,6 +319,19 @@ export class MapUI {
     root.appendChild(hoverTip);
     this.hoverTip = hoverTip;
 
+    // —— build-mode chip (fixed banner while a building is being placed) ——
+    const buildTip = this.create('div', 'map-build-tip');
+    const buildTipText = this.create('span', 'map-build-tip-text');
+    buildTip.appendChild(buildTipText);
+    const buildTipCancel = this.create('button', 'map-build-tip-cancel');
+    buildTipCancel.setText('لغو');
+    buildTipCancel.onClick(() => this.commands.send({ type: 'economy.buildMode', typeId: null }));
+    buildTip.appendChild(buildTipCancel);
+    buildTip.setVisible(false);
+    root.appendChild(buildTip);
+    this.buildTip = buildTip;
+    this.buildTipText = buildTipText;
+
     // —— layer toggles (generated from the data-driven registry) ——
     const layerTitle = this.create('div', 'map-layers-title');
     layerTitle.setText('لایه‌ها');
@@ -339,6 +397,14 @@ export class MapUI {
       `${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
       `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}` +
       `|${map.selectedProvinceId}|${map.selectedCityConnectionId}` +
+      // The cell's ECONOMIC building is LIVE state (built/removed → the
+      // §2 grid info must follow immediately) — it feeds the signature.
+      `|${(() => {
+        const atCell = map.selectedGridKey !== null
+          ? economicBuildingAtCell(context.state, map.selectedGridKey)
+          : null;
+        return atCell === null ? String(map.selectedGridKey ?? '') : `${map.selectedGridKey}:${atCell.buildingId}`;
+      })()}` +
       // Mine data is LIVE state (levels move with upgrades) — the selected
       // site's level + the research unlock feed the signature so the panel
       // never shows a stale level/production pair.
@@ -468,6 +534,25 @@ export class MapUI {
           );
         }
         addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(config, id)));
+        // THE ECONOMIC BUILDING OF THIS REGION (spec §2) — read from the
+        // LIVE Game State (never copied); every region shows its building
+        // and its REAL production (base × economy level, spec §3), or the
+        // explicit بدون ساختمان اقتصادی line.
+        {
+          const atCell = economicBuildingAtCell(context.state, info.cellKey);
+          if (atCell !== null) {
+            const def = config.buildings.find((candidate) => candidate.id === atCell.typeId);
+            const produced = config.resources.find((candidate) => candidate.id === def?.resource);
+            const amount = Math.round((def?.output ?? 0) * economyLevelBuildingFactor(context.state, atCell.countryId, config));
+            addRow('ساختمان اقتصادی', def?.name ?? atCell.typeId);
+            if (produced !== undefined && amount > 0) {
+              addRow(`تولید ${produced.name}`, `+${faNum(amount)} / ماه`);
+            }
+            addRow('وضعیت', 'فعال');
+          } else {
+            addRow('ساختمان اقتصادی', 'بدون ساختمان اقتصادی');
+          }
+        }
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow('زیرساخت', `${info.roadIds.length} جاده · ${info.railwayIds.length} راه‌آهن`);
         addRow('ارزش راهبردی', String(info.strategicValue));

@@ -304,6 +304,24 @@
         align-self: flex-start; font-size: 12px;
       }
       .pd-resource-buy:hover { background: #2c3c5e; }
+      /* BUILD MODE (spec §1): the in-dashboard hint while the placement is
+         pending + the fixed map banner naming the building with a cancel. */
+      .pd-build-hint {
+        display: flex; align-items: center; gap: 8px;
+        border: 1px solid #4a7fa8; background: #16222e; color: #bfe0f5;
+        border-radius: 5px; padding: 6px 10px; font-size: 12px; font-weight: 700;
+      }
+      .pd-build-cancel, .map-build-tip-cancel {
+        border: 1px solid #4a3038; background: transparent; color: #e8b4a0;
+        border-radius: 4px; padding: 2px 10px; cursor: pointer; font-weight: 700; font-size: 11px;
+      }
+      .pd-build-cancel:hover, .map-build-tip-cancel:hover { background: #33222a; }
+      .map-build-tip {
+        position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 10px;
+        background: rgba(16, 26, 42, 0.92); border: 1px solid #4a7fa8; border-radius: 5px;
+        padding: 5px 12px; font-size: 12px; color: #bfe0f5; z-index: 41; font-weight: 700;
+      }
       .pd-market-close {
         border: 1px solid #4a3038; background: transparent; color: #e8b4a0;
         border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 700;

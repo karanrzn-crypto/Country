@@ -1,37 +1,38 @@
 /**
- * The SIMPLE resource economy — production, consumption, statuses (spec §1-§5).
+ * The SIMPLE resource economy — production, consumption, statuses (spec §1-§8).
  *
- * THE causal chain (spec §10's cycle — implemented in economyCycle.ts):
+ * THE causal chain (spec §9's cycle — implemented in economyCycle.ts):
  *
- *   Deposits (geography) + Domestic baseline + Buildings  ← PRODUCTION
+ *   Deposits (geography) + Specialized baseline + Buildings (× economy
+ *   level)                                                   ← PRODUCTION
  *     ↓
- *   Consumption  (population food · military wear)
+ *   Consumption  (population per good · military wear)
  *     ↓
  *   STOCK STEP  (stock += production − consumption, floored at 0)
  *     ↓
- *   World Trade (shortage buys from surplus at the BASE price — §6/§7)
+ *   World Trade (shortage buys from surplus at the BASE price — one seller
+ *   serves MANY buyers)
  *     ↓
- *   Shortage → the player buys explicitly (command) → trade keeps flowing
+ *   Coverage = (production + imports + stock) / consumption → shortage
+ *     ↓
+ *   Graded satisfaction penalty (§7) → opinion + stability
  *
  * This module holds the PURE helpers: production/consumption math, the
- * safety reserve, the honest shortage and display status, plus the SEED
- * pass used at state creation and after every load. The monthly cycle
- * itself lives in economyCycle.ts — the ONE writer of the live records.
- *
- * Anti-famine guarantees (spec §5/§9): deposits are permanent capacity
- * (never depleted), buildings raise production, the safety reserve keeps
- * exports from stripping domestic stocks, and consumption is smooth —
- * shortages can happen, automatic famine cannot.
+ * country SPECIALIZATION ranking (§4), the economy-level building modifier
+ * (§3), the safety reserve, the honest shortage, the graded satisfaction
+ * penalty (§7) and the SEED pass. The monthly cycle itself lives in
+ * economyCycle.ts — the ONE writer of the live records.
  *
  * LEAF-friendly: depends only on state/map TYPES + utils. No renderer, no UI.
  */
 
 import type { GameState } from '../state/GameState';
 import type { StrategicMapModel, MapResourceDeposit } from '../world/map/MapTypes';
-import type { StrategicResourcesConfig } from './types';
+import type { StrategicResourcesConfig, SatisfactionConfig } from './types';
 import { liveUnits } from '../state/slices/militarySlice';
 import { type CountryResourceState, type ResourceDisplayStatus, type ResourceStatus } from './resourceTypes';
 import { countryBaselineProduction } from './domesticBaseline';
+import { roundTo } from '../utils/math';
 
 export { emptyCountryResourceState } from './resourceTypes';
 export type { CountryResourceState, ResourceDisplayStatus, ResourceStatus } from './resourceTypes';
@@ -179,9 +180,44 @@ export function countryResourceProduction(
   return production;
 }
 
-// ————————————————————————————— buildings (spec §8) ————————————————————————————
+// ———————————————————————— buildings (spec §1/§3) ————————————————————————
 
-/** Monthly PRODUCTION added by the country's completed buildings. */
+/**
+ * The ECONOMY LEVEL of ONE country (spec §3): a 0..100 scale for the overall
+ * state of the economy. Reads the live state; countries without a record
+ * (fresh/hand-made saves before the heal) sit at the neutral config start.
+ */
+export function economyLevelOf(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): number {
+  const level = state.economy.economyLevel[countryId];
+  return typeof level === 'number' && Number.isFinite(level)
+    ? Math.min(100, Math.max(0, level))
+    : config.economyLevel.start;
+}
+
+/**
+ * The BUILDING production modifier of ONE country (spec §3): the economy
+ * level scales building output LINEARLY around the neutral 50 —
+ * (level − 50) × buildingBonusPerPoint. Level 70 → +12%, level 35 → −9%.
+ * Deliberately gradual: a few points of level never multiply the output.
+ */
+export function economyLevelBuildingFactor(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): number {
+  const delta = economyLevelOf(state, countryId, config) - 50;
+  return 1 + delta * config.economyLevel.buildingBonusPerPoint;
+}
+
+/**
+ * Monthly BASE production added by the country's completed buildings,
+ * scaled by the economy-level factor (spec §1/§3 — production depends on
+ * the building AND the overall economy, never multi-fold).
+ */
 export function buildingProductionOf(
   state: GameState,
   countryId: string,
@@ -190,37 +226,56 @@ export function buildingProductionOf(
   const output: Record<string, number> = {};
   const buildings = state.economy.buildings[countryId];
   if (buildings === undefined) return output;
+  const factor = economyLevelBuildingFactor(state, countryId, config);
   for (const building of Object.values(buildings)) {
     const def = config.buildings.find((candidate) => candidate.id === building.typeId);
-    if (def === undefined || def.effect !== 'production' || def.resource === undefined) continue;
-    addToRecord(output, def.resource, def.output ?? 0);
+    if (def === undefined) continue;
+    const amount = Math.round((def.output ?? 0) * factor);
+    if (amount > 0) addToRecord(output, def.resource, amount);
   }
   return output;
 }
 
-/** Monthly INCOME added by the country's completed buildings (spec §8). */
-export function buildingIncomeOf(
+/**
+ * The economic building standing on ONE grid cell (spec §1/§2 — one per
+ * region): reads the LIVE state (the single source); the UI renders this
+ * verbatim. Covers every country so foreign cells report their owner's
+ * building too.
+ */
+export function economicBuildingAtCell(
   state: GameState,
-  countryId: string,
-  config: StrategicResourcesConfig
-): number {
-  let income = 0;
-  const buildings = state.economy.buildings[countryId];
-  if (buildings === undefined) return 0;
-  for (const building of Object.values(buildings)) {
-    const def = config.buildings.find((candidate) => candidate.id === building.typeId);
-    if (def !== undefined && def.effect === 'income') income += def.income ?? 0;
+  cellKey: string
+): { countryId: string; buildingId: string; typeId: string } | null {
+  for (const [countryId, buildings] of Object.entries(state.economy.buildings)) {
+    for (const [buildingId, building] of Object.entries(buildings)) {
+      if (building.cellKey === cellKey) {
+        return { countryId, buildingId, typeId: building.typeId };
+      }
+    }
   }
-  return income;
+  return null;
+}
+
+/** TRUE when a construction project already occupies the cell. */
+export function cellIsUnderConstruction(state: GameState, cellKey: string): boolean {
+  for (const construction of Object.values(state.economy.construction)) {
+    for (const project of construction.projects) {
+      if (project.cellKey === cellKey) return true;
+    }
+  }
+  return false;
 }
 
 // ———————————————————————— consumption: population × military ————————————————
 
 /**
- * Monthly consumption of ONE country, derived from LIVE state (spec §5 —
- * every unit has a clear reason):
- *  - population eats food (perMillionPopulation, config — §5's formula);
- *  - military units burn oil and wear iron (perMilitaryUnit).
+ * Monthly consumption of ONE country, derived from LIVE state (spec §6 —
+ * every unit has a clear reason and NO country with population consumes
+ * zero):
+ *  - EVERY good carries a population base (perMillionPopulation) — food,
+ *    iron, oil and industrial goods all scale with the people, so a
+ *    populated country never records a bogus zero consumption;
+ *  - military units add fuel and equipment wear (perMilitaryUnit).
  */
 export function countryResourceConsumption(
   state: GameState,
@@ -282,6 +337,108 @@ export function shortageOf(
   return Math.max(0, Math.round(gap - Math.max(0, stockBefore)));
 }
 
+// ————————————————————— specialization (spec §4) ——————————————————————
+
+/**
+ * The SPECIALIZED domestic baseline of ONE country (spec §4): the raw
+ * geography baseline, re-ranked against the country's OWN production
+ * vector — its strongest good is amplified, the second strengthened, the
+ * weakest reduced. Every country keeps a positive output of every good
+ * (specialization ≠ inability); the differences between countries drive
+ * REAL world trade. Deterministic: ties resolve by config resource order.
+ */
+export function specializedBaselineProduction(
+  model: StrategicMapModel,
+  countryId: string,
+  config: StrategicResourcesConfig
+): Record<string, number> {
+  const raw = countryBaselineProduction(model, countryId, config.domesticBaseline);
+  const ranked = config.resources
+    .map((resource, index) => ({ id: resource.id, index, amount: raw[resource.id] ?? 0 }))
+    .sort((a, b) => b.amount - a.amount || a.index - b.index);
+  const result: Record<string, number> = {};
+  for (let rank = 0; rank < ranked.length; rank += 1) {
+    const entry = ranked[rank];
+    let multiplier = 1;
+    if (entry.amount > 0) {
+      if (rank === 0) multiplier = 1 + config.specialization.boostBest;
+      else if (rank === 1) multiplier = 1 + config.specialization.boostSecond;
+      else if (rank === ranked.length - 1) multiplier = 1 - config.specialization.reduceWeakest;
+    }
+    const amount = roundTo(entry.amount * multiplier, 2);
+    if (amount > 0) result[entry.id] = amount;
+  }
+  return result;
+}
+
+// ——————————————— coverage · satisfaction (spec §7/§8) ———————————————
+
+/**
+ * The supply COVERAGE of ONE resource (spec §8): (تولید داخلی + واردات +
+ * انبار) against مصرف — what the people actually GOT divided by what they
+ * needed. The record's `shortage` holds the POST-TRADE uncovered deficit
+ * (imports already subtracted by the cycle's trade step), so coverage reads
+ * one honest number: 1 = fully supplied, 0.7 = 30% of the need unmet.
+ * Zero consumption (a good the country genuinely does not use) is covered
+ * by definition.
+ */
+export function coverageOf(record: CountryResourceState, resourceId: string): number {
+  const consumption = record.consumption[resourceId] ?? 0;
+  if (consumption <= 0) return 1;
+  const uncovered = Math.max(0, record.shortage[resourceId] ?? 0);
+  return Math.min(1, Math.max(0, 1 - uncovered / consumption));
+}
+
+/**
+ * The graded SATISFACTION penalty of ONE coverage ratio (spec §7's exact
+ * scale): piecewise-linear between the config breakpoints —
+ *   100% → none · 90% → very small · 70% → moderate · 40% → severe,
+ * clamped at maxPenalty below the last breakpoint. A small shortage never
+ * collapses satisfaction (spec §7 — متعادل).
+ */
+export function satisfactionPenaltyOf(coverage: number, config: SatisfactionConfig): number {
+  const points = [...config.breakpoints].sort((a, b) => b.coverage - a.coverage);
+  if (points.length === 0) return 0;
+  if (coverage >= points[0].coverage) return points[0].penalty;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const high = points[i];
+    const low = points[i + 1];
+    if (coverage >= low.coverage) {
+      const span = high.coverage - low.coverage;
+      const t = span > 0 ? (coverage - low.coverage) / span : 1;
+      return roundTo(low.penalty + (high.penalty - low.penalty) * t, 4);
+    }
+  }
+  // Below the last breakpoint: extrapolate with the same slope, then clamp.
+  const last = points[points.length - 1];
+  const previous = points[points.length - 2] ?? { coverage: 1, penalty: 0 };
+  const slope =
+    previous.coverage !== last.coverage
+      ? (previous.penalty - last.penalty) / (previous.coverage - last.coverage)
+      : 0;
+  return Math.min(config.maxPenalty, roundTo(last.penalty + (coverage - last.coverage) * slope, 4));
+}
+
+/**
+ * The TOTAL satisfaction penalty of ONE country this month (spec §7): the
+ * sum of the graded penalties over ALL goods — the ONE number the opinion
+ * economy topic, the stability drop and the UI read. Zero when fully
+ * supplied.
+ */
+export function satisfactionPenaltyTotalOf(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): number {
+  const record = state.economy.resources[countryId];
+  if (record === undefined) return 0;
+  let total = 0;
+  for (const resource of config.resources) {
+    total += satisfactionPenaltyOf(coverageOf(record, resource.id), config.satisfaction);
+  }
+  return roundTo(total, 4);
+}
+
 /** Defaults of the display-status thresholds (mirrors economy.json). */
 const DEFAULT_DISPLAY_STATUS = { surplusBufferMonths: 2, minSurplusShare: 0.1 } as const;
 
@@ -338,7 +495,7 @@ export function seedResourceEconomies(
   const productionCache = new Map<string, Record<string, number>>();
   for (const countryId of countryIds) {
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
-    const baseline = countryBaselineProduction(mapModel, countryId, config.domesticBaseline);
+    const baseline = specializedBaselineProduction(mapModel, countryId, config);
     const buildings = buildingProductionOf(state, countryId, config);
     const production: Record<string, number> = { ...deposits };
     for (const source of [baseline, buildings]) {

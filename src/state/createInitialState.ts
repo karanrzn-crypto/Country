@@ -67,7 +67,8 @@ export function createInitialState(
     resources: {} as EconomySlice['resources'],
     finance: {} as EconomySlice['finance'],
     construction: {} as EconomySlice['construction'],
-    buildings: {} as EconomySlice['buildings']
+    buildings: {} as EconomySlice['buildings'],
+    economyLevel: {} as Record<string, number>
   };
 
   // —— military ——
@@ -168,6 +169,9 @@ export function createInitialState(
       economy.finance[countryId] = emptyCountryFinanceState();
       economy.construction[countryId] = emptyCountryConstructionState();
       economy.buildings[countryId] = {};
+      // The 0-100 economy level starts NEUTRAL (spec §3 — the drift begins
+      // from the middle of the scale, never from a pre-charged state).
+      economy.economyLevel[countryId] = data.economyData.strategicResources.economyLevel.start;
     }
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
@@ -226,9 +230,18 @@ export function healPhase2State(
     if (state.economy.treasury[countryId] === undefined) {
       state.economy.treasury[countryId] = DEFAULT_CONFIG.economy.startingTreasury;
     }
+    if (state.economy.economyLevel === undefined) state.economy.economyLevel = {};
+    if (state.economy.economyLevel[countryId] === undefined) {
+      state.economy.economyLevel[countryId] = data.economyData.strategicResources.economyLevel.start;
+    }
     if (state.political.countries[countryId] === undefined) {
       state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
     }
+    // Legacy building/project records (pre-v17 saves) anchor to a CITY —
+    // convert to the canonical GRID CELL the city occupies (spec §1) and
+    // drop the stale field. A record whose city no longer exists in the
+    // live model is dead weight and is dismantled.
+    healBuildingAnchors(state, mapModel, countryId);
   }
 
   // Drop government/finance records for countries the live model no longer
@@ -246,6 +259,11 @@ export function healPhase2State(
   for (const countryId of Object.keys(state.economy.buildings)) {
     if (!liveIds.has(countryId)) delete state.economy.buildings[countryId];
   }
+  if (state.economy.economyLevel !== undefined) {
+    for (const countryId of Object.keys(state.economy.economyLevel)) {
+      if (!liveIds.has(countryId)) delete state.economy.economyLevel[countryId];
+    }
+  }
 
   syncCityAreasSlice(state.cityAreas, mapModel, columns);
 
@@ -261,4 +279,53 @@ export function healPhase2State(
     if (!liveIds.has(countryId)) delete state.economy.resources[countryId];
   }
   seedResourceEconomies(state, mapModel, data.economyData.strategicResources);
+}
+
+/**
+ * Converts legacy city-anchored buildings/projects to grid-cell anchors
+ * (spec §1). Uses ONLY the live map model (the single geographic truth):
+ * the host cell is the one the city occupies. Unresolvable records are
+ * removed — a building that lost its place has no effect.
+ */
+function healBuildingAnchors(state: GameState, mapModel: StrategicMapModel, countryId: string): void {
+  const resolve = (cityId: unknown): string | null => {
+    if (typeof cityId !== 'string' || cityId === '') return null;
+    const city = mapModel.cities[cityId];
+    if (city === undefined || city.countryId !== countryId || city.gridId === '') return null;
+    return `${countryId}#${city.gridId}`;
+  };
+  const buildings = state.economy.buildings[countryId];
+  if (buildings !== undefined) {
+    for (const [buildingId, building] of Object.entries(buildings)) {
+      const record = building as unknown as Record<string, unknown>;
+      if (typeof record['cellKey'] === 'string' && record['cellKey'] !== '') {
+        delete record['cityId'];
+        continue;
+      }
+      const cellKey = resolve(record['cityId']);
+      if (cellKey === null) {
+        delete buildings[buildingId];
+        continue;
+      }
+      buildings[buildingId] = { id: buildingId, typeId: String(record['typeId'] ?? ''), cellKey };
+    }
+  }
+  const construction = state.economy.construction[countryId];
+  if (construction !== undefined) {
+    for (const project of construction.projects) {
+      const record = project as unknown as Record<string, unknown>;
+      if (typeof record['cellKey'] === 'string' && record['cellKey'] !== '') {
+        delete record['cityId'];
+        continue;
+      }
+      const cellKey = resolve(record['cityId']);
+      if (cellKey === null) continue; // keep building; it finishes harmlessly
+      (project as unknown as { cellKey: string }).cellKey = cellKey;
+      delete record['cityId'];
+    }
+    construction.projects = construction.projects.filter(
+      (project) => typeof (project as unknown as Record<string, unknown>)['cellKey'] === 'string' &&
+        (project as unknown as Record<string, unknown>)['cellKey'] !== ''
+    );
+  }
 }

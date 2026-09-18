@@ -49,7 +49,8 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     game.setTimeMode('month');
     game.runTicks(150); // ≈ 10 months
     const government = game.gameState.government.countries[countryId];
-    // The SIMPLE ledger (spec §3): tax + trade + factories vs the expenses.
+    // The SIMPLE ledger (spec §3): tax + trade vs the expenses (buildings
+    // produce GOODS — no factory money line exists).
     const finance = game.gameState.economy.finance[countryId]!;
     expect(government.lastSimMonth).toBeGreaterThanOrEqual(9);
     expect(finance.lastTaxIncome).toBeGreaterThan(0);
@@ -57,7 +58,7 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     expect(finance.lastArmyExpense).toBeGreaterThanOrEqual(0);
     expect(finance.lastGovernmentExpense).toBeGreaterThan(0);
     expect(finance.lastInfrastructureExpense).toBeGreaterThan(0);
-    const income = finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome;
+    const income = finance.lastTaxIncome + finance.lastTradeIncome;
     const expenses = finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense;
     expect(finance.lastBalance).toBeCloseTo(income - expenses, 3);
     // The resource economy produced real stockpiles the whole time.

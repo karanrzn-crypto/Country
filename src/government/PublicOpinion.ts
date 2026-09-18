@@ -13,7 +13,8 @@
 import type { GameState } from '../state/GameState';
 import type { OpinionTopic } from './types';
 import { clamp01, clampSigned, OPINION_TOPICS, TAX_LEVEL_SPECS } from './types';
-import { acuteShortageCountOf } from './Metrics';
+import type { StrategicResourcesConfig } from '../economy/types';
+import { satisfactionPenaltyTotalOf } from '../economy/resources';
 
 /** Topic weights of the aggregate approval blend (Σ = 1). */
 export const TOPIC_WEIGHTS: Readonly<Record<OpinionTopic, number>> = {
@@ -36,7 +37,11 @@ export const NEUTRAL_SERVICE_FUNDING = 0.035;
  * Recomputes all topic sentiments for one country from CURRENT state.
  * Pure — writes only into `government.opinion.topics`.
  */
-export function updateOpinionTopics(state: GameState, countryId: string): void {
+export function updateOpinionTopics(
+  state: GameState,
+  countryId: string,
+  economyConfig?: StrategicResourcesConfig
+): void {
   const government = state.government.countries[countryId];
   if (government === undefined) return;
 
@@ -50,12 +55,17 @@ export function updateOpinionTopics(state: GameState, countryId: string): void {
   const serviceFunding = budget.spendingShares.healthcare + budget.spendingShares.education + budget.spendingShares.welfare;
   const securityFunding = budget.spendingShares.military;
 
-  // Economy: the REAL resource situation — every acutely short resource
-  // (empty stockpile + uncovered deficit, or an unfilled world shortage)
-  // hurts; a fully supplied country is content.
-  const shortages = acuteShortageCountOf(state, countryId);
+  // Economy: the REAL resource situation (spec §7/§8) — the GRADED
+  // satisfaction penalty over the supply coverage of every good
+  // (production + imports vs consumption). 100% coverage costs nothing,
+  // 90% hurts a little, 70% moderately, 40% badly — a fully supplied
+  // country is content, a long shortage accumulates through the drift.
+  const penalty =
+    economyConfig !== undefined
+      ? satisfactionPenaltyTotalOf(state, countryId, economyConfig)
+      : acuteShortageCountOf(state, countryId) * 0.14;
   const topics = government.opinion.topics;
-  topics.economy = clampSigned(0.3 - shortages * 0.14);
+  topics.economy = clampSigned(0.3 - penalty);
   // Taxes: the level's buff, directly.
   topics.taxes = clampSigned(taxSentiment);
   // Services: economic-budget-funded services relative to the neutral level.
@@ -72,6 +82,21 @@ function readCorruption(state: GameState, countryId: string): number {
 
 function readStability(state: GameState, countryId: string): number {
   return state.political.countries[countryId]?.stability ?? 0;
+}
+
+/**
+ * Legacy fallback for callers without the economy config: counts acutely
+ * short resources (the pre-graded behavior, now scaled like the config's
+ * own economy sentiment so the two paths stay comparable).
+ */
+function acuteShortageCountOf(state: GameState, countryId: string): number {
+  const record = state.economy.resources[countryId];
+  if (record === undefined) return 0;
+  let count = 0;
+  for (const value of Object.values(record.shortage)) {
+    if (value > 0) count += 1;
+  }
+  return count;
 }
 
 /** Weighted approval target implied by the current topics (0..1). */

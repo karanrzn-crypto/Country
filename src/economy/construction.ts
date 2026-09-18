@@ -1,16 +1,19 @@
 /**
- * Construction system (spec §8) — SIMPLE, money-paid, one-time costs:
+ * Construction system (spec §1) — SIMPLE, money-paid, one-time costs on
+ * geographic grid cells:
  *
- *   start a project  → the FULL money cost is deducted from the treasury
- *                      ONCE (a project the country cannot pay cannot start)
+ *   pick a building   → the FULL money cost is deducted from the treasury
+ *                       ONCE (a project that cannot be paid cannot start)
+ *   pick a grid cell  → the cell must be the player's OWN land and hold no
+ *                       economic building yet (ONE building per region)
  *     → the project BUILDS by time alone (the economic budget scales the
  *       speed — the only budget lever)
- *     → on completion it becomes a BUILDING with exactly ONE effect:
- *       production (monthly resource units) or income (monthly money)
+ *     → on completion it becomes a BUILDING anchored to that cell: its one
+ *       effect is producing its good (scaled by the economy level, §3)
  *
  * No escrow, no waiting-for-resources state, no monthly draws, no resource
- * chains (spec §8: a factory must not need dozens of inputs). One source of
- * truth: the treasury pays once, `buildings` holds the completed effects.
+ * chains. One source of truth: the treasury pays once, `buildings` holds
+ * the completed effects — always read from here, never copied.
  *
  * Pure functions over GameState — the GovernmentSystem calls `stepProjects`
  * once per month per country; the command facade calls `startProject`.
@@ -20,6 +23,7 @@
 import type { GameState } from '../state/GameState';
 import type { StrategicResourcesConfig } from './types';
 import type { BuildingProject } from './resourceTypes';
+import { economicBuildingAtCell, cellIsUnderConstruction } from './resources';
 import { roundTo } from '../utils/math';
 
 /** Lower/upper construction-speed factor over the base rate (budget lever). */
@@ -37,20 +41,30 @@ export function constructionSpeedFactorOf(state: GameState, countryId: string): 
 
 export type StartProjectResult =
   | { readonly ok: true; readonly project: BuildingProject }
-  | { readonly ok: false; readonly reason: 'unknown-type' | 'limit' | 'no-funds' | 'no-capital' };
+  | {
+      readonly ok: false;
+      readonly reason:
+        | 'unknown-type'
+        | 'limit'
+        | 'no-funds'
+        | 'occupied';
+    };
 
 /**
- * Starts ONE construction project (spec §8): checks the type, the
- * concurrent-project cap and the MONEY (the whole one-time cost must be in
- * the treasury), deducts the cost ONCE and starts building. Negative
- * treasuries are unrepresentable — the check comes first (spec §14).
+ * Starts ONE construction project (spec §1): checks the type, the
+ * concurrent-project cap, the CELL (one economic building per region — a
+ * cell holding a building or a project is taken) and the MONEY (the whole
+ * one-time cost must be in the treasury), deducts the cost ONCE and starts
+ * building. Negative treasuries are unrepresentable — the check comes first
+ * (spec §14). Cell OWNERSHIP (own country, valid land) is validated by the
+ * caller against the live map model.
  */
 export function startProject(
   state: GameState,
   countryId: string,
   config: StrategicResourcesConfig,
   typeId: string,
-  cityId: string,
+  cellKey: string,
   month: number,
   newId: () => string
 ): StartProjectResult {
@@ -61,16 +75,21 @@ export function startProject(
   if (construction.projects.length >= config.construction.maxProjects) {
     return { ok: false, reason: 'limit' };
   }
+  // ONE economic building per region (spec §1): the cell must be free —
+  // neither a completed building nor an in-progress project may sit there.
+  if (cellKey === '' || economicBuildingAtCell(state, cellKey) !== null || cellIsUnderConstruction(state, cellKey)) {
+    return { ok: false, reason: 'occupied' };
+  }
   const treasury = state.economy.treasury[countryId] ?? 0;
   if (treasury < def.cost) return { ok: false, reason: 'no-funds' };
 
-  // ONE-TIME cost, paid in full, exactly once (spec §8/§14).
+  // ONE-TIME cost, paid in full, exactly once (spec §14).
   state.economy.treasury[countryId] = roundTo(treasury - def.cost, 4);
 
   const project: BuildingProject = {
     id: newId(),
     typeId,
-    cityId,
+    cellKey,
     startedMonth: month,
     progress: 0
   };
@@ -86,8 +105,9 @@ export interface StepOutcome {
 /**
  * Advances EVERY project of ONE country by one month: building is TIME
  * ONLY (speed = economic budget lever) — a building project never draws
- * money or resources again (the cost was paid once at start, spec §8).
- * Finished projects graduate into buildings (real production/income).
+ * money or resources again (the cost was paid once at start, spec §1).
+ * Finished projects graduate into buildings on their OWN cell (real
+ * production, §2's grid info reads them from here).
  */
 export function stepProjects(
   state: GameState,
@@ -95,6 +115,7 @@ export function stepProjects(
   config: StrategicResourcesConfig,
   month: number
 ): StepOutcome {
+  void month;
   const construction = state.economy.construction[countryId];
   if (construction === undefined) return { completed: [] };
 
@@ -111,8 +132,7 @@ export function stepProjects(
     const buildings = (state.economy.buildings[countryId] ??= {});
     construction.projects = construction.projects.filter((project) => {
       if (!completed.includes(project)) return true;
-      buildings[project.id] = { id: project.id, typeId: project.typeId, cityId: project.cityId };
-      void month;
+      buildings[project.id] = { id: project.id, typeId: project.typeId, cellKey: project.cellKey };
       return false;
     });
   }

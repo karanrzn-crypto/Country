@@ -82,5 +82,14 @@ export type GameCommand =
       readonly resourceId: string;
       readonly amount: number;
     }
-  /** Start ONE building construction project (money cost paid once). */
-  | { readonly type: 'economy.startConstruction'; readonly countryId: string; readonly typeId: string };
+  /** Start ONE building construction project (money cost paid once) on a
+   *  specific grid cell of the caller's own country (spec §1). */
+  | {
+      readonly type: 'economy.startConstruction';
+      readonly countryId: string;
+      readonly typeId: string;
+      readonly cellKey: string;
+    }
+  /** BUILD MODE (spec §1): activate (typeId) or cancel (null) build
+   *  placement — while active, map clicks place the building. */
+  | { readonly type: 'economy.buildMode'; readonly typeId: string | null };

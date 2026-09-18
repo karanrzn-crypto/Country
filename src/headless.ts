@@ -71,7 +71,7 @@ if (government !== undefined && finance !== undefined && resourceRecord !== unde
     `[headless] resources: stock {${stockSummary}} treasury=${(game.gameState.economy.treasury[playerId] ?? 0).toFixed(0)}`
   );
   console.log(
-    `[headless] finance: tax=${finance.lastTaxIncome.toFixed(1)} trade=${finance.lastTradeIncome.toFixed(1)} factories=${finance.lastFactoryIncome.toFixed(1)} ` +
+    `[headless] finance: tax=${finance.lastTaxIncome.toFixed(1)} trade=${finance.lastTradeIncome.toFixed(1)} ` +
       `army=${finance.lastArmyExpense.toFixed(1)} government=${finance.lastGovernmentExpense.toFixed(1)} infra=${finance.lastInfrastructureExpense.toFixed(1)} ` +
       `balance=${finance.lastBalance.toFixed(1)}/mo nextElection=month ${government.elections.nextElectionMonth} cityAreas=${countryAreas.length} links=${countryLinks.length} ` +
       `pendingEvents=${government.events.pending.length}`

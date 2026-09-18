@@ -32,8 +32,11 @@ import type { TickInfo } from '../../time/TimeSystem';
 import type { SimulationSystemDef } from '../SimulationEngine';
 import { absoluteMonthIndex } from '../../time/Calendar';
 import type { StrategicResourcesConfig } from '../../economy/types';
+import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject } from '../../economy/construction';
+import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
+import { gridCellKey } from '../../world/map/MapTypes';
 import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
 import { expireOverdueEvents, firePendingEvent, newEventInstanceId, rollEvents } from '../../government/EventEngine';
@@ -113,12 +116,12 @@ export class GovernmentSystem implements SimulationSystemDef {
     }
 
     // —— 2. resource AI: the whole world builds, simply (spec §8) ——
-    if (state.player.countryId !== countryId) {
-      this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind));
+    if (state.player.countryId !== countryId && context.map !== undefined) {
+      this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind), context.map);
     }
 
     // —— 3. public opinion → presidential approval ——
-    updateOpinionTopics(state, countryId);
+    updateOpinionTopics(state, countryId, data.economyData.strategicResources);
     driftApproval(state, countryId, 0.25);
 
     // —— 4. decisions: active modifiers age ——
@@ -172,7 +175,8 @@ export class GovernmentSystem implements SimulationSystemDef {
    * AI countries keep the WORLD economy alive (spec §8): occasionally a
    * non-player country starts a production building around its strongest
    * resource — but ONLY when the treasury covers the full one-time money
-   * cost with a margin. Deterministic through the campaign rng.
+   * cost with a margin. The site is a FREE grid cell of its OWN land (spec
+   * §1 — one economic building per region), picked deterministically.
    */
   private processAiEconomy(
     state: GameState,
@@ -180,7 +184,8 @@ export class GovernmentSystem implements SimulationSystemDef {
     config: StrategicResourcesConfig,
     month: number,
     rng: Random,
-    newId: (kind: string) => string
+    newId: (kind: string) => string,
+    mapModel: StrategicMapModel
   ): void {
     const record = state.economy.resources[countryId];
     if (record === undefined) return;
@@ -206,15 +211,43 @@ export class GovernmentSystem implements SimulationSystemDef {
       rng.chance(AI_CONSTRUCTION_CHANCE)
     ) {
       const def = config.buildings.find(
-        (candidate) => candidate.effect === 'production' && candidate.resource === strongest
+        (candidate) => candidate.resource === strongest
       );
-      const capital = state.countries.countries[countryId]?.capitalId ?? null;
       const treasury = state.economy.treasury[countryId] ?? 0;
       const affordable = def !== undefined && treasury >= def.cost * AI_TREASURY_MARGIN;
-      if (def !== undefined && affordable && capital !== null) {
-        startProject(state, countryId, config, def.id, capital, month, () => newId('building'));
+      if (def !== undefined && affordable) {
+        const cell = this.pickFreeCell(state, mapModel, countryId, rng);
+        if (cell !== null) {
+          startProject(state, countryId, config, def.id, cell, month, () => newId('building'));
+        }
       }
     }
+  }
+
+  /**
+   * ONE free grid cell of the country's OWN land (spec §1): no economic
+   * building, no running project. Samples deterministically through the
+   * campaign rng (bounded scan keeps the monthly tick cheap).
+   */
+  private pickFreeCell(
+    state: GameState,
+    mapModel: StrategicMapModel,
+    countryId: string,
+    rng: Random
+  ): string | null {
+    const country = mapModel.countries[countryId];
+    if (country === undefined || country.cellIds.length === 0) return null;
+    const scanned = Math.min(country.cellIds.length, 32);
+    for (let attempt = 0; attempt < scanned; attempt += 1) {
+      const cellIndex = country.cellIds[rng.int(country.cellIds.length)];
+      const gridId = mapModel.features.gridIds[cellIndex];
+      if (gridId === null) continue;
+      const key = gridCellKey(countryId, gridId);
+      if (economicBuildingAtCell(state, key) !== null) continue;
+      if (cellIsUnderConstruction(state, key)) continue;
+      return key;
+    }
+    return null;
   }
 
   /** Ministry efficiency drifts toward a funding-dependent target. */

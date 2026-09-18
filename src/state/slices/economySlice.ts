@@ -40,21 +40,28 @@ export interface EconomySlice {
   resources: Record<string, CountryResourceState>;
   /**
    * The simple monthly money ledger per strategic country id (spec §3/§12):
-   * مالیات + تجارت + کارخانه‌ها against ارتش + دولت + زیرساخت. The balance
-   * lands on the treasury ONCE per month.
+   * مالیات + تجارت against ارتش + دولت + زیرساخت. The balance lands on the
+   * treasury ONCE per month.
    */
   finance: Record<string, CountryFinanceState>;
   /**
-   * Active construction projects per strategic country id (spec §8) — the
-   * ONE-TIME money cost was paid at start; only build time remains.
+   * Active construction projects per strategic country id (spec §1) — the
+   * ONE-TIME money cost was paid at start; only build time remains. Each
+   * project occupies ONE grid cell (canonical `countryId#gridId` key).
    */
   construction: Record<string, CountryConstructionState>;
   /**
    * COMPLETED buildings per strategic country id: buildingId →
-   * {typeId, cityId}. Each building adds its ONE effect (production or
-   * income) to the monthly cycle.
+   * {typeId, cellKey}. Each building produces its ONE good on the grid cell
+   * it was built on (spec §1/§2 — one economic building per region).
    */
   buildings: Record<string, Record<string, BuildingRecord>>;
+  /**
+   * The ECONOMY LEVEL per strategic country id (spec §3): one 0-100 number
+   * for the overall state of the economy. Drifts gradually every month
+   * (economyCycle step ۸) and scales building production around 50.
+   */
+  economyLevel: Record<string, number>;
 }
 
 export function addStockpile(

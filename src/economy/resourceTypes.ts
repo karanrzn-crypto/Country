@@ -71,19 +71,18 @@ export function emptyCountryResourceState(): CountryResourceState {
 /**
  * The MONTHLY government ledger (spec §3/§12 — deliberately simple):
  *
- *   درآمد   : مالیات (جمعیت × نرخ) + تجارت (خالص فروش‌ها) + کارخانه‌ها
+ *   درآمد   : مالیات (جمعیت × نرخ) + تجارت (خالص فروش‌ها)
  *   هزینه‌ها : ارتش + دولت + زیرساخت
  *   تغییر خزانه = درآمد − هزینه‌ها
  *
  * No GDP, no customs, no debt, no interest, no inflation, no budget pot.
+ * (Buildings produce GOODS — the factory no longer prints money.)
  */
 export interface CountryFinanceState {
   /** Last month's tax income (جمعیت × نرخ × ضریب — spec §2). */
   lastTaxIncome: number;
   /** Last month's NET trade money (sales receipts − purchase bills). */
   lastTradeIncome: number;
-  /** Last month's factory income (completed income buildings). */
-  lastFactoryIncome: number;
   /** Last month's army expense. */
   lastArmyExpense: number;
   /** Last month's government expense. */
@@ -98,7 +97,6 @@ export function emptyCountryFinanceState(): CountryFinanceState {
   return {
     lastTaxIncome: 0,
     lastTradeIncome: 0,
-    lastFactoryIncome: 0,
     lastArmyExpense: 0,
     lastGovernmentExpense: 0,
     lastInfrastructureExpense: 0,
@@ -109,7 +107,7 @@ export function emptyCountryFinanceState(): CountryFinanceState {
 // ——————————————————————————————— construction ————————————————————————————————
 
 /**
- * One construction project (spec §8): the ONE-TIME money cost is paid IN
+ * One construction project (spec §1): the ONE-TIME money cost is paid IN
  * FULL at start (a project that cannot be paid cannot be started), so a
  * project is always BUILDING — only its build time remains. No escrow, no
  * waiting-for-resources state, no monthly draws.
@@ -118,8 +116,12 @@ export interface BuildingProject {
   readonly id: string;
   /** BuildingDef id. */
   readonly typeId: string;
-  /** Host city (the country's capital at start time). */
-  readonly cityId: string;
+  /**
+   * The host GRID CELL (spec §1 — the player picked the exact region):
+   * canonical key `countryId#gridId` (e.g. "country_3#A3"). One economic
+   * building per cell — a cell holding a project or a building is taken.
+   */
+  readonly cellKey: string;
   /** Absolute month the project started. */
   readonly startedMonth: number;
   /** 0..1 elapsed build time (economic budget scales the speed). */
@@ -134,9 +136,10 @@ export function emptyCountryConstructionState(): CountryConstructionState {
   return { projects: [] };
 }
 
-/** A COMPLETED building (the built thing that boosts production / income). */
+/** A COMPLETED building — anchored to its grid cell (spec §1/§2). */
 export interface BuildingRecord {
   readonly id: string;
   readonly typeId: string;
-  readonly cityId: string;
+  /** Canonical cell key `countryId#gridId` the building stands on. */
+  readonly cellKey: string;
 }

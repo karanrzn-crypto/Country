@@ -29,9 +29,12 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v15 → v16: the SIMPLE economy — 3 resources, money construction, the
  *   transparent cycle; mines/research/plants die, the money scale converts
  *   the waiting/building states (one-time costs, spec §5/§6)
+ * - v16 → v17: the WIDER simple economy — buildings anchor to grid cells
+ *   (cityId kept for the session heal), the factory money line dies, the
+ *   economy-level record appears
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v16)', () => {
+describe('save migrations (v1 → … → v17)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -534,6 +537,34 @@ describe('save migrations (v1 → … → v16)', () => {
     expect(government.country_1.budget.tax).toBe('high');
   });
 
+  it('v16→v17: cell anchors appear (legacy cityId kept for the heal), factory income line dies, economyLevel appears', () => {
+    const v16 = {
+      state: {
+        economy: {
+          treasury: { country_0: 5000 },
+          resources: { country_0: { stock: { food: 900 }, production: {}, consumption: {}, imports: {}, exports: {}, shortage: {}, tradeIncome: 0, tradeExpense: 0 } },
+          finance: { country_0: { lastTaxIncome: 90, lastTradeIncome: 0, lastFactoryIncome: 60, lastArmyExpense: 10, lastGovernmentExpense: 5, lastInfrastructureExpense: 2, lastBalance: 133 } },
+          construction: { country_0: { projects: [{ id: 'p1', typeId: 'farm', cityId: 'city_0', startedMonth: 3, progress: 0.25 }] } },
+          buildings: { country_0: { b1: { id: 'b1', typeId: 'farm', cityId: 'city_1' } } }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v16, 16, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, any> } }).state.economy;
+    // Finance: the factory income line is GONE (buildings produce goods).
+    expect(economy.finance.country_0).not.toHaveProperty('lastFactoryIncome');
+    expect(economy.finance.country_0.lastBalance).toBe(133);
+    // Buildings/projects carry a provisional empty cellKey; the legacy
+    // cityId stays so the session heal can resolve the real cell.
+    expect(economy.buildings.country_0.b1).toMatchObject({ id: 'b1', typeId: 'farm', cellKey: '' });
+    expect(economy.buildings.country_0.b1.cityId).toBe('city_1');
+    expect(economy.construction.country_0.projects[0]).toMatchObject({ id: 'p1', cellKey: '' });
+    // The economy level record appears (the heal fills the neutral start).
+    expect(economy.economyLevel).toEqual({});
+  });
+
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {
     const { data } = applyMigrations(v1, 1, 2);
     const migrated = data as { state: Record<string, unknown> };
@@ -541,6 +572,7 @@ describe('save migrations (v1 → … → v16)', () => {
     const map = migrated.state.map as Record<string, unknown>;
     expect(Object.keys(map).sort()).toEqual(
       [
+        'buildMode',
         'camera',
         'layerVisibility',
         'selectedBuildingId',

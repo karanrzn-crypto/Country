@@ -66,6 +66,15 @@ export interface MapSlice {
    * only the land fallback changes.
    */
   selectionMode: MapSelectionMode;
+  /**
+   * BUILD MODE (spec §1): the building typeId the player is placing, or
+   * null. While active, a map click resolves as a BUILD PLACEMENT on the
+   * clicked grid cell (own country, one economic building per region) —
+   * not as a selection. The core owns the mode like the selection policy;
+   * the grid layer is force-enabled while the mode is active so the cells
+   * are visible and clickable.
+   */
+  buildMode: string | null;
   layerVisibility: Record<MapLayerId, boolean>;
   camera: MapCameraState;
   viewport: MapViewport;
@@ -93,6 +102,7 @@ export function createDefaultMapSlice(columns = 30, rows = 20, cellSize = 10): M
     selectedBuildingId: null,
     selectedCityConnectionId: null,
     selectionMode: 'country',
+    buildMode: null,
     layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
     camera: { x: (columns * cellSize) / 2, z: (rows * cellSize) / 2, viewHeight: rows * cellSize },
     viewport: { width: 1280, height: 720 }

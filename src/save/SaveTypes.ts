@@ -1,8 +1,14 @@
 import type { IdGeneratorState } from '../core/IdGenerator';
 import type { GameState } from '../state/GameState';
 
+/** Version of the WIDER simple economy (spec §1-§9): FOUR goods (industrial
+ *  goods added), buildings anchored to geographic GRID CELLS (one per
+ *  region), the 0-100 economy level scaling building production, country
+ *  specialization over the baseline, population-based consumption for every
+ *  good (zero-consumption bug fixed), graded shortage → satisfaction. */
+export const SAVE_VERSION_ECONOMY_LEVEL = 17;
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = 16;
+export const SAVE_VERSION = SAVE_VERSION_ECONOMY_LEVEL;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */
