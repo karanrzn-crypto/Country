@@ -21,7 +21,6 @@
  */
 
 import type { GameState } from '../state/GameState';
-import { TAX_LEVEL_SPECS } from './types';
 
 // —— Economic Budget → construction / development speed (spec §2) ——————
 /** Development target at zero economic budget (decay floor). */
@@ -62,21 +61,46 @@ const ARMY_BASE_GROWTH = 0.0015;
 const ARMY_GROWTH_SPAN = 0.0035;
 /** The army expands toward this fraction of total manpower. */
 const ARMY_CEILING_FRACTION = 0.6;
+/** Output floor when materials are scarce (production slows, never dies). */
+const MATERIAL_FLOOR = 0.25;
 
 /**
  * Produces weapons and equipment for the country, monthly, scaled by the
- * military budget share (spec §3: military production speed ↑ with the
- * military budget). The army also slowly expands toward its ceiling —
- * readiness grows with funding. Deterministic; all domains respected.
+ * military budget share (spec §3) — and gated by REAL materials (spec §9):
+ * every equipment unit draws iron/oil/coal/copper from the stockpile. When
+ * the stockpile is empty, output slows to the floor until materials arrive
+ * (produce them or buy them — the resource loop drives the arsenals).
+ * The army also slowly expands toward its ceiling. Deterministic.
  */
-export function produceMilitary(state: GameState, countryId: string): void {
+export function produceMilitary(state: GameState, countryId: string, militaryMaterials: Readonly<Record<string, number>>): void {
   const government = state.government.countries[countryId];
   const country = state.countries.countries[countryId];
   if (government === undefined || country === undefined) return;
   const military = government.budget.shares.military;
 
   // Equipment: linear output scaled by the military share (0.2 .. 1.5 / month).
-  const output = EQUIPMENT_BASE_OUTPUT + EQUIPMENT_OUTPUT_SPAN * military;
+  let output = EQUIPMENT_BASE_OUTPUT + EQUIPMENT_OUTPUT_SPAN * military;
+
+  // —— materials: draw iron/oil/coal/copper from the REAL stockpile ——
+  const record = state.economy.resources[countryId];
+  if (record !== undefined && Object.keys(militaryMaterials).length > 0) {
+    let factor = 1;
+    for (const [resourceId, perUnit] of Object.entries(militaryMaterials)) {
+      const need = output * perUnit;
+      if (need <= 0) continue;
+      const available = record.stock[resourceId] ?? 0;
+      factor = Math.min(factor, Math.max(MATERIAL_FLOOR, available / need));
+    }
+    for (const [resourceId, perUnit] of Object.entries(militaryMaterials)) {
+      const draw = Math.min(
+        record.stock[resourceId] ?? 0,
+        Math.ceil(output * factor * perUnit)
+      );
+      if (draw > 0) record.stock[resourceId] = Math.max(0, Math.round((record.stock[resourceId] ?? 0) - draw));
+    }
+    output *= factor;
+  }
+
   country.military.equipment = Math.max(0, country.military.equipment + output);
 
   // Recruitment: closes a budget-scaled fraction of the gap to the ceiling.
@@ -89,12 +113,7 @@ export function produceMilitary(state: GameState, countryId: string): void {
 }
 
 /**
- * The productivity-growth modifier of the CURRENT tax level (spec §4/§5:
- * LOW buffs the economy, MEDIUM is neutral, HIGH and MAX penalize it).
- * EconomySimulation folds this into the monthly sector-productivity growth.
+ * The budget file no longer exports a tax productivity helper — the tax
+ * level's economic side is the compounding `outputGrowth` multiplier that
+ * EconomySimulation maintains and the resource recompute applies.
  */
-export function taxEconomyGrowthOf(state: GameState, countryId: string): number {
-  const government = state.government.countries[countryId];
-  if (government === undefined) return 0;
-  return TAX_LEVEL_SPECS[government.budget.tax].economyGrowth;
-}

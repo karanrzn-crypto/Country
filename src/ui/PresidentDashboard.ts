@@ -8,8 +8,11 @@ import { OPINION_TOPICS, TAX_LEVEL_IDS } from '../government/types';
 import { decisionBlockReason } from '../government/DecisionEngine';
 import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
-import { resourceRawBalanceOf } from '../economy/resources';
+import { resourceRawBalanceOf, realShortageOf } from '../economy/resources';
 import { marketPriceTierOf, type TradeTier } from '../economy/market';
+import { projectShortageOf } from '../economy/construction';
+import { sellersOf, dealPriceOf } from '../economy/purchase';
+import { unlockedMineLevelOf, researchCostOf } from '../economy/research';
 
 /**
  * President Dashboard (Phase 2) — the head-of-state command center.
@@ -31,6 +34,7 @@ import { marketPriceTierOf, type TradeTier } from '../economy/market';
 export type SectionId =
   | 'overview'
   | 'economy'
+  | 'research'
   | 'budget'
   | 'politics'
   | 'decisions'
@@ -41,6 +45,7 @@ export type SectionId =
 const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   overview: 'نمای کلی',
   economy: 'اقتصاد',
+  research: 'تحقیقات',
   budget: 'بودجه',
   politics: 'سیاست',
   decisions: 'تصمیم‌ها',
@@ -52,6 +57,7 @@ const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
 const TAB_ORDER: readonly SectionId[] = [
   'overview',
   'economy',
+  'research',
   'budget',
   'politics',
   'decisions',
@@ -68,15 +74,19 @@ const TOPIC_LABELS: Readonly<Record<OpinionTopic, string>> = {
   security: 'امنیت'
 };
 
-const SECTOR_LABELS: Readonly<Record<string, string>> = {
-  agriculture: 'کشاورزی',
-  industry: 'صنعت',
-  energy: 'انرژی',
-  mining: 'معدن',
-  technology: 'فناوری',
-  construction: 'ساخت‌وساز',
-  services: 'خدمات',
-  trade: 'بازرگانی'
+/** Effect-target metric ids → Persian labels (unknown ids pass through). */
+const TARGET_LABELS: Readonly<Record<string, string>> = {
+  approval: 'محبوبیت',
+  corruption: 'فساد',
+  executiveAuthority: 'اقتدار اجرایی',
+  foodStock: 'انبار غذا',
+  militaryPower: 'قدرت نظامی',
+  politicalSupport: 'حمایت سیاسی',
+  protestPressure: 'فشار اعتراض',
+  publicTrust: 'اعتماد عمومی',
+  stability: 'ثبات',
+  strikePressure: 'فشار اعتصاب',
+  treasury: 'خزانه'
 };
 
 /** Budget pool labels (spec §1/§6 — the TWO halves of the ONE 100% pool). */
@@ -98,23 +108,6 @@ const TAX_LEVEL_EFFECTS: Readonly<Record<TaxLevel, string>> = {
   medium: 'متعادل',
   high: 'اثر منفی — نارضایتی و فشار اقتصادی',
   max: 'اثر منفی قوی — فشار سنگین بر مردم و اقتصاد'
-};
-
-/** Effect-target metric ids → Persian labels (unknown ids pass through). */
-const TARGET_LABELS: Readonly<Record<string, string>> = {
-  approval: 'محبوبیت',
-  corruption: 'فساد',
-  executiveAuthority: 'اقتدار اجرایی',
-  gdpGrowth: 'رشد اقتصادی',
-  inflation: 'تورم',
-  militaryPower: 'قدرت نظامی',
-  politicalSupport: 'حمایت سیاسی',
-  protestPressure: 'فشار اعتراض',
-  publicTrust: 'اعتماد عمومی',
-  stability: 'ثبات',
-  strikePressure: 'فشار اعتصاب',
-  treasury: 'خزانه',
-  unemployment: 'بیکاری'
 };
 
 /** Decision block-reason ids → Persian labels. */
@@ -140,13 +133,6 @@ const STATUS_VISUALS = {
   balanced: { label: 'متعادل', css: 'st-balanced' },
   shortage: { label: 'کمبود', css: 'st-shortage' }
 } as const;
-
-/** Status visual of a SIGNED balance: positive → surplus, negative → shortage. */
-function statusVisualOf(balance: number): { label: string; css: string } {
-  if (balance > 1e-4) return STATUS_VISUALS.surplus;
-  if (balance < -1e-4) return STATUS_VISUALS.shortage;
-  return STATUS_VISUALS.balanced;
-}
 
 /** Fixed, deterministic party colors for the power pie ( Politics, spec §5). */
 const POWER_PIE_COLORS = [
@@ -209,6 +195,7 @@ export class PresidentDashboard {
 
     this.refreshOverview(countryId, month);
     this.refreshEconomy(countryId);
+    this.refreshResearch(countryId);
     this.refreshBudget(countryId);
     this.refreshPolitics(countryId);
     this.refreshDecisions(countryId, month);
@@ -248,6 +235,7 @@ export class PresidentDashboard {
 
     this.sections.set('overview', this.buildOverview(body));
     this.sections.set('economy', this.buildEconomy(body));
+    this.sections.set('research', this.buildResearch(body));
     this.sections.set('budget', this.buildBudget(body));
     this.sections.set('politics', this.buildPolitics(body));
     this.sections.set('decisions', this.buildDecisions(body));
@@ -276,35 +264,65 @@ export class PresidentDashboard {
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    // The RESOURCE page (final structure — spec §7): ONLY Resources / Imports
-    // / Exports. No financial summary rows, no sector data — money stays in
-    // the simulation and the Budget page.
-    // Resources — the resource-centric core (spec §2/§3): production ·
-    // consumption · INITIAL shortage/surplus · active import/export · FINAL
-    // balance + the resource's own import/export action.
+    // The RESOURCE page (spec §18): stockpiles + production, construction
+    // with its Required/Owned/Missing triad, explicit purchases from real
+    // sellers, and the live import/export flows. No GDP, no inflation,
+    // no unemployment, no accounting — the loop is:
+    //   تولید → ذخیره → مصرف → کمبود → خرید → ساخت (spec §17).
+    // Resources — the REAL stockpile + the monthly production/consumption.
     const resourcesTitle = this.create('div', 'pd-subtitle');
-    resourcesTitle.setText('منابع');
+    resourcesTitle.setText('منابع — موجودی و تولید');
     section.appendChild(resourcesTitle);
     const resourcesList = this.create('div', 'pd-resources');
     section.appendChild(resourcesList);
     this.track(resourcesList, 'resources');
-    // Imports — ONLY the resources the country is short of: the world market
-    // buys the shortage automatically (real trade partners + amounts + the
-    // GLOBAL market price tier).
+    // Construction — the buildable factories + the active projects with
+    // their per-resource missing numbers (spec §4).
+    const constructionTitle = this.create('div', 'pd-subtitle');
+    constructionTitle.setText('ساخت‌وساز');
+    section.appendChild(constructionTitle);
+    const constructionList = this.create('div', 'pd-construction');
+    section.appendChild(constructionList);
+    this.track(constructionList, 'construction');
+    // Purchases — the EXPLICIT deals (spec §5): for every short resource,
+    // the countries that actually hold stock, one click per deal. Price
+    // shows on the seller row; there is no "buy cheapest" system (spec §6).
+    const purchaseTitle = this.create('div', 'pd-subtitle');
+    purchaseTitle.setText('خرید منابع — فروشندگان موجود');
+    section.appendChild(purchaseTitle);
+    const purchaseList = this.create('div', 'pd-purchases');
+    section.appendChild(purchaseList);
+    this.track(purchaseList, 'purchases');
+    // Imports — what the world market bought for the country this month.
     const importsTitle = this.create('div', 'pd-subtitle');
     importsTitle.setText('واردات');
     section.appendChild(importsTitle);
     const importsList = this.create('div', 'pd-trades');
     section.appendChild(importsList);
     this.track(importsList, 'imports');
-    // Exports — ONLY the resources with a surplus: what the world actually
-    // bought this month, from whom, and the remaining export potential.
+    // Exports — what the world bought FROM the country this month.
     const exportsTitle = this.create('div', 'pd-subtitle');
     exportsTitle.setText('صادرات');
     section.appendChild(exportsTitle);
     const exportsList = this.create('div', 'pd-trades');
     section.appendChild(exportsList);
     this.track(exportsList, 'exports');
+    return section;
+  }
+
+  /** The RESOURCE RESEARCH page (spec §11): one row per mine branch — the
+   *  unlocked level, the next level's cost, and the unlock action. */
+  private buildResearch(container: UIElement): UIElement {
+    const section = this.section(container, 'pd-research');
+    const title = this.create('div', 'pd-subtitle');
+    title.setText('تحقیقات منابع — معادن');
+    section.appendChild(title);
+    const hint = this.create('div', 'pd-research-hint');
+    hint.setText('با باز کردن هر سطح، ارتقای معادن آن منبع در نقشه باز می‌شود و تولید واقعاً افزایش می‌یابد.');
+    section.appendChild(hint);
+    const list = this.create('div', 'pd-research-list');
+    section.appendChild(list);
+    this.track(list, 'research');
     return section;
   }
 
@@ -437,83 +455,282 @@ export class PresidentDashboard {
   private refreshEconomy(countryId: string): void {
     const context = this.context;
     if (context === undefined || context === null) return;
-    // The resource page reads ONLY the live resource record (spec §7 — no
-    // money rows here; treasury/GDP live in the Budget page and the status
-    // panel).
+    // The resource page reads ONLY the live resource record (spec §18 — no
+    // money rows, no GDP/inflation/unemployment).
     this.rebuildResources(countryId);
+    this.rebuildConstruction(countryId);
+    this.rebuildPurchases(countryId);
     this.rebuildTrades(countryId);
   }
 
   /**
-   * The resource cards (spec §2/§3 — the understandable math):
-   *   تولید · مصرف · INITIAL shortage/surplus · واردات/صادرات · FINAL balance
-   * Initial = Production − Consumption. The GLOBAL trade network resolves
-   * every month on its own: a real shortage is bought automatically (when
-   * the world can cover it) and a real surplus sells automatically — the
-   * final balance reads 0 (متعادل) unless the WORLD supply ran out.
+   * The resource cards (spec §18/§19): numeric UNITS only.
+   *   موجودی  (the REAL stockpile) · تولید  · مصرف  · status chip
+   * The status is the REAL situation after trade (surplus / balanced /
+   * shortage); a shortage the stockpile can no longer cover shows its size.
    */
   private rebuildResources(countryId: string): void {
     const context = this.context;
     if (context === undefined || context === null) return;
     const config = context.data.economyData.strategicResources;
     const record = context.state.economy.resources[countryId];
+    // Signature guard: only rebuild the cards when a number actually moved
+    // (keeps the DOM stable for clicks between the 15-frame refreshes).
+    const signature = record === undefined ? 'none' : config.resources.map((resource) => {
+      const id = resource.id;
+      return [
+        Math.round(record.stock[id] ?? 0),
+        Math.round(record.production[id] ?? 0),
+        Math.round(record.consumption[id] ?? 0),
+        Math.round(record.imports[id] ?? 0),
+        Math.round(record.exports[id] ?? 0),
+        Math.round(record.emergencyImports[id] ?? 0)
+      ].join(',');
+    }).join('|') + `#${countryId}`;
+    if (signature === this.dynamicSignatures.get('resources')) return;
+    this.dynamicSignatures.set('resources', signature);
     this.rebuild('resources', this.parents.get('resources'), () => {
       const rows: UIElement[] = [];
       if (record === undefined) return rows;
       for (const resource of config.resources) {
         const resourceId = resource.id;
-        const production = record.production[resourceId] ?? 0;
-        const consumption = record.consumption[resourceId] ?? 0;
-        const importing = record.imports[resourceId] ?? 0;
-        const exporting = record.exports[resourceId] ?? 0;
-        // DISPLAY math: deltas are computed from the SAME rounded numbers the
-        // lines show, so what the player reads always adds up exactly
-        // (تولید 12 − مصرف 30 → کمبود 18 — never an off-by-one puzzle).
-        const shownProduction = Math.round(production);
-        const shownConsumption = Math.round(consumption);
-        const shownImports = Math.round(importing);
-        const shownExports = Math.round(exporting);
-        const shownInitial = shownProduction - shownConsumption;
-        const shownFinal = shownProduction + shownImports - shownConsumption - shownExports;
+        const stock = Math.round(record.stock[resourceId] ?? 0);
+        const production = Math.round(record.production[resourceId] ?? 0);
+        const consumption = Math.round(record.consumption[resourceId] ?? 0);
+        const importing = Math.round((record.imports[resourceId] ?? 0) + (record.emergencyImports[resourceId] ?? 0));
+        const exporting = Math.round(record.exports[resourceId] ?? 0);
+        const shortage = realShortageOf(record, resourceId);
 
-        const finalVisual = statusVisualOf(shownFinal);
-        const card = this.create('div', `pd-resource ${finalVisual.css}`);
+        const visual = shortage > 0
+          ? STATUS_VISUALS.shortage
+          : production - consumption + importing - exporting < 0
+            ? STATUS_VISUALS.balanced
+            : production > consumption
+              ? STATUS_VISUALS.surplus
+              : STATUS_VISUALS.balanced;
+        const card = this.create('div', `pd-resource ${visual.css}`);
         const head = this.create('div', 'pd-resource-head');
         const name = this.create('span', 'pd-resource-name');
         name.setText(resource.name);
         head.appendChild(name);
+        const chip = this.create('span', `pd-resource-chip ${visual.css}`);
+        chip.setText(visual.label);
+        head.appendChild(chip);
         card.appendChild(head);
 
-        // — the understandable math lines (spec §3) —
+        // — the spec §18 lists: stock FIRST, then the monthly flows —
         const lines: string[] = [
-          `تولید: ${units(shownProduction)}`,
-          `مصرف: ${units(shownConsumption)}`
+          `موجودی: ${units(stock)}`,
+          `تولید: +${units(production)} / ماه`,
+          `مصرف: ${units(consumption)} / ماه`
         ];
-        if (shownInitial !== 0) {
-          lines.push(
-            shownInitial < 0
-              ? `کمبود اولیه: ${units(-shownInitial)}`
-              : `مازاد اولیه: ${units(shownInitial)}`
-          );
-        }
-        if (importing > 1e-4) lines.push(`واردات: ${units(shownImports)}`);
-        if (exporting > 1e-4) lines.push(`صادرات: ${units(shownExports)}`);
+        if (importing > 0) lines.push(`واردات: +${units(importing)} / ماه`);
+        if (exporting > 0) lines.push(`صادرات: −${units(exporting)} / ماه`);
+        if (shortage > 0) lines.push(`کمبود برطرف‌نشده: ${units(shortage)}`);
         for (const line of lines) {
           const detail = this.create('div', 'pd-resource-detail');
           detail.setText(line);
           card.appendChild(detail);
         }
-        // The FINAL line (spec §3: Final Balance — the number that must add
-        // up): 0 → متعادل، otherwise the remaining ± amount (a negative
-        // remainder is the UNFILLED shortage — the world supply ran out).
-        const statusElement = this.create('div', `pd-resource-statusline ${finalVisual.css}`);
-        statusElement.setText(
-          shownFinal !== 0
-            ? `${finalVisual.label}: ${units(Math.abs(shownFinal))}`
-            : 'تراز نهایی: متعادل'
-        );
-        card.appendChild(statusElement);
         rows.push(card);
+      }
+      return rows;
+    });
+  }
+
+  /**
+   * The CONSTRUCTION section (spec §4/§17): every buildable factory with its
+   * resource cost, and every active project with progress + the
+   * Required/Owned/Missing triad. A stalled project says so plainly.
+   */
+  private rebuildConstruction(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const construction = state.economy.construction[countryId];
+    const projects = construction?.projects ?? [];
+    // The signature includes the LIVE stockpiles of the cost resources —
+    // buying the missing units must visibly update دارا/کمبود immediately.
+    const stockKey = config.productionFactories
+      .flatMap((def) => Object.keys(def.cost))
+      .filter((resourceId, index, all) => all.indexOf(resourceId) === index)
+      .map((resourceId) => Math.round(state.economy.resources[countryId]?.stock[resourceId] ?? 0))
+      .join(',');
+    const signature =
+      JSON.stringify(projects.map((project) => [project.id, project.typeId, project.progress, project.paid])) +
+      `#${projects.length}#${stockKey}`;
+    if (signature === this.dynamicSignatures.get('construction')) return;
+    this.dynamicSignatures.set('construction', signature);
+    this.rebuild('construction', this.parents.get('construction'), () => {
+      const rows: UIElement[] = [];
+      // — active projects (top) —
+      for (const project of projects) {
+        const def = config.productionFactories.find((candidate) => candidate.id === project.typeId);
+        if (def === undefined) continue;
+        const card = this.create('div', 'pd-project');
+        const head = this.create('div', 'pd-project-head');
+        const name = this.create('span', 'pd-project-name');
+        name.setText(def.name);
+        head.appendChild(name);
+        const progress = this.create('span', 'pd-project-progress');
+        progress.setText(`${Math.round(project.progress * 100)}٪`);
+        head.appendChild(progress);
+        card.appendChild(head);
+        const shortages = projectShortageOf(state, countryId, config, project);
+        const stalled = shortages.some((row) => row.missing > 0);
+        for (const row of shortages) {
+          const line = this.create('div', 'pd-project-line');
+          const resName = config.resources.find((resource) => resource.id === row.resourceId)?.name ?? row.resourceId;
+          line.setText(
+            `${resName} — لازم ${units(row.required)} · دارا ${units(row.owned)} · ` +
+            (row.missing > 0 ? `کمبود ${units(row.missing)}` : 'کافی')
+          );
+          card.appendChild(line);
+        }
+        const status = this.create('div', `pd-project-status ${stalled ? 'stalled' : 'running'}`);
+        status.setText(stalled ? 'متوقف — منابع کافی نیست (خرید کنید)' : 'در حال ساخت');
+        card.appendChild(status);
+        rows.push(card);
+      }
+      // — the buildable types (bottom) —
+      for (const def of config.productionFactories) {
+        const row = this.create('div', 'pd-buildable');
+        const info = this.create('div', 'pd-buildable-info');
+        const name = this.create('span', 'pd-buildable-name');
+        name.setText(def.name);
+        info.appendChild(name);
+        const resName = (resourceId: string): string =>
+          config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
+        const cost = Object.entries(def.cost)
+          .map(([resourceId, amount]) => `${resName(resourceId)} ${units(amount)}`)
+          .join(' · ');
+        const boostName = resName(def.boosts);
+        const detail = this.create('div', 'pd-buildable-detail');
+        detail.setText(`هزینهٔ ساخت: ${cost} → تولید +${units(def.output)} ${boostName} / ماه`);
+        info.appendChild(detail);
+        row.appendChild(info);
+        const build = this.create('button', 'pd-build');
+        const atCap = projects.length >= config.construction.maxProjects;
+        build.setText(atCap ? 'ظرفیت ساخت پُر است' : 'ساخت');
+        build.onClick(() => this.send({ type: 'economy.startConstruction', countryId, typeId: def.id }));
+        if (atCap) build.setAttribute('disabled', 'true');
+        row.appendChild(build);
+        rows.push(row);
+      }
+      return rows;
+    });
+  }
+
+  /**
+   * The PURCHASE panel (spec §5): for every resource the country is short
+   * of, the sellers that actually hold stock. One click = one real deal;
+   * the button buys what the country still needs (capped by the seller's
+   * stock and the treasury). The per-unit price shows on the row — there is
+   * no "Buy Cheapest" system (spec §6): the player picks the seller.
+   */
+  private rebuildPurchases(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const record = state.economy.resources[countryId];
+    if (record === undefined) return;
+    const countryName = (id: string): string => state.countries.countries[id]?.name ?? id;
+    // The NEED is both the consumption shortfall AND the construction gaps
+    // (spec §5's example: the player is short iron FOR A FACTORY and buys
+    // the missing units — construction need is a first-class trigger).
+    const constructionNeed: Record<string, number> = {};
+    for (const project of state.economy.construction[countryId]?.projects ?? []) {
+      for (const row of projectShortageOf(state, countryId, config, project)) {
+        constructionNeed[row.resourceId] = (constructionNeed[row.resourceId] ?? 0) + row.missing;
+      }
+    }
+
+    this.rebuild('purchases', this.parents.get('purchases'), () => {
+      const rows: UIElement[] = [];
+      for (const resource of config.resources) {
+        const resourceId = resource.id;
+        const shortage = realShortageOf(record, resourceId) + (constructionNeed[resourceId] ?? 0);
+        const sellers = sellersOf(state, countryId, resourceId);
+        if (shortage <= 0 || sellers.length === 0) continue;
+        const price = dealPriceOf(state, countryId, resourceId, config);
+        const block = this.create('div', 'pd-purchase');
+        const head = this.create('div', 'pd-purchase-head');
+        const name = this.create('span', 'pd-purchase-name');
+        name.setText(`${resource.name} — کمبود ${units(shortage)}`);
+        head.appendChild(name);
+        const hint = this.create('span', 'pd-purchase-hint');
+        hint.setText(`قیمت هر واحد ${money(price.buyPerUnit)}`);
+        head.appendChild(hint);
+        block.appendChild(head);
+        for (const seller of sellers) {
+          const row = this.create('div', 'pd-purchase-row');
+          const label = this.create('span', 'pd-purchase-seller');
+          label.setText(`${countryName(seller.countryId)} — ${units(seller.amount)} موجود`);
+          row.appendChild(label);
+          const buy = this.create('button', 'pd-buy');
+          buy.setText(`خرید ${units(Math.min(seller.amount, shortage))}`);
+          buy.onClick(() =>
+            this.send({
+              type: 'economy.buyResource',
+              countryId,
+              sellerId: seller.countryId,
+              resourceId,
+              amount: Math.min(seller.amount, shortage)
+            })
+          );
+          row.appendChild(buy);
+          block.appendChild(row);
+        }
+        rows.push(block);
+      }
+      if (rows.length === 0) {
+        const empty = this.create('div', 'pd-trade-empty');
+        empty.setText('کمبودی برای خرید نیست — یا فروشنده‌ای موجودی ندارد');
+        rows.push(empty);
+      }
+      return rows;
+    });
+  }
+
+  /** The RESOURCE RESEARCH rows (spec §11/§12): unlocked level per mine
+   *  branch, the next level's cost, and the unlock action. */
+  private refreshResearch(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const signature = config.resources.map((resource) => {
+      const unlocked = unlockedMineLevelOf(state, countryId, resource.id);
+      const cost = researchCostOf(config, resource.id, countryId, state);
+      return `${resource.id}:${unlocked}:${cost ?? 'max'}`;
+    }).join('|') + `#${countryId}`;
+    if (signature === this.dynamicSignatures.get('research')) return;
+    this.dynamicSignatures.set('research', signature);
+    this.rebuild('research', this.parents.get('research'), () => {
+      const rows: UIElement[] = [];
+      for (const resource of config.resources) {
+        const unlocked = unlockedMineLevelOf(state, countryId, resource.id);
+        const cost = researchCostOf(config, resource.id, countryId, state);
+        const row = this.create('div', 'pd-research-row');
+        const name = this.create('span', 'pd-research-name');
+        name.setText(resource.name);
+        row.appendChild(name);
+        const level = this.create('span', 'pd-research-level');
+        level.setText(`سطح باز‌شده: ${unlocked}`);
+        row.appendChild(level);
+        if (cost === undefined) {
+          const maxed = this.create('span', 'pd-research-max');
+          maxed.setText('بیشینه');
+          row.appendChild(maxed);
+        } else {
+          const action = this.create('button', 'pd-research-btn');
+          action.setText(`باز کردن سطح ${unlocked + 1} — ${money(cost)}`);
+          action.onClick(() => this.send({ type: 'economy.researchMine', countryId, resourceId: resource.id }));
+          row.appendChild(action);
+        }
+        rows.push(row);
       }
       return rows;
     });
@@ -945,6 +1162,9 @@ function percent(value: number): string {
 }
 
 function money(value: number): string {
+  // The light money scale prices small trades below 1 M$/unit — keep one
+  // decimal so a per-unit price never rounds into a meaningless 0.
+  if (Math.abs(value) < 10 && Math.abs(value) > 0) return `${value.toFixed(1)} میلیون دلار`;
   if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(2)} میلیارد دلار`;
   return `${Math.round(value)} میلیون دلار`;
 }
@@ -967,16 +1187,14 @@ function describeEffects(effects: readonly EffectDef[]): string {
       const sign = effect.value >= 0 ? '+' : '−';
       const magnitude = Math.abs(effect.value);
       const duration = effect.durationMonths !== undefined && effect.durationMonths > 0 ? ` (${effect.durationMonths} ماه)` : '';
-      // 'mul' is always a percentage modifier; 'add' is M$ for money/sector
-      // targets and percentage points for rates (approval, growth, …).
-      const targetLabel = effect.target.startsWith('sector.')
-        ? (SECTOR_LABELS[effect.target.slice('sector.'.length)] ?? effect.target)
-        : (TARGET_LABELS[effect.target] ?? effect.target);
+      // 'mul' is always a percentage modifier; 'add' is M$ for money/food
+      // targets and percentage points for rates (approval, trust, …).
+      const targetLabel = TARGET_LABELS[effect.target] ?? effect.target;
       if (effect.mode === 'mul') {
         return `${targetLabel} ${sign}${(magnitude * 100).toFixed(0)}٪${duration}`;
       }
-      const moneyTargets = ['treasury', 'debt'];
-      const isMoney = moneyTargets.includes(effect.target) || effect.target.startsWith('sector.');
+      const moneyTargets = ['treasury', 'foodStock'];
+      const isMoney = moneyTargets.includes(effect.target);
       const amount = isMoney ? `${sign}${money(magnitude)}` : `${sign}${(magnitude * 100).toFixed(1)}٪`;
       return `${targetLabel} ${amount}${duration}`;
     })

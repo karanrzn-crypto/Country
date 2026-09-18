@@ -103,7 +103,9 @@ export class PresidentStatusPanel {
     this.root.appendChild(this.identity);
 
     // —— fixed sections (top → bottom) ——
-    this.addSection('economy', 'اقتصاد', ['خزانه', 'تولید ناخالص', 'رشد', 'تورم', 'بیکاری', 'تراز ماهانه', 'منابع']);
+    // Light money (spec §10): treasury + the THREE revenue lines + the
+    // budget spending + the resource summary. No GDP/inflation/unemployment.
+    this.addSection('economy', 'اقتصاد', ['خزانه', 'مالیات', 'گمرک', 'صادرات', 'هزینه‌های دولت', 'تراز ماهانه', 'منابع']);
     this.addSection('military', 'نظامی', ['قدرت', 'یگان‌های فعال', 'سربازان', 'در نبرد', 'در حال حرکت', 'جنگ‌ها']);
     this.addSection('politics', 'سیاست', [
       'محبوبیت',
@@ -250,20 +252,20 @@ export class PresidentStatusPanel {
   private refreshEconomy(context: SystemContext, countryId: string): void {
     const economy = this.section('economy');
     if (economy === null) return;
-    const macro = context.state.economy.macro[countryId];
+    const finance = context.state.economy.finance[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     economy.rows.get('خزانه')?.setText(moneyM(treasury));
-    if (macro !== undefined) {
-      economy.rows.get('تولید ناخالص')?.setText(moneyM(macro.gdp));
-      economy.rows.get('رشد')?.setText(percentSigned(macro.gdpGrowth));
-      economy.rows.get('تورم')?.setText(percentSigned(macro.inflation));
-      economy.rows.get('بیکاری')?.setText(percent(macro.unemployment));
-      economy.rows.get('تراز ماهانه')?.setText(`${signed(moneyM(Math.abs(macro.lastBalance)), macro.lastBalance >= 0)} ماهانه`);
+    if (finance !== undefined) {
+      economy.rows.get('مالیات')?.setText(moneyM(finance.lastTax));
+      economy.rows.get('گمرک')?.setText(moneyM(finance.lastCustoms));
+      economy.rows.get('صادرات')?.setText(moneyM(finance.lastExports));
+      economy.rows.get('هزینه‌های دولت')?.setText(moneyM(finance.lastSpending));
+      economy.rows.get('تراز ماهانه')?.setText(`${signed(moneyM(Math.abs(finance.lastBalance)), finance.lastBalance >= 0)} ماهانه`);
     } else {
-      economy.rows.get('تولید ناخالص')?.setText('—');
-      economy.rows.get('رشد')?.setText('—');
-      economy.rows.get('تورم')?.setText('—');
-      economy.rows.get('بیکاری')?.setText('—');
+      economy.rows.get('مالیات')?.setText('—');
+      economy.rows.get('گمرک')?.setText('—');
+      economy.rows.get('صادرات')?.setText('—');
+      economy.rows.get('هزینه‌های دولت')?.setText('—');
       economy.rows.get('تراز ماهانه')?.setText('—');
     }
     economy.rows.get('منابع')?.setText(this.resourceSummary(context, countryId));
@@ -414,7 +416,6 @@ export class PresidentStatusPanel {
       const def = context.data.eventList.find((candidate) => candidate.id === instance.eventId);
       alerts.push(`⚠ ${def?.title ?? instance.eventId}`);
     }
-    const macro = context.state.economy.macro[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     // 2. Hard fiscal alarm.
     if (treasury < 0 && alerts.length < MAX_ALERTS) alerts.push('⚠ کسری خزانه');
@@ -428,14 +429,7 @@ export class PresidentStatusPanel {
     if (government.politics.protests === 'massive' && alerts.length < MAX_ALERTS) {
       alerts.push('⚠ اعتراض‌های گسترده');
     }
-    // 5. Economy shocks.
-    if (macro !== undefined && macro.unemployment > 0.15 && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ بحران بیکاری');
-    }
-    if (macro !== undefined && macro.inflation > 0.12 && alerts.length < MAX_ALERTS) {
-      alerts.push('⚠ بحران تورم');
-    }
-    // 6. Resource shortage — the first uncovered strategic resource.
+    // 5. Resource shortage — the first uncovered strategic resource.
     const resources = context.state.economy.resources[countryId];
     if (resources !== undefined && alerts.length < MAX_ALERTS) {
       const shortage = context.data.economyData.strategicResources.resources.find(
@@ -491,10 +485,6 @@ function signed(text: string, positive: boolean): string {
 
 function percent(value: number): string {
   return `${Math.round(value * 100)}٪`;
-}
-
-function percentSigned(value: number): string {
-  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}٪`;
 }
 
 function protestLabel(level: GovernmentCountryState['politics']['protests']): string {

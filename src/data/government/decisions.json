@@ -2,37 +2,32 @@
   "industrial_subsidy": {
     "id": "industrial_subsidy",
     "name": "یارانهٔ صنعتی",
-    "description": "کمک مالی مستقیم به کارخانه‌های ملی. اکنون پرهزینه است، اما کارخانه‌ها گسترش می‌یابند و استخدام دنباله می‌گیرد.",
+    "description": "کمک مالی به کارخانه‌های ملی برای خرید مواد اولیه. مردم راضی می‌شوند؛ خزانه سبک‌تر.",
     "category": "economic",
     "cost": {
-      "treasury": 2000
+      "treasury": 120
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 2000
+        "value": 120
       }
     ],
     "effects": [
       {
-        "target": "sector.industry",
-        "mode": "mul",
-        "value": 0.05
-      },
-      {
-        "target": "unemployment",
-        "mode": "add",
-        "value": -0.004
-      },
-      {
         "target": "approval",
         "mode": "add",
         "value": 0.03
+      },
+      {
+        "target": "protestPressure",
+        "mode": "add",
+        "value": -0.02
       }
     ],
-    "durationMonths": 24,
-    "cooldownMonths": 36
+    "durationMonths": 12,
+    "cooldownMonths": 24
   },
   "increase_military_spending": {
     "id": "increase_military_spending",
@@ -40,13 +35,13 @@
     "description": "خریدهای اضطراری و رزمایش‌ها. ستاد کل شاد می‌شود؛ صلح‌طلبان نه.",
     "category": "military",
     "cost": {
-      "treasury": 5000
+      "treasury": 300
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 5000
+        "value": 300
       }
     ],
     "effects": [
@@ -70,7 +65,7 @@
     "description": "حسابرسان مستقل، حمایت از افشاگران و تعقیب قانونی. نهادها پاک‌تر می‌شوند؛ رجال قدیمی نگران.",
     "category": "political",
     "cost": {
-      "treasury": 800
+      "treasury": 80
     },
     "preconditions": [
       {
@@ -105,25 +100,25 @@
     "description": "یارانهٔ یک‌بارهٔ خانوارها از خزانهٔ کشور. محبوب اما پرهزینه.",
     "category": "economic",
     "cost": {
-      "treasury": 3500
+      "treasury": 200
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 3500
+        "value": 200
       }
     ],
     "effects": [
       {
-        "target": "gdpGrowth",
-        "mode": "add",
-        "value": 0.004
-      },
-      {
         "target": "approval",
         "mode": "add",
         "value": 0.05
+      },
+      {
+        "target": "stability",
+        "mode": "add",
+        "value": 0.02
       }
     ],
     "durationMonths": 6,
@@ -132,53 +127,53 @@
   "infrastructure_program": {
     "id": "infrastructure_program",
     "name": "برنامهٔ ملی زیرساخت",
-    "description": "جاده‌ها، پل‌ها و شبکهٔ برق. ظرفیت صنعتی را باز می‌کند اما صندوق کشور را خالی می‌کند.",
+    "description": "جاده‌ها، پل‌ها و شبکهٔ برق. ساخت‌وساز شتاب می‌گیرد اما صندوق کشور خالی‌تر می‌شود.",
     "category": "economic",
     "cost": {
-      "treasury": 6000
+      "treasury": 250
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 6000
+        "value": 250
       }
     ],
     "effects": [
       {
-        "target": "sector.construction",
-        "mode": "mul",
-        "value": 0.08
+        "target": "approval",
+        "mode": "add",
+        "value": 0.02
       },
       {
-        "target": "unemployment",
+        "target": "protestPressure",
         "mode": "add",
-        "value": -0.005
+        "value": -0.04
       }
     ],
-    "durationMonths": 36,
-    "cooldownMonths": 48
+    "durationMonths": 24,
+    "cooldownMonths": 36
   },
   "agriculture_modernization": {
     "id": "agriculture_modernization",
     "name": "نوسازی کشاورزی",
-    "description": "تجهیزات مدرن، بذرهای بهتر و آبیاری کارآمد برای مزارع کشور.",
+    "description": "تجهیزات مدرن، بذرهای بهتر و آبیاری کارآمد — انبار غذا کشور را پُر می‌کند.",
     "category": "economic",
     "cost": {
-      "treasury": 1500
+      "treasury": 100
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 1500
+        "value": 100
       }
     ],
     "effects": [
       {
-        "target": "sector.agriculture",
-        "mode": "mul",
-        "value": 0.06
+        "target": "foodStock",
+        "mode": "add",
+        "value": 400
       },
       {
         "target": "approval",
@@ -186,67 +181,67 @@
         "value": 0.02
       }
     ],
-    "durationMonths": 30,
+    "durationMonths": 12,
     "cooldownMonths": 30
   },
   "technology_fund": {
     "id": "technology_fund",
     "name": "صندوق ملی فناوری",
-    "description": "سرمایه‌گذاری در پژوهش و نوآوری برای رشد بلندمدت اقتصاد دانش‌بنیان.",
+    "description": "سرمایه‌گذاری در پژوهش و نوآوری؛ اعتماد عمومی و آبروی کشور بالا می‌رود.",
     "category": "economic",
     "cost": {
-      "treasury": 2200
+      "treasury": 150
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 2200
+        "value": 150
       }
     ],
     "effects": [
       {
-        "target": "sector.technology",
-        "mode": "mul",
-        "value": 0.08
+        "target": "approval",
+        "mode": "add",
+        "value": 0.02
       },
       {
-        "target": "gdpGrowth",
+        "target": "publicTrust",
         "mode": "add",
-        "value": 0.002
+        "value": 0.02
       }
     ],
-    "durationMonths": 36,
+    "durationMonths": 24,
     "cooldownMonths": 36
   },
   "energy_grid_investment": {
     "id": "energy_grid_investment",
     "name": "سرمایه‌گذاری در شبکهٔ انرژی",
-    "description": "نیروگاه‌ها و خطوط انتقال تازه؛ ستون فقرات صنعت و شهرها.",
+    "description": "نیروگاه‌ها و خطوط انتقال تازه؛ ستون فقرات معادن و کارخانه‌ها.",
     "category": "economic",
     "cost": {
-      "treasury": 2800
+      "treasury": 180
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 2800
+        "value": 180
       }
     ],
     "effects": [
       {
-        "target": "sector.energy",
-        "mode": "mul",
-        "value": 0.07
+        "target": "approval",
+        "mode": "add",
+        "value": 0.02
       },
       {
-        "target": "sector.industry",
-        "mode": "mul",
-        "value": 0.02
+        "target": "protestPressure",
+        "mode": "add",
+        "value": -0.03
       }
     ],
-    "durationMonths": 30,
+    "durationMonths": 24,
     "cooldownMonths": 30
   },
   "state_of_emergency": {
@@ -298,28 +293,28 @@
     "description": "مدارس و دانشگاه‌های بهتر؛ سرمایهٔ انسانی بلندمدت کشور.",
     "category": "social",
     "cost": {
-      "treasury": 1800
+      "treasury": 120
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 1800
+        "value": 120
       }
     ],
     "effects": [
       {
-        "target": "gdpGrowth",
+        "target": "approval",
         "mode": "add",
-        "value": 0.003
+        "value": 0.02
       },
       {
-        "target": "approval",
+        "target": "publicTrust",
         "mode": "add",
         "value": 0.02
       }
     ],
-    "durationMonths": 48,
+    "durationMonths": 36,
     "cooldownMonths": 48
   }
 }

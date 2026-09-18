@@ -51,25 +51,28 @@ const playerId = game.gameState.player.countryConfirmed
   ? game.gameState.player.countryId
   : map.countryOrder[0];
 const government = game.gameState.government.countries[playerId];
-const macro = game.gameState.economy.macro[playerId];
+const finance = game.gameState.economy.finance[playerId];
+const resourceRecord = game.gameState.economy.resources[playerId];
 const network = game.gameState.cityAreas.network;
 const countryAreas = Object.values(network.areas).filter((area) => area.countryId === playerId);
 const countryLinks = Object.values(network.links).filter(
   (link) => countryAreas.some((a) => a.id === link.a) && countryAreas.some((a) => a.id === link.b)
 );
-if (government !== undefined && macro !== undefined) {
+if (government !== undefined && finance !== undefined && resourceRecord !== undefined) {
   console.log(
     `[headless] government: president=${government.president.name} approval=${(government.president.approval * 100).toFixed(0)}% ` +
       `parties=${Object.keys(government.politics.parties).length} corruption=${(government.politics.corruption * 100).toFixed(0)}% ` +
       `trust=${(government.politics.publicTrust * 100).toFixed(0)}% protests=${government.politics.protests}`
   );
+  const stockSummary = Object.entries(resourceRecord.stock)
+    .map(([resourceId, amount]) => `${resourceId}=${Math.round(amount)}`)
+    .join(' ');
   console.log(
-    `[headless] economy: gdp=${macro.gdp.toFixed(0)}M$ growth=${(macro.gdpGrowth * 100).toFixed(1)}% ` +
-      `inflation=${(macro.inflation * 100).toFixed(1)}% unemployment=${(macro.unemployment * 100).toFixed(1)}% debt=${macro.debt.toFixed(0)}M$ ` +
-      `treasury=${(game.gameState.economy.treasury[playerId] ?? 0).toFixed(0)}M$`
+    `[headless] resources: stock {${stockSummary}} treasury=${(game.gameState.economy.treasury[playerId] ?? 0).toFixed(0)}M$`
   );
   console.log(
-    `[headless] budget: revenue=${macro.lastRevenue.toFixed(1)}M$/mo spending=${macro.lastSpending.toFixed(1)}M$/mo ` +
+    `[headless] finance: tax=${finance.lastTax.toFixed(1)} customs=${finance.lastCustoms.toFixed(1)} exports=${finance.lastExports.toFixed(1)} ` +
+      `revenue=${finance.lastRevenue.toFixed(1)}M$/mo spending=${finance.lastSpending.toFixed(1)}M$/mo ` +
       `nextElection=month ${government.elections.nextElectionMonth} cityAreas=${countryAreas.length} links=${countryLinks.length} ` +
       `pendingEvents=${government.events.pending.length}`
   );

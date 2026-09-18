@@ -47,12 +47,24 @@ export class PopulationSystem implements SimulationSystemDef {
   }
 
   private foodAvailabilityFactor(context: SystemContext, regionId: string): number {
-    const countryId = context.state.world.countryOfRegion[regionId];
+    const state = context.state;
+    const countryId = state.world.countryOfRegion[regionId];
     if (countryId === undefined) return 0.75;
-    const food = context.state.economy.stockpiles[countryId]?.food ?? 0;
-    const population = context.state.population.regions[regionId]?.population ?? 0;
+    const population = state.population.regions[regionId]?.population ?? 0;
     const dailyFoodNeed = population / 1000;
     if (dailyFoodNeed <= 0) return 1;
+
+    // Strategic countries: food availability reads the REAL stockpile — a
+    // healthy buffer keeps growth at full speed, an empty one slows it
+    // (famine protection: growth stalls, it does not collapse, spec §8).
+    const record = state.economy.resources[countryId];
+    if (record !== undefined) {
+      const monthlyNeed = Math.max(1, record.consumption.food ?? 0);
+      return clamp((record.stock.food ?? 0) / (monthlyNeed * 2), 0.3, 1.1);
+    }
+
+    // Legacy demo world: the old stockpile record.
+    const food = state.economy.stockpiles[countryId]?.food ?? 0;
     return clamp(food / 24 / dailyFoodNeed, 0.25, 1.25);
   }
 }

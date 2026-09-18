@@ -31,7 +31,15 @@ export const RELATION_MAX = 100;
 /** Human-readable relation bands (display + future diplomacy hooks). */
 export type RelationBand = 'hostile' | 'wary' | 'neutral' | 'cordial' | 'friendly';
 
-export type CountryEconomyState = CountryProfileJson['economy'];
+/**
+ * Runtime economy record of a country — deliberately minimal (spec §10):
+ * the static seed treasury. The LIVE money lives in economy.treasury and
+ * the monthly ledger in economy.finance; the profile's GDP/income/expenses
+ * rows are gone from the runtime model.
+ */
+export interface CountryEconomyState {
+  treasury: number;
+}
 /**
  * Runtime military record — the static profile's shape but MUTABLE: the
  * budget-driven military production (government/budgetEffects) evolves
@@ -157,7 +165,9 @@ export function buildCountrySlice(
       flag: { ...profile.flag, colors: [...profile.flag.colors] },
       capitalId: mapCountry !== undefined ? mapCountry.capitalCityId : null,
       population: profile.population,
-      economy: { ...profile.economy },
+      // Only the seed treasury carries over — GDP/income/expenses are no
+      // longer part of the runtime model (spec §10: money is light).
+      economy: { treasury: profile.economy.treasury },
       resources: { ...profile.resources },
       military: { ...profile.military },
       foreignRelations: {}

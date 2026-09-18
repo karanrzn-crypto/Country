@@ -3,7 +3,7 @@ import { createDefaultMapSlice } from '../state/slices/mapSlice';
 import { buildCountrySlice } from '../state/slices/countrySlice';
 import { buildGovernmentSlice } from '../state/slices/governmentSlice';
 import { createCityAreasSlice } from '../state/slices/cityAreasSlice';
-import { createMacroEconomy } from '../economy/EconomySimulation';
+
 import { generateStrategicMap } from '../world/map/MapGenerator';
 import { DEFAULT_CONFIG } from '../config/configTypes';
 import { Random } from '../utils/Random';
@@ -229,14 +229,14 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       // only touched when the parent objects already exist (real saves do);
       // the session's load heal fills any remaining gaps per live country.
       if (clone.state.economy !== undefined) {
-        const economy = clone.state.economy as { macro?: Record<string, unknown>; treasury?: Record<string, number> };
-        if (economy.macro === undefined) economy.macro = {};
+        const economy = clone.state.economy as { finance?: Record<string, unknown>; treasury?: Record<string, number> };
+        if (economy.finance === undefined) economy.finance = {};
         if (economy.treasury === undefined) economy.treasury = {};
         const profiles = countriesJson as unknown as readonly CountryProfileJson[];
         for (const countryId of model.countryOrder) {
           const profile = profiles.find((candidate) => candidate.id === countryId);
-          if (economy.macro[countryId] === undefined) {
-            economy.macro[countryId] = createMacroEconomy(profile?.population ?? 1_500_000);
+          if (economy.finance[countryId] === undefined) {
+            economy.finance[countryId] = { lastTax: 0, lastCustoms: 0, lastExports: 0, lastRevenue: 0, lastSpending: 0, lastBalance: 0, outputGrowth: 1 };
           }
           if (economy.treasury[countryId] === undefined) {
             economy.treasury[countryId] = profile?.economy.treasury ?? DEFAULT_CONFIG.economy.startingTreasury;
@@ -460,6 +460,54 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
             (typeof typedRates.trade === 'number' ? typedRates.trade : 0);
           budget['tax'] = burden <= 0.36 ? 'low' : burden <= 0.55 ? 'medium' : burden <= 0.75 ? 'high' : 'max';
           delete budget['taxRates'];
+        }
+      }
+      return clone;
+    }
+  },
+  {
+    from: 13,
+    to: 14,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v13\u2192v14: save payload is not an object');
+      }
+      // The GDP/debt/inflation macro engine is REPLACED by the light resource
+      // economy (spec \u00a710/\u00a720): `economy.macro` dies, and finance /
+      // mines / research / construction / plants records appear. Resource
+      // records gain `stock` + `emergencyImports` (the heal seeds the buffer),
+      // and the country profiles' static gdp/income/expenses rows disappear.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: {
+          economy?: Record<string, unknown>;
+          countries?: { countries?: Record<string, Record<string, unknown>> };
+        };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined) {
+        delete economy['macro'];
+        if (economy['finance'] === undefined) economy['finance'] = {};
+        if (economy['mines'] === undefined) economy['mines'] = {};
+        if (economy['research'] === undefined) economy['research'] = {};
+        if (economy['construction'] === undefined) economy['construction'] = {};
+        if (economy['plants'] === undefined) economy['plants'] = {};
+        const resources = economy['resources'] as Record<string, Record<string, unknown>> | undefined;
+        if (resources !== undefined) {
+          for (const record of Object.values(resources)) {
+            if (record['stock'] === undefined) record['stock'] = {};
+            if (record['emergencyImports'] === undefined) record['emergencyImports'] = {};
+          }
+        }
+      }
+      const countries = clone.state?.countries?.countries;
+      if (countries !== undefined) {
+        for (const record of Object.values(countries)) {
+          const economyProfile = record?.['economy'] as Record<string, unknown> | undefined;
+          if (economyProfile === undefined) continue;
+          economyProfile['treasury'] = economyProfile['treasury'] ?? 500;
+          delete economyProfile['gdp'];
+          delete economyProfile['income'];
+          delete economyProfile['expenses'];
         }
       }
       return clone;

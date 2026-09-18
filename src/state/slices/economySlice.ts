@@ -1,37 +1,67 @@
 /**
  * Economy state slice — treasuries, resource stockpiles, factories, region
  * infrastructure supply. Fully JSON-safe (save-friendly).
+ *
+ * TWO economies share this slice:
+ *  - the LEGACY demo world (stockpiles/factories with the old faction ids);
+ *  - the strategic resource economy (resources/finance/mines/research/
+ *    construction/plants, keyed by strategic country ids).
  */
 
 import type { FactoryRecord } from '../../economy/types';
-import type { MacroEconomyState } from '../../economy/macro';
 // LEAF types module — importing from economy/resources here would close the
 // cycle GameState → economySlice → resources → GameState (resources reads
 // live GameState). The record SHAPE has no such dependency.
-import type { CountryResourceState } from '../../economy/resourceTypes';
+import type {
+  CountryResourceState,
+  CountryFinanceState,
+  ResourceResearchState,
+  CountryConstructionState,
+  CountryPlant
+} from '../../economy/resourceTypes';
 
 export interface EconomySlice {
   /** faction/country id → treasury amount. */
   treasury: Record<string, number>;
-  /** faction/country id → resource id → amount. */
+  /** faction/country id → resource id → amount (LEGACY demo world only). */
   stockpiles: Record<string, Record<string, number>>;
-  /** factory instance id → record. */
+  /** factory instance id → record (LEGACY demo world only). */
   factories: Record<string, FactoryRecord>;
   /** region id → supply satisfaction ratio 0..1 (SupplySystem writes). */
   supply: Record<string, number>;
   /**
-   * Phase 2 — national accounts per strategic country id (country_0…):
-   * GDP, sectors, inflation, unemployment, debt, trade. The legacy demo
-   * world has no macro record.
-   */
-  macro: Record<string, MacroEconomyState>;
-  /**
-   * Strategic resource economy per strategic country id — production from
-   * attributed city deposits, consumption from live state, world-market
-   * imports/exports and the player's trade policies. Written ONLY by
-   * recomputeResourceEconomies (never hand-edited).
+   * Strategic resource economy per strategic country id — REAL stockpiles,
+   * production from mines/baseline/factories, consumption, world-market
+   * imports/exports. Written ONLY by recomputeResourceEconomies (never
+   * hand-edited); `stock` is stepped by the same world pass.
    */
   resources: Record<string, CountryResourceState>;
+  /**
+   * The light monthly money ledger per strategic country id (spec §10):
+   * Tax + Customs + Exports against the derived budget spending. Replaces
+   * the old GDP/debt/inflation macro engine.
+   */
+  finance: Record<string, CountryFinanceState>;
+  /**
+   * Mine levels per deposit id (spec §12): depositId → level. Absent = 1.
+   * Higher levels multiply the deposit's monthly production.
+   */
+  mines: Record<string, number>;
+  /**
+   * Resource research per strategic country id (spec §11): the highest
+   * UNLOCKED mine level per resource branch. Absent resource = level 1.
+   */
+  research: Record<string, ResourceResearchState>;
+  /**
+   * Active construction projects per strategic country id (spec §4) —
+   * resource costs paid month by month from the real stockpile.
+   */
+  construction: Record<string, CountryConstructionState>;
+  /**
+   * COMPLETED production factories per strategic country id: plantId →
+   * {typeId, cityId}. Each plant boosts its resource's monthly production.
+   */
+  plants: Record<string, Record<string, CountryPlant>>;
 }
 
 export function addStockpile(

@@ -38,6 +38,10 @@ import {
   distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
+import { recomputeResourceEconomies } from '../economy/resources';
+import { purchaseResource } from '../economy/purchase';
+import { startProject } from '../economy/construction';
+import { upgradeMine, unlockMineLevel } from '../economy/research';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
 import { AssetManager } from '../assets/AssetManager';
@@ -1091,6 +1095,102 @@ export class Game {
       this.events.emit('government.eventResolved', { countryId, instanceId, choiceId });
     }
     return resolved;
+  }
+
+  // ————————————————— Phase 3 — the resource economy commands —————————————————
+
+  /** ONE explicit deal (spec §5): buy units of a resource from ONE seller. */
+  economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean {
+    this.assertInitialized();
+    const result = purchaseResource(
+      this.state,
+      countryId,
+      sellerId,
+      resourceId,
+      amount,
+      this.data.economyData.strategicResources
+    );
+    if (!result.ok) {
+      this.log.debug(`buyResource blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId})`);
+      return false;
+    }
+    this.events.emit('economy.resourceBought', {
+      buyerId: countryId,
+      sellerId: result.sellerId,
+      resourceId: result.resourceId,
+      amount: result.amount,
+      cost: result.cost
+    });
+    return true;
+  }
+
+  /** Starts a production-factory construction project (spec §4). */
+  economyStartConstruction(countryId: string, typeId: string): boolean {
+    this.assertInitialized();
+    const capital = this.state.countries.countries[countryId]?.capitalId ?? null;
+    if (capital === null) {
+      this.log.debug(`startConstruction blocked: ${countryId} has no capital`);
+      return false;
+    }
+    const result = startProject(
+      this.state,
+      countryId,
+      this.data.economyData.strategicResources,
+      typeId,
+      capital,
+      this.currentMonth(),
+      () => this.ids.next('plant')
+    );
+    if (!result.ok) {
+      this.log.debug(`startConstruction blocked: ${result.reason} (${typeId})`);
+      return false;
+    }
+    this.events.emit('economy.constructionStarted', {
+      countryId,
+      projectId: result.project.id,
+      typeId
+    });
+    return true;
+  }
+
+  /** Unlocks the next mine research level of ONE resource branch (spec §11). */
+  economyResearchMine(countryId: string, resourceId: string): boolean {
+    this.assertInitialized();
+    const result = unlockMineLevel(this.state, countryId, this.data.economyData.strategicResources, resourceId);
+    if (!result.ok) {
+      this.log.debug(`researchMine blocked: ${result.reason} (${resourceId})`);
+      return false;
+    }
+    this.events.emit('economy.researchUnlocked', { countryId, resourceId, level: result.level });
+    return true;
+  }
+
+  /** Upgrades ONE mine to the next unlocked level (spec §12/§15) — the
+   *  production effect is applied immediately via a fresh world recompute. */
+  economyUpgradeMine(countryId: string, depositId: string): boolean {
+    this.assertInitialized();
+    const deposit = this.strategicMap.features.deposits.find((candidate) => candidate.id === depositId);
+    if (deposit === undefined) {
+      this.log.debug(`upgradeMine blocked: unknown deposit "${depositId}"`);
+      return false;
+    }
+    const result = upgradeMine(
+      this.state,
+      countryId,
+      this.data.economyData.strategicResources,
+      depositId,
+      deposit.countryId,
+      deposit.resourceId
+    );
+    if (!result.ok) {
+      this.log.debug(`upgradeMine blocked: ${result.reason} (${depositId})`);
+      return false;
+    }
+    // REAL, immediate effect (spec §13): the level multiplier feeds the
+    // production recompute the moment the upgrade happens.
+    recomputeResourceEconomies(this.state, this.strategicMap, this.data.economyData.strategicResources);
+    this.events.emit('economy.mineUpgraded', { countryId, depositId, level: result.level });
+    return true;
   }
 
   private emitSelectionChanged(): void {

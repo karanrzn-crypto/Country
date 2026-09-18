@@ -45,9 +45,31 @@
   "strategicResources": {
     "productionScale": 1.4,
     "importMarkup": 1.25,
+    "customsRate": 0.1,
     "priceTiers": {
       "supply": { "low": 0.85, "medium": 1.0, "high": 1.25 },
       "demand": { "low": 0.85, "medium": 1.0, "high": 1.15 }
+    },
+    "mineLevels": {
+      "multipliers": { "1": 1.0, "2": 1.5, "3": 2.0 }
+    },
+    "research": {
+      "levels": { "2": 150, "3": 450 }
+    },
+    "construction": {
+      "monthlyRate": 0.25,
+      "maxProjects": 3
+    },
+    "safetyBuffer": {
+      "foodMonths": 3
+    },
+    "startingStock": {
+      "oil": 250,
+      "iron": 400,
+      "coal": 250,
+      "copper": 150,
+      "food": 600,
+      "wood": 350
     },
     "domesticBaseline": {
       "cityTermScale": 0.25,
@@ -81,32 +103,80 @@
         "copper": {
           "base": 17,
           "terrain": { "mountain": 1.0, "highMountain": 0.9, "hills": 0.7, "plateau": 0.5, "plains": 0.25, "valley": 0.25, "lowland": 0.2 }
-        },
-        "gold": {
-          "base": 1.5,
-          "cityFactor": 0,
-          "biomeNeutral": 0,
-          "terrain": { "highMountain": 1.0, "mountain": 0.85, "hills": 0.35, "plateau": 0.15 }
         }
       }
     },
     "resources": [
-      { "id": "oil", "name": "نفت", "price": 2.0 },
-      { "id": "wood", "name": "چوب", "price": 0.8 },
-      { "id": "iron", "name": "آهن", "price": 1.6 },
-      { "id": "food", "name": "غذا", "price": 0.6 },
-      { "id": "coal", "name": "زغال‌سنگ", "price": 1.0 },
-      { "id": "copper", "name": "مس", "price": 1.8 },
-      { "id": "gold", "name": "طلا", "price": 4.0 }
+      { "id": "oil", "name": "نفت", "price": 0.9 },
+      { "id": "iron", "name": "آهن", "price": 0.35 },
+      { "id": "coal", "name": "زغال‌سنگ", "price": 0.2 },
+      { "id": "copper", "name": "مس", "price": 0.5 },
+      { "id": "food", "name": "غذا", "price": 0.12 },
+      { "id": "wood", "name": "چوب", "price": 0.15 }
     ],
     "consumption": {
-      "food": { "perMillionPopulation": 9 },
-      "wood": { "perBillionOutput": { "construction": 1.1 }, "perMillionPopulation": 0.8 },
-      "iron": { "perBillionOutput": { "industry": 0.9 }, "perMilitaryUnit": 0.6 },
-      "coal": { "perBillionOutput": { "industry": 0.9, "energy": 1.2 } },
-      "copper": { "perBillionOutput": { "technology": 1.6 } },
-      "oil": { "perBillionOutput": { "energy": 1.0, "trade": 0.3 }, "perMilitaryUnit": 0.9 },
-      "gold": {}
-    }
+      "food": { "perMillionPopulation": 17.5 },
+      "wood": { "perMillionPopulation": 5.5 },
+      "iron": { "perMillionPopulation": 5.5, "perMilitaryUnit": 0.6 },
+      "coal": { "perMillionPopulation": 8.0 },
+      "copper": { "perMillionPopulation": 4.5 },
+      "oil": { "perMillionPopulation": 3.2, "perMilitaryUnit": 0.9 }
+    },
+    "militaryMaterials": {
+      "iron": 4,
+      "oil": 3,
+      "coal": 2,
+      "copper": 1
+    },
+    "productionFactories": [
+      {
+        "id": "iron_works",
+        "name": "کارخانهٔ آهن‌آلات",
+        "boosts": "iron",
+        "output": 120,
+        "cost": { "iron": 1000, "coal": 400 },
+        "upkeep": { "coal": 30 }
+      },
+      {
+        "id": "oil_refinery",
+        "name": "پالایشگاه نفت",
+        "boosts": "oil",
+        "output": 120,
+        "cost": { "iron": 800, "oil": 300 },
+        "upkeep": { "iron": 20 }
+      },
+      {
+        "id": "coal_plant",
+        "name": "کارخانهٔ زغال‌شویی",
+        "boosts": "coal",
+        "output": 120,
+        "cost": { "iron": 700, "wood": 300 },
+        "upkeep": { "wood": 25 }
+      },
+      {
+        "id": "copper_foundry",
+        "name": "کارخانهٔ مس",
+        "boosts": "copper",
+        "output": 100,
+        "cost": { "iron": 900, "coal": 300 },
+        "upkeep": { "coal": 25 }
+      },
+      {
+        "id": "food_plant",
+        "name": "کارخانهٔ غذایی",
+        "boosts": "food",
+        "output": 180,
+        "cost": { "iron": 500, "wood": 400 },
+        "upkeep": { "iron": 15 }
+      },
+      {
+        "id": "lumber_mill",
+        "name": "کارخانهٔ چوب‌بری",
+        "boosts": "wood",
+        "output": 180,
+        "cost": { "iron": 400, "wood": 300 },
+        "upkeep": { "iron": 10 }
+      }
+    ]
   }
 }

@@ -5,7 +5,7 @@ import { MemorySaveStorage } from '../../../save/SaveStorage';
 import { validateGameState } from '../../../state/validate';
 import { updateOpinionTopics, driftApproval, approvalTargetOf } from '../../../government/PublicOpinion';
 import { produceMilitary } from '../../../government/budgetEffects';
-import { processMonthEconomy } from '../../../economy/EconomySimulation';
+import { processMonthFinance } from '../../../economy/EconomySimulation';
 import { TAX_LEVEL_SPECS, TAX_LEVEL_IDS } from '../../../government/types';
 import type { TaxLevel } from '../../../government/types';
 import type { InMemoryUIElement } from '../../helpers/InMemoryDomAdapter';
@@ -129,8 +129,9 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
       const country = game.gameState.countries.countries[countryId];
       const equipmentStart = country.military.equipment;
       const armyStart = country.military.armySize;
+      const config = game.gameContext.data.economyData.strategicResources;
       for (let month = 0; month < 12; month += 1) {
-        produceMilitary(game.gameState, countryId);
+        produceMilitary(game.gameState, countryId, config.militaryMaterials);
       }
       const result = {
         equipment: country.military.equipment - equipmentStart,
@@ -187,20 +188,20 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     for (let index = 1; index < ordering.length; index += 1) {
       expect(ordering[index - 1]).toBeGreaterThan(ordering[index]);
     }
-    const ledger = (level: TaxLevel): { revenue: number; productivity: number } => {
+    const ledger = (level: TaxLevel): { revenue: number; growth: number } => {
       const taxGame = createTestGame({ seed: 306 });
       const taxId = taxGame.strategicMap.countryOrder[0];
       taxGame.gameState.government.countries[taxId].budget.tax = level;
-      const productivityStart = taxGame.gameState.economy.macro[taxId].sectors.industry.productivity;
-      const ledgerA = processMonthEconomy(taxGame.gameState, taxId, undefined as never);
-      const productivity = taxGame.gameState.economy.macro[taxId].sectors.industry.productivity - productivityStart;
+      const config = taxGame.gameContext.data.economyData.strategicResources;
+      const ledgerA = processMonthFinance(taxGame.gameState, taxId, config);
+      const growth = taxGame.gameState.economy.finance[taxId]!.outputGrowth - 1;
       taxGame.dispose();
-      return { revenue: ledgerA.revenue, productivity };
+      return { revenue: ledgerA.revenue, growth };
     };
     const lowLedger = ledger('low');
     const maxLedger = ledger('max');
     expect(maxLedger.revenue).toBeGreaterThan(lowLedger.revenue); // MAX collects more
-    expect(lowLedger.productivity).toBeGreaterThan(maxLedger.productivity); // LOW grows faster
+    expect(lowLedger.growth).toBeGreaterThan(maxLedger.growth); // LOW grows the economy
   });
 
   it('11. changing the tax level REALLY changes GameState through the live month cadence (revenue + opinion)', () => {
@@ -213,7 +214,7 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
       game.setTimeMode('month');
       game.runTicks(30); // 2 months through the REAL GovernmentSystem
       const result = {
-        revenue: game.gameState.economy.macro[countryId].lastRevenue,
+        revenue: game.gameState.economy.finance[countryId]!.lastRevenue,
         taxes: game.gameState.government.countries[countryId].opinion.topics.taxes
       };
       game.dispose();

@@ -8,8 +8,10 @@ import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
 import { describeGridCell, describeProvince } from '../world/map/MapGeography';
 import { selectionSummary } from '../state/slices/mapSlice';
-import { cityResourceProduction } from '../economy/resources';
+import { cityResourceProduction, depositMonthlyProduction, mineLevelOf } from '../economy/resources';
 import type { StrategicResourcesConfig } from '../economy/types';
+import type { GameCommand } from '../core/CommandTypes';
+import { unlockedMineLevelOf } from '../economy/research';
 import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
 import type { CityConnection } from '../world/cityareas/CityConnections';
 import {
@@ -225,7 +227,9 @@ export class MapUI {
     rows.set('پایتخت', addRow(detail, 'پایتخت'));
     rows.set('جمعیت', addRow(detail, 'جمعیت'));
     section('اقتصاد');
-    for (const key of ['تولید ناخالص', 'خزانه', 'درآمد', 'هزینه‌ها'] as const) {
+    // Light money (spec §10): the LIVE treasury + the real resource summary.
+    // No GDP/income/expense profile rows.
+    for (const key of ['خزانه', 'منابع'] as const) {
       rows.set(key, addRow(detail, key));
     }
     section('نظامی');
@@ -335,7 +339,21 @@ export class MapUI {
     const signature =
       `${map.selectedGridKey}|${map.selectedRiverId}|${map.selectedLakeId}` +
       `|${map.selectedSiteId}|${map.selectedBuildingId}|${map.selectedCityId}` +
-      `|${map.selectedProvinceId}|${map.selectedCityConnectionId}`;
+      `|${map.selectedProvinceId}|${map.selectedCityConnectionId}` +
+      // Mine data is LIVE state (levels move with upgrades) — the selected
+      // site's level + the research unlock feed the signature so the panel
+      // never shows a stale level/production pair.
+      `|${(() => {
+        const site = map.selectedSiteId !== null
+          ? model.features.sites.find((candidate) => candidate.id === map.selectedSiteId)
+          : undefined;
+        const deposit = site !== undefined
+          ? model.features.deposits.find((candidate) => candidate.siteId === site.id)
+          : undefined;
+        if (deposit === undefined) return String(map.selectedGridKey ?? '');
+        const state = context.state;
+        return `${mineLevelOf(state, deposit.id)}:${unlockedMineLevelOf(state, state.player.countryId, deposit.resourceId)}`;
+      })()}`;
     if (signature === this.featureSignature) return;
     this.featureSignature = signature;
     for (const row of this.featureRows) row.remove();
@@ -428,7 +446,22 @@ export class MapUI {
           'شهرها',
           info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
         );
-        addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(context.data.economyData.strategicResources, id)));
+        // REAL mines of this cell (spec §14): resource, level, monthly
+        // production, owner — read from the live Game State, never labels.
+        const config = context.data.economyData.strategicResources;
+        const mines = info.depositIds
+          .map((depositId) => model.features.deposits.find((candidate) => candidate.id === depositId))
+          .filter((deposit) => deposit !== undefined);
+        for (const deposit of mines) {
+          const level = mineLevelOf(context.state, deposit.id);
+          const production = depositMonthlyProduction(deposit, config, level);
+          const owner = model.countries[deposit.countryId]?.name ?? deposit.countryId;
+          addRow(
+            'معدن',
+            `${resourceLabel(config, deposit.resourceId)} — سطح ${level} · ${production.toLocaleString('en-US')} / ماه · ${owner}`
+          );
+        }
+        addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(config, id)));
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow('زیرساخت', `${info.roadIds.length} جاده · ${info.railwayIds.length} راه‌آهن`);
         addRow('ارزش راهبردی', String(info.strategicValue));
@@ -567,10 +600,24 @@ export class MapUI {
         featureVisible = true;
         this.featureTitle?.setText(`محوطه — ${SITE_KIND_LABELS[site.kind] ?? site.kind}`);
         addRow('نوع', SITE_KIND_LABELS[site.kind] ?? site.kind);
-        if (site.resourceId !== null) addRow('منبع', site.resourceId);
         const deposit = model.features.deposits.find((candidate) => candidate.siteId === site.id);
-        if (deposit !== undefined) addRow('مقدار', String(deposit.quantity));
-        addRow('کشور', model.countries[site.countryId]?.name ?? site.countryId);
+        const config = context.data.economyData.strategicResources;
+        if (deposit !== undefined) {
+          // The REAL mine record (spec §14/§15/§16): resource, type, level,
+          // monthly production, owner — all read from the live Game State.
+          const level = mineLevelOf(context.state, deposit.id);
+          const production = depositMonthlyProduction(deposit, config, level);
+          if (site.resourceId !== null) addRow('منبع', resourceLabel(config, site.resourceId));
+          addRow('سطح', String(level));
+          addRow('تولید', `${production.toLocaleString('en-US')} / ماه`);
+          addRow('کشور', model.countries[deposit.countryId]?.name ?? deposit.countryId);
+          addRow('مقدار', String(deposit.quantity));
+          // Upgrade status (spec §15): research-gated, executed per mine.
+          this.appendMineUpgradeBlock(deposit.id, deposit.countryId, deposit.resourceId, level, config);
+        } else {
+          if (site.resourceId !== null) addRow('منبع', site.resourceId);
+          addRow('کشور', model.countries[site.countryId]?.name ?? site.countryId);
+        }
         addRow('شهر', site.cityId !== null ? (model.cities[site.cityId]?.name ?? site.cityId) : 'هیچ');
       }
     }
@@ -591,6 +638,66 @@ export class MapUI {
     }
 
     this.featureContainer.setVisible(featureVisible);
+  }
+
+  /**
+   * The mine UPGRADE block (spec 15): an actionable upgrade button when the
+   * owner is the player and the research level is unlocked, otherwise the
+   * research requirement line. The command path is the standard one - the
+   * UI never mutates state.
+   */
+  private appendMineUpgradeBlock(
+    depositId: string,
+    countryId: string,
+    resourceId: string,
+    level: number,
+    config: StrategicResourcesConfig
+  ): void {
+    if (this.featureContainer === null) return;
+    const state = this.context?.state;
+    if (state === undefined) return;
+    const isPlayerCountry = state.player.countryConfirmed && state.player.countryId === countryId;
+    const unlocked = unlockedMineLevelOf(state, countryId, resourceId);
+    const maxLevel = Math.max(
+      ...Object.keys(config.mineLevels.multipliers).map((key) => Number.parseInt(key, 10))
+    );
+    if (level >= maxLevel) return; // nothing beyond the config's top level
+    const resName = resourceLabel(config, resourceId);
+    if (isPlayerCountry && level < unlocked) {
+      const row = this.create('div', 'map-info-row');
+      const button = this.create('button', 'map-mine-upgrade');
+      button.setText('ارتقای معدن → سطح ' + (level + 1));
+      button.onClick(() =>
+        this.commands.send({ type: 'economy.upgradeMine', countryId, depositId } as GameCommand)
+      );
+      row.appendChild(button);
+      this.featureContainer.appendChild(row);
+      this.featureRows.push(row);
+    } else {
+      const row = this.create('div', 'map-info-row');
+      const keyEl = this.create('span', 'map-info-key');
+      keyEl.setText('ارتقا');
+      const valueEl = this.create('span', 'map-info-value');
+      valueEl.setText('نیازمند تحقیق: معدن ' + resName + ' سطح ' + (level + 1));
+      row.appendChild(keyEl);
+      row.appendChild(valueEl);
+      this.featureContainer.appendChild(row);
+      this.featureRows.push(row);
+    }
+  }
+
+  /** One-line stockpile summary of a country (the country panel's resources row). */
+  private resourceSummaryLine(context: SystemContext, countryId: string): string {
+    const record = context.state.economy.resources[countryId];
+    const config = context.data.economyData.strategicResources;
+    if (record === undefined) return '—';
+    const parts: string[] = [];
+    for (const resource of config.resources) {
+      const stock = Math.round(record.stock[resource.id] ?? 0);
+      if (stock <= 0 && (record.production[resource.id] ?? 0) <= 0) continue;
+      parts.push(resource.name + ' ' + stock.toLocaleString('en-US'));
+    }
+    return parts.length > 0 ? parts.join(' · ') : '—';
   }
 
   // —— map legends (biomes / elevation) ——
@@ -700,10 +807,8 @@ export class MapUI {
         countryState.capitalId !== null ? model.cities[countryState.capitalId] : undefined;
       fill('پایتخت', capital !== undefined ? capital.name : '—');
       fill('جمعیت', formatCompact(countryState.population));
-      fill('تولید ناخالص', `${countryState.economy.gdp} میلیارد دلار`);
-      fill('خزانه', `${countryState.economy.treasury} میلیون دلار`);
-      fill('درآمد', `+${countryState.economy.income} میلیون دلار`);
-      fill('هزینه‌ها', `-${countryState.economy.expenses} میلیون دلار`);
+      fill('خزانه', `${Math.round(context.state.economy.treasury[countryState.id] ?? countryState.economy.treasury)} میلیون دلار`);
+      fill('منابع', this.resourceSummaryLine(context, countryState.id));
       fill('نیروی انسانی', formatCompact(countryState.military.manpower));
       fill('ارتش', formatCompact(countryState.military.armySize));
       fill('تجهیزات', `${countryState.military.equipment}`);

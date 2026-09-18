@@ -72,4 +72,19 @@ export type GameCommand =
     }
   | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
-  | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string };
+  | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }
+  // —— Phase 3 — the resource economy (spec §5/§11/§12/§15) ——
+  /** ONE explicit deal: buy units of a resource from a chosen seller country. */
+  | {
+      readonly type: 'economy.buyResource';
+      readonly countryId: string;
+      readonly sellerId: string;
+      readonly resourceId: string;
+      readonly amount: number;
+    }
+  /** Start a production-factory construction project (resource-costed). */
+  | { readonly type: 'economy.startConstruction'; readonly countryId: string; readonly typeId: string }
+  /** Unlock the next mine research level of ONE resource branch. */
+  | { readonly type: 'economy.researchMine'; readonly countryId: string; readonly resourceId: string }
+  /** Upgrade ONE mine (deposit) to the next unlocked research level. */
+  | { readonly type: 'economy.upgradeMine'; readonly countryId: string; readonly depositId: string };

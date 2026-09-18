@@ -9,24 +9,26 @@
  * TWO effect modes:
  *  - instant 'add'  : one-shot delta written into state at apply time.
  *  - modifier       : registered for N months; 'mul' scales the metric on
- *                     READ (so e.g. "industry +5 %" genuinely feeds GDP and
- *                     taxes), 'add' contributes per-month while active.
+ *                     READ (e.g. "military power +10 %" while active).
  *
  * The vocabulary is exported for DataRegistry validation: unknown metric ids
  * or mode/target mismatches fail at BOOT, never mid-campaign.
+ *
+ * The financial vocabulary is the LIGHT one (spec §10): treasury and the
+ * monthly balance exist; GDP, debt, inflation, unemployment and sectors do
+ * NOT. Resource conditions (shortageResources / foodStock) let the
+ * data-driven content react to the REAL resource economy.
  */
 
 import type { GameState } from '../state/GameState';
 import type { ActiveModifier, EffectConditionDef, EffectDef } from './types';
 import { clamp01 } from './types';
-import { SECTORS, type SectorId, type SectorState } from '../economy/macro';
 
 // —————————————————————————————————————————————————————————— vocabulary ——
 
 /** Instant-writable state metrics ('add' mode). */
 export const ADD_METRICS: ReadonlySet<string> = new Set([
   'treasury',
-  'debt',
   'approval',
   'politicalSupport',
   'executiveAuthority',
@@ -37,19 +39,13 @@ export const ADD_METRICS: ReadonlySet<string> = new Set([
   'stability',
   'legitimacy',
   'warExhaustion',
-  'inflation',
-  'unemployment',
-  'gdpGrowth',
   'militaryPower',
-  ...SECTORS.map((sector) => `sector.${sector}`) // 'add' = per-month output delta (M$)
+  'foodStock' // instant food units into the country's stockpile
 ]);
 
 /** Read-time multiplicative metrics ('mul' mode modifiers). */
 export const MUL_METRICS: ReadonlySet<string> = new Set([
-  'gdp',
-  'militaryPower',
-  'gdpGrowth',
-  ...SECTORS.map((sector) => `sector.${sector}`)
+  'militaryPower'
 ]);
 
 /** Every metric an effect may target (DataRegistry boot validation). */
@@ -58,12 +54,11 @@ export const KNOWN_GOV_METRICS: ReadonlySet<string> = new Set([
   ...MUL_METRICS,
   // Read-only condition metrics (preconditions/event conditions).
   'population',
-  'tradeBalance'
+  'shortageResources',
+  'monthlyBalance'
 ]);
 
 // ————————————————————————————————————————————————————————————— reading ——
-
-const SECTOR_PREFIX = 'sector.';
 
 /** Sum of active 'add' modifiers for one metric. */
 function activeAdd(active: readonly ActiveModifier[], metric: string): number {
@@ -83,10 +78,36 @@ function activeMul(active: readonly ActiveModifier[], metric: string): number {
   return product;
 }
 
-/** Exported read-time multiplier for metrics the economy composes manually. */
+/** Exported read-time multiplier for metrics other systems compose manually. */
 export function activeMulFactor(state: GameState, countryId: string, metric: string): number {
   const government = state.government.countries[countryId];
   return activeMul(government?.decisions.active ?? [], metric);
+}
+
+/**
+ * How many resources are ACUTELY short for this country right now: a
+ * resource counts when the stockpile is empty while the monthly balance
+ * (with imports) is still negative, or when the world market left an
+ * unfilled shortage. Drives data-driven conditions and opinion.
+ */
+export function acuteShortageCountOf(state: GameState, countryId: string): number {
+  const record = state.economy.resources[countryId];
+  if (record === undefined) return 0;
+  const resourceIds = new Set<string>([
+    ...Object.keys(record.consumption),
+    ...Object.keys(record.unfilledShortage),
+    ...Object.keys(record.production)
+  ]);
+  let count = 0;
+  for (const resourceId of resourceIds) {
+    const unfilled = record.unfilledShortage[resourceId] ?? 0;
+    const uncovered =
+      (record.consumption[resourceId] ?? 0) -
+      (record.production[resourceId] ?? 0) -
+      (record.imports[resourceId] ?? 0);
+    if (unfilled > 0 || (uncovered > 0 && (record.stock[resourceId] ?? 0) <= 0)) count += 1;
+  }
+  return count;
 }
 
 /**
@@ -99,28 +120,15 @@ export function readMetric(state: GameState, countryId: string, metric: string):
   const active = government?.decisions.active ?? [];
   const mul = activeMul(active, metric);
 
-  if (metric.startsWith(SECTOR_PREFIX)) {
-    const sectorId = metric.slice(SECTOR_PREFIX.length);
-    const sector = (state.economy.macro[countryId]?.sectors as Record<string, SectorState | undefined>)[sectorId as SectorId];
-    if (sector === undefined) return 0;
-    return (sector.output + activeAdd(active, metric)) * mul;
-  }
-
   switch (metric) {
     case 'treasury':
       return state.economy.treasury[countryId] ?? 0;
-    case 'debt':
-      return state.economy.macro[countryId]?.debt ?? 0;
-    case 'gdp':
-      return (state.economy.macro[countryId]?.gdp ?? 0) * mul;
-    case 'gdpGrowth':
-      return (state.economy.macro[countryId]?.gdpGrowth ?? 0) * mul + activeAdd(active, metric);
-    case 'inflation':
-      return state.economy.macro[countryId]?.inflation ?? 0;
-    case 'unemployment':
-      return state.economy.macro[countryId]?.unemployment ?? 0;
-    case 'tradeBalance':
-      return state.economy.macro[countryId]?.trade.balance ?? 0;
+    case 'monthlyBalance':
+      return state.economy.finance[countryId]?.lastBalance ?? 0;
+    case 'shortageResources':
+      return acuteShortageCountOf(state, countryId);
+    case 'foodStock':
+      return (state.economy.resources[countryId]?.stock.food ?? 0) + activeAdd(active, metric);
     case 'population':
       return state.countries.countries[countryId]?.population ?? 0;
     case 'militaryPower':
@@ -170,7 +178,6 @@ export function militaryPowerOf(state: GameState, countryId: string): number {
 function clampMetric(metric: string, value: number): number {
   switch (metric) {
     case 'treasury':
-    case 'debt':
     case 'population':
     case 'warExhaustion':
       return Math.max(0, value);
@@ -183,32 +190,24 @@ function clampMetric(metric: string, value: number): number {
     case 'strikePressure':
     case 'stability':
     case 'legitimacy':
-    case 'unemployment':
       return clamp01(value);
-    case 'inflation':
-      return Math.max(-0.2, Math.min(1, value));
-    case 'gdpGrowth':
-      return Math.max(-0.5, Math.min(0.5, value));
     default:
       return value;
   }
 }
 
 /**
- * Applies ONE instant effect (no duration) to a country. Sector 'add'
- * effects adjust the sector's annual output directly (M$) — used by events
- * like harvest shocks; the system pulls output back toward jobs ×
- * productivity, so the shock decays naturally.
+ * Applies ONE instant effect (no duration) to a country. 'foodStock' adds
+ * real units to the country's food stockpile (harvest aid / purchases);
+ * the other effects write their existing state records.
  */
 export function applyInstantEffect(state: GameState, countryId: string, effect: EffectDef): void {
   const government = state.government.countries[countryId];
-  const macro = state.economy.macro[countryId];
 
-  if (effect.target.startsWith(SECTOR_PREFIX)) {
-    const sectorId = effect.target.slice(SECTOR_PREFIX.length);
-    const sector = (macro?.sectors as Record<string, SectorState | undefined>)[sectorId as SectorId];
-    if (sector !== undefined) {
-      sector.output = Math.max(0, sector.output + effect.value);
+  if (effect.target === 'foodStock') {
+    const record = state.economy.resources[countryId];
+    if (record !== undefined) {
+      record.stock.food = Math.max(0, Math.round((record.stock.food ?? 0) + effect.value));
     }
     return;
   }
@@ -218,18 +217,6 @@ export function applyInstantEffect(state: GameState, countryId: string, effect: 
   switch (effect.target) {
     case 'treasury':
       state.economy.treasury[countryId] = next;
-      break;
-    case 'debt':
-      if (macro !== undefined) macro.debt = next;
-      break;
-    case 'gdpGrowth':
-    case 'inflation':
-    case 'unemployment':
-      if (macro !== undefined) {
-        if (effect.target === 'gdpGrowth') macro.gdpGrowth = next;
-        if (effect.target === 'inflation') macro.inflation = next;
-        if (effect.target === 'unemployment') macro.unemployment = next;
-      }
       break;
     case 'militaryPower':
       // Derived metric — instant deltas land as a spending-share-neutral

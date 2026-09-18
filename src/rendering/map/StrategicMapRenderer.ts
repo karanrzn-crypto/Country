@@ -121,8 +121,15 @@ export class StrategicMapRenderer {
     this.surfaceLayer = surfaceLayer;
     const populationLayer = createPopulationFillLayer(this.columns, theme);
     const economyLayer = createEconomyFillLayer(this.columns, theme, (countryId) => {
-      const country = context.state.countries.countries[countryId];
-      return country !== undefined ? country.economy.gdp : 0;
+      // Economy tint = the country's real monthly PRODUCTION VALUE (units ×
+      // price — the light resource economy's output, spec §10). No GDP.
+      const record = context.state.economy.resources[countryId];
+      if (record === undefined) return 0;
+      let value = 0;
+      for (const resource of context.data.economyData.strategicResources.resources) {
+        value += (record.production[resource.id] ?? 0) * resource.price;
+      }
+      return value;
     });
     const strategicLayer = createStrategicFillLayer(this.columns, theme);
     const riverLayer = new RiverLayer(this.columns, theme);

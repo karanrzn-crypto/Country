@@ -551,9 +551,10 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       let resourceId: string | null = null;
       if (terrainClass === 'mountain') {
         kind = 'mine';
-        // Mountain ores: iron dominates, copper and gold are rarer (deterministic pick).
+        // Mountain ores: iron dominates, copper and coal are rarer
+        // (deterministic pick — the six-resource economy has no gold).
         const pick = rng.next();
-        resourceId = pick < 0.55 ? 'iron' : pick < 0.8 ? 'copper' : 'gold';
+        resourceId = pick < 0.55 ? 'iron' : pick < 0.8 ? 'copper' : 'coal';
       } else if (terrainClass === 'hills') {
         kind = 'mine';
         resourceId = 'coal';

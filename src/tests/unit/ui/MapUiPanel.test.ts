@@ -122,8 +122,10 @@ describe('MapUI country info panel (Part 2)', () => {
     expect(detailText).toContain(state.name);
     expect(detailText).toContain(context.map.cities[state.capitalId as string].name);
 
-    // Economy / military values are rendered from the slice.
-    expect(detailText).toContain(`${state.economy.gdp} میلیارد دلار`);
+    // Economy / military values are rendered from the live state (light
+    // money: the treasury row; the resources row from the real stockpile).
+    expect(detailText).toContain('میلیون دلار');
+    expect(detailText).toContain('منابع');
     expect(detailText).toContain(formatCompact(state.population));
     expect(detailText).toContain(`${state.military.aircraft}`);
 

@@ -29,20 +29,17 @@ describe('DecisionEngine (data-driven presidential decisions)', () => {
     const state = game.gameState;
     const treasuryBefore = state.economy.treasury[countryId];
     const approvalBefore = state.government.countries[countryId].president.approval;
-    expect(decisionTreasuryPreview(state, countryId, decision)).toBe(-2000);
+    expect(decisionTreasuryPreview(state, countryId, decision)).toBe(-120);
 
     enactDecision(state, countryId, decision, 5);
 
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 2000, 4);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 4);
     expect(state.government.countries[countryId].president.approval).toBeCloseTo(approvalBefore + 0.03, 6);
-    // The industry modifier is active for the decision's full duration.
+    // The 'add' effects applied instantly (protest relief) — no modifier.
     const active = state.government.countries[countryId].decisions.active;
-    const industryModifier = active.find((modifier) => modifier.target === 'sector.industry' && modifier.mode === 'mul');
-    expect(industryModifier).toBeDefined();
-    expect(industryModifier?.monthsLeft).toBe(24);
-    expect(industryModifier?.sourceId).toBe('industrial_subsidy');
+    expect(active.some((modifier) => modifier.sourceId === 'industrial_subsidy')).toBe(false);
     // Cooldown + history bookkeeping.
-    expect(state.government.countries[countryId].decisions.cooldowns['industrial_subsidy']).toBe(5 + 36);
+    expect(state.government.countries[countryId].decisions.cooldowns['industrial_subsidy']).toBe(5 + 24);
     expect(state.government.countries[countryId].decisions.history[0]).toEqual({ decisionId: 'industrial_subsidy', month: 5 });
     game.dispose();
   });
@@ -53,37 +50,38 @@ describe('DecisionEngine (data-driven presidential decisions)', () => {
     const state = game.gameState;
     enactDecision(state, countryId, decision, 0);
     expect(decisionBlockReason(state, countryId, decision, 1)).toBe('cooldown');
-    expect(decisionBlockReason(state, countryId, decision, 35)).toBe('cooldown');
-    expect(decisionBlockReason(state, countryId, decision, 36)).toBeNull();
+    expect(decisionBlockReason(state, countryId, decision, 23)).toBe('cooldown');
+    expect(decisionBlockReason(state, countryId, decision, 24)).toBeNull();
     game.dispose();
   });
 
-  it('readMetric applies mul modifiers (industry +5 % really reads +5 %)', () => {
+  it('readMetric applies mul modifiers (military +10 % really reads +10 %)', () => {
     const { game, countryId } = preparedGame(64);
-    const decision = game.gameData.decision('industrial_subsidy');
+    const decision = game.gameData.decision('increase_military_spending');
     const state = game.gameState;
-    const baseOutput = state.economy.macro[countryId].sectors.industry.output;
-    expect(activeMulFactor(state, countryId, 'sector.industry')).toBe(1);
-    expect(readMetric(state, countryId, 'sector.industry')).toBeCloseTo(baseOutput, 6);
+    expect(activeMulFactor(state, countryId, 'militaryPower')).toBe(1);
+    const basePower = readMetric(state, countryId, 'militaryPower');
+    expect(basePower).toBeGreaterThan(0);
 
     enactDecision(state, countryId, decision, 0);
-    expect(activeMulFactor(state, countryId, 'sector.industry')).toBeCloseTo(1.05, 10);
-    expect(readMetric(state, countryId, 'sector.industry')).toBeCloseTo(baseOutput * 1.05, 6);
+    expect(activeMulFactor(state, countryId, 'militaryPower')).toBeCloseTo(1.1, 10);
+    expect(readMetric(state, countryId, 'militaryPower')).toBeCloseTo(basePower * 1.1, 6);
     game.dispose();
   });
 
   it('modifiers age monthly and expire exactly at zero months left', () => {
     const { game, countryId } = preparedGame(65);
-    const decision = game.gameData.decision('industrial_subsidy');
+    // The military decision carries a 'mul' modifier → a real 12-month life.
+    const decision = game.gameData.decision('increase_military_spending');
     const state = game.gameState;
     enactDecision(state, countryId, decision, 0);
     const active = state.government.countries[countryId].decisions.active;
-    for (let month = 0; month < 23; month += 1) {
+    for (let month = 0; month < 11; month += 1) {
       tickDecisionModifiers(state, countryId);
     }
-    expect(active.some((modifier) => modifier.sourceId === 'industrial_subsidy')).toBe(true);
-    tickDecisionModifiers(state, countryId); // 24th decrement → expiry
-    expect(active.some((modifier) => modifier.sourceId === 'industrial_subsidy')).toBe(false);
+    expect(active.some((modifier) => modifier.sourceId === 'increase_military_spending')).toBe(true);
+    tickDecisionModifiers(state, countryId); // 12th decrement → expiry
+    expect(active.some((modifier) => modifier.sourceId === 'increase_military_spending')).toBe(false);
     game.dispose();
   });
 
@@ -94,6 +92,16 @@ describe('DecisionEngine (data-driven presidential decisions)', () => {
     expect(decisionBlockReason(state, countryId, decision, 0)).toBe('preconditions');
     state.government.countries[countryId].politics.protestPressure = 0.6;
     expect(decisionBlockReason(state, countryId, decision, 0)).toBeNull();
+    game.dispose();
+  });
+
+  it('the food-stock decision feeds the REAL stockpile (resource economy)', () => {
+    const { game, countryId } = preparedGame(67);
+    const decision = game.gameData.decision('agriculture_modernization');
+    const state = game.gameState;
+    const foodBefore = state.economy.resources[countryId]?.stock.food ?? 0;
+    enactDecision(state, countryId, decision, 0);
+    expect(state.economy.resources[countryId]!.stock.food).toBe(foodBefore + 400);
     game.dispose();
   });
 });

@@ -34,37 +34,32 @@ const pointSchema: FieldSchema = {
   fields: { x: { type: 'number' }, z: { type: 'number' } }
 };
 
-const sectorSchema: FieldSchema = {
+/**
+ * The light monthly finance ledger (spec §10): Tax + Customs + Exports
+ * against the derived budget spending. No GDP/debt/inflation fields.
+ */
+export const FINANCE_STATE_SCHEMA: FieldSchema = {
   type: 'object',
   fields: {
-    jobs: { type: 'number', min: 0 },
-    capacityJobs: { type: 'number', min: 0 },
-    productivity: positiveNumber,
-    output: { type: 'number', min: 0 }
+    lastTax: { type: 'number', min: 0 },
+    lastCustoms: { type: 'number', min: 0 },
+    lastExports: { type: 'number', min: 0 },
+    lastRevenue: { type: 'number', min: 0 },
+    lastSpending: { type: 'number', min: 0 },
+    lastBalance: { type: 'number' },
+    outputGrowth: { type: 'number', min: 0.1, max: 4 }
   }
 };
 
-export const MACRO_ECONOMY_SCHEMA: FieldSchema = {
+const constructionProjectSchema: FieldSchema = {
   type: 'object',
   fields: {
-    gdp: { type: 'number', min: 0 },
-    gdpGrowth: { type: 'number', min: -0.5, max: 0.5 },
-    inflation: { type: 'number', min: -0.2, max: 1 },
-    unemployment: { type: 'number', min: 0, max: 1 },
-    debt: { type: 'number', min: 0 },
-    sectors: { type: 'record', values: sectorSchema },
-    trade: {
-      type: 'object',
-      fields: {
-        exports: { type: 'number', min: 0 },
-        imports: { type: 'number', min: 0 },
-        balance: { type: 'number' }
-      }
-    },
-    lastRevenue: { type: 'number' },
-    lastSpending: { type: 'number' },
-    lastBalance: { type: 'number' },
-    gdpPreviousMonth: { type: 'number', min: 0 }
+    id: { type: 'string' },
+    typeId: { type: 'string' },
+    cityId: { type: 'string' },
+    startedMonth: { type: 'number', min: 0, integer: true },
+    progress: { type: 'number', min: 0, max: 1 },
+    paid: { type: 'record', values: { type: 'number', min: 0 } }
   }
 };
 
@@ -348,20 +343,55 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
           }
         },
         supply: { type: 'record', values: { type: 'number', min: 0, max: 1 } },
-        macro: { type: 'record', values: MACRO_ECONOMY_SCHEMA },
         resources: {
           type: 'record',
           values: {
             type: 'object',
             fields: {
+              stock: { type: 'record', values: { type: 'number', min: 0 } },
               production: { type: 'record', values: { type: 'number' } },
               consumption: { type: 'record', values: { type: 'number' } },
               imports: { type: 'record', values: { type: 'number', min: 0 } },
               exports: { type: 'record', values: { type: 'number', min: 0 } },
               suppliers: { type: 'record', values: { type: 'record', values: { type: 'number', min: 0 } } },
               unfilledShortage: { type: 'record', values: { type: 'number', min: 0 } },
+              emergencyImports: { type: 'record', values: { type: 'number', min: 0 } },
               importCost: { type: 'number', min: 0 },
               exportIncome: { type: 'number', min: 0 }
+            }
+          }
+        },
+        finance: { type: 'record', values: FINANCE_STATE_SCHEMA },
+        mines: { type: 'record', values: { type: 'number', min: 1, max: 10, integer: true } },
+        research: {
+          type: 'record',
+          values: {
+            type: 'object',
+            fields: {
+              mineLevels: { type: 'record', values: { type: 'number', min: 1, max: 10, integer: true } }
+            }
+          }
+        },
+        construction: {
+          type: 'record',
+          values: {
+            type: 'object',
+            fields: {
+              projects: { type: 'array', items: constructionProjectSchema }
+            }
+          }
+        },
+        plants: {
+          type: 'record',
+          values: {
+            type: 'record',
+            values: {
+              type: 'object',
+              fields: {
+                id: { type: 'string' },
+                typeId: { type: 'string' },
+                cityId: { type: 'string' }
+              }
             }
           }
         }
@@ -534,10 +564,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               economy: {
                 type: 'object',
                 fields: {
-                  gdp: positiveNumber,
-                  treasury: positiveNumber,
-                  income: positiveNumber,
-                  expenses: positiveNumber
+                  treasury: positiveNumber
                 }
               },
               resources: { type: 'record', values: positiveNumber },

@@ -10,6 +10,26 @@ export interface ResourceDef {
   readonly weight: number;
 }
 
+// ———————————————— resource-economy production factories (new model) ————————
+
+/**
+ * A BUILDABLE production factory (spec §4): costs resources to construct,
+ * then boosts ONE resource's monthly production forever and consumes a small
+ * upkeep amount of another resource (living demand → trade).
+ */
+export interface ProductionFactoryDef {
+  readonly id: string;
+  readonly name: string;
+  /** The resource whose monthly production this factory boosts. */
+  readonly boosts: string;
+  /** Monthly units added to the boosted resource while active. */
+  readonly output: number;
+  /** Construction cost in resources (paid month by month during building). */
+  readonly cost: Readonly<Record<string, number>>;
+  /** Monthly upkeep in resources (consumption while active). */
+  readonly upkeep: Readonly<Record<string, number>>;
+}
+
 /** Data-driven factory archetype (src/data/economy.json). */
 export interface FactoryTypeDef {
   readonly id: string;
@@ -45,8 +65,6 @@ export interface StrategicResourceDef {
 export interface ResourceConsumptionDef {
   /** Monthly units per 1M population (food, housing wood …). */
   readonly perMillionPopulation?: number;
-  /** Monthly units per 1B$ ANNUAL output of each sector. */
-  readonly perBillionOutput?: Readonly<Record<string, number>>;
   /** Monthly units per operational military unit (fuel, equipment wear). */
   readonly perMilitaryUnit?: number;
 }
@@ -100,12 +118,28 @@ export interface StrategicResourcesConfig {
   readonly productionScale: number;
   /** Import price multiplier over the base price (transport premium). */
   readonly importMarkup: number;
+  /** Customs (border trade) revenue as a fraction of the month's trade value. */
+  readonly customsRate: number;
   /** Tier pricing factors (supply side + demand side). */
   readonly priceTiers: PriceTiersConfig;
+  /** Mine level → production multiplier (1: 1.0, 2: 1.5, 3: 2.0 …). */
+  readonly mineLevels: { readonly multipliers: Readonly<Record<string, number>> };
+  /** Research: target mine level → unlock cost (M$). */
+  readonly research: { readonly levels: Readonly<Record<string, number>> };
+  /** Construction pacing: monthly progress fraction + concurrent-project cap. */
+  readonly construction: { readonly monthlyRate: number; readonly maxProjects: number };
+  /** Anti-famine safety buffer (spec §8.ز): months of consumption kept in reserve. */
+  readonly safetyBuffer: { readonly foodMonths: number };
+  /** The stockpile every country starts the campaign with (units per resource). */
+  readonly startingStock: Readonly<Record<string, number>>;
   /** Geography-driven minimum domestic production (spec §3). */
   readonly domesticBaseline: DomesticBaselineConfig;
   /** The strategic resources themselves (id, Persian name, price). */
   readonly resources: readonly StrategicResourceDef[];
   /** Per-resource consumption drivers. */
   readonly consumption: Readonly<Record<string, ResourceConsumptionDef>>;
+  /** Materials drawn from the stockpile per unit of equipment produced (§9). */
+  readonly militaryMaterials: Readonly<Record<string, number>>;
+  /** The buildable production factories (spec §4). */
+  readonly productionFactories: readonly ProductionFactoryDef[];
 }

@@ -2,7 +2,7 @@ import type { IdGeneratorState } from '../core/IdGenerator';
 import type { GameState } from '../state/GameState';
 
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = 13;
+export const SAVE_VERSION = 14;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */
@@ -24,6 +24,9 @@ export const SAVE_VERSION_RESOURCE_ECONOMY = 10;
 /** Version that merged Urban Areas + Roads into one toggle and made
  *  resource `suppliers` a per-resource list (multi-seller market). */
 export const SAVE_VERSION_URBAN_ROADS_MERGE = 11;
+/** Version that replaced the GDP/debt macro engine with the light resource
+ *  economy: stockpiles, mines, research, construction, finance. */
+export const SAVE_VERSION_RESOURCE_REDESIGN = 14;
 
 export interface SaveMeta {
   readonly version: number;

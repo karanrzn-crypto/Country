@@ -74,6 +74,54 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       fields: {
         productionScale: positiveNumber,
         importMarkup: positiveNumber,
+        customsRate: { type: 'number', min: 0, max: 1 },
+        mineLevels: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            multipliers: { type: 'record', values: { type: 'number', min: 0.1, max: 100 } }
+          }
+        },
+        research: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            levels: { type: 'record', values: { type: 'number', min: 0 } }
+          }
+        },
+        construction: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            monthlyRate: { type: 'number', min: 0.01, max: 1 },
+            maxProjects: { type: 'number', min: 1, max: 20, integer: true }
+          }
+        },
+        safetyBuffer: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            foodMonths: { type: 'number', min: 0, max: 24 }
+          }
+        },
+        startingStock: { type: 'record', values: { type: 'number', min: 0 } },
+        militaryMaterials: { type: 'record', values: { type: 'number', min: 0 } },
+        productionFactories: {
+          type: 'array',
+          minLength: 1,
+          items: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              id: idField,
+              name: nameField,
+              boosts: idField,
+              output: { type: 'number', min: 0 },
+              cost: { type: 'record', values: { type: 'number', min: 0 } },
+              upkeep: { type: 'record', values: { type: 'number', min: 0 } }
+            }
+          }
+        },
         priceTiers: {
           type: 'object',
           allowUnknown: false,
@@ -122,7 +170,6 @@ export const ECONOMY_SCHEMA: FieldSchema = {
             allowUnknown: false,
             fields: {
               perMillionPopulation: { type: 'optional', inner: { type: 'number', min: 0 } },
-              perBillionOutput: { type: 'optional', inner: { type: 'record', values: positiveNumber } },
               perMilitaryUnit: { type: 'optional', inner: { type: 'number', min: 0 } }
             }
           }

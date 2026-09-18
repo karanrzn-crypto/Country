@@ -4,15 +4,19 @@
  * ONE system owns the month cadence for every strategic country and
  * sequences the pure domain engines in a fixed, deterministic order:
  *
- *   0. global trade (ONE world-market pass per month, BEFORE any ledger:
- *      every country's production/consumption → global supply & demand →
- *      exporter↔importer matching → trade transactions)
- *   1. economy      (EconomySimulation.processMonthEconomy)
- *   2. public opinion (updateOpinionTopics → approval drift)
- *   3. decisions    (modifier expiry / cooldowns age with months)
- *   4. events       (expire overdue → maybe fire a new one)
- *   5. elections    (campaign start → effort accrual → election day)
- *   6. politics     (ministries, corruption, trust, protests, strikes,
+ *   0. global trade + stock step (ONE world pass per month, BEFORE any
+ *      ledger: production/consumption → world market → flows → the monthly
+ *      STOCK STEP → the food safety pass)
+ *   1. finance     (processMonthFinance — Tax + Customs + Exports, light)
+ *   1.5 budget & construction (urban development, military production with
+ *      real material draws, construction projects consuming the stockpile)
+ *   2. resource AI (non-player countries research mine levels and start
+ *      production factories — the whole world builds, spec §7/§8)
+ *   3. public opinion (updateOpinionTopics → approval drift)
+ *   4. decisions    (modifier expiry / cooldowns age with months)
+ *   5. events       (expire overdue → maybe fire a new one)
+ *   6. elections    (campaign start → effort accrual → election day)
+ *   7. politics     (ministries, corruption, trust, protests, strikes,
  *                    party support drift, presidential authority)
  *
  * Catch-up design: each government record stores `lastSimMonth`; fast time
@@ -27,13 +31,17 @@ import type { Random } from '../../utils/Random';
 import type { TickInfo } from '../../time/TimeSystem';
 import type { SimulationSystemDef } from '../SimulationEngine';
 import { absoluteMonthIndex } from '../../time/Calendar';
+import type { StrategicResourcesConfig } from '../../economy/types';
 import { recomputeResourceEconomies } from '../../economy/resources';
-import { processMonthEconomy } from '../../economy/EconomySimulation';
+import { processMonthFinance } from '../../economy/EconomySimulation';
+import { stepProjects, startProject } from '../../economy/construction';
+import { unlockMineLevel, unlockedMineLevelOf } from '../../economy/research';
 import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
 import { expireOverdueEvents, firePendingEvent, newEventInstanceId, rollEvents } from '../../government/EventEngine';
 import { accrueCampaignEffort, applyElectionOutcome, campaignPhaseActive, computeElectionOutcome, startCampaign } from '../../government/Elections';
 import { driftApproval, updateOpinionTopics } from '../../government/PublicOpinion';
+import { acuteShortageCountOf } from '../../government/Metrics';
 import { clamp01, protestLevelOf, type GovernmentCountryState } from '../../government/types';
 
 /** Chance a new event fires for a country in a given month. */
@@ -41,6 +49,14 @@ const EVENT_FIRE_CHANCE = 0.3;
 /** Strike pressure that triggers a general strike. */
 const GENERAL_STRIKE_THRESHOLD = 0.65;
 const GENERAL_STRIKE_MONTHS = 3;
+/** Monthly chance an AI country starts one production factory (when it can
+ *  actually pay the FULL resource cost — construction must never starve the
+ *  world's stockpiles, spec §8). */
+const AI_CONSTRUCTION_CHANCE = 0.08;
+/** Max concurrent AI projects (the player gets the config cap). */
+const AI_PROJECT_CAP = 1;
+/** Staggered research cadence: one attempt every RESEARCH_EVERY months. */
+const AI_RESEARCH_EVERY = 6;
 
 export class GovernmentSystem implements SimulationSystemDef {
   readonly id = 'government';
@@ -53,12 +69,10 @@ export class GovernmentSystem implements SimulationSystemDef {
 
     // Month-LOCKSTEP catch-up: every due country lives through month M
     // before anyone starts M+1. This is what lets the GLOBAL trade network
-    // run exactly ONCE per month (spec §13: a monthly economic cadence, not
-    // a per-frame or per-country recomputation):
+    // + stock step run exactly ONCE per month (a monthly economic cadence):
     //
-    //   world trade pass (all countries → global supply/demand → trades)
-    //     ↓
-    //   every due country's ledger bills its OWN flows for that month.
+    //   world pass (production/consumption → trades → stock step → food
+    //   safety)  ↓  every due country's finance/construction for that month.
     for (;;) {
       const due = countryIds.filter(
         (countryId) => state.government.countries[countryId].lastSimMonth < currentMonth
@@ -68,7 +82,8 @@ export class GovernmentSystem implements SimulationSystemDef {
         recomputeResourceEconomies(
           state,
           context.map,
-          context.data.economyData.strategicResources
+          context.data.economyData.strategicResources,
+          { applyStockStep: true }
         );
       }
       for (const countryId of due) {
@@ -87,27 +102,37 @@ export class GovernmentSystem implements SimulationSystemDef {
     month: number
   ): void {
     const { state, events, rng, ids, data } = context;
+    const config = data.economyData.strategicResources;
 
-    // —— 1. economy (treasury, GDP, sectors, debt, inflation, jobs) ——
+    // —— 1. finance (treasury: Tax + Customs + Exports − budget spending) ——
     // Bills the country's trade flows resolved by THIS month's world pass
-    // (the global trade network ran once, above, before any ledger).
-    processMonthEconomy(state, countryId, rng);
+    // (the global pass ran once, above, before any ledger).
+    processMonthFinance(state, countryId, config);
 
-    // —— 1.5 budget & tax effects (REAL state, spec §2/§3/§4) ——
-    // Economic budget grows urban development (construction speed); military
-    // budget produces equipment and expands the army. The pool is 100%, so
-    // moving the split visibly trades these two effects against each other.
+    // —— 1.5 budget & construction (REAL state, spec §2/§3/§4/§9) ——
+    // Economic budget grows urban development (construction speed) and
+    // speeds up building projects; military budget produces equipment by
+    // consuming iron/oil/coal/copper from the REAL stockpile.
     growUrbanDevelopment(state, countryId);
-    produceMilitary(state, countryId);
+    produceMilitary(state, countryId, config.militaryMaterials);
+    const built = stepProjects(state, countryId, config, month);
+    for (const project of built.completed) {
+      events.emit('economy.constructionCompleted', { countryId, projectId: project.id, typeId: project.typeId });
+    }
 
-    // —— 2. public opinion → presidential approval ——
+    // —— 2. resource AI: the whole world researches and builds (spec §7) ——
+    if (state.player.countryId !== countryId) {
+      this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind));
+    }
+
+    // —— 3. public opinion → presidential approval ——
     updateOpinionTopics(state, countryId);
     driftApproval(state, countryId, 0.25);
 
-    // —— 3. decisions: active modifiers age ——
+    // —— 4. decisions: active modifiers age ——
     tickDecisionModifiers(state, countryId);
 
-    // —— 4. events: expiry, then a weighted roll ——
+    // —— 5. events: expiry, then a weighted roll ——
     expireOverdueEvents(state, countryId, data.eventList, month);
     if (rng.chance(EVENT_FIRE_CHANCE)) {
       const fired = rollEvents(state, countryId, data.eventList, month, rng);
@@ -122,7 +147,7 @@ export class GovernmentSystem implements SimulationSystemDef {
       }
     }
 
-    // —— 5. elections ——
+    // —— 6. elections ——
     const elections = government.elections;
     if (campaignPhaseActive(elections.nextElectionMonth, month) && elections.phase === 'idle') {
       startCampaign(state, countryId);
@@ -141,7 +166,7 @@ export class GovernmentSystem implements SimulationSystemDef {
       });
     }
 
-    // —— 6. politics & administration ——
+    // —— 7. politics & administration ——
     this.processMinistries(government);
     this.processCorruptionAndTrust(government);
     this.processProtestsAndStrikes(state, countryId, government, month);
@@ -149,6 +174,67 @@ export class GovernmentSystem implements SimulationSystemDef {
     this.processPresidentialPowers(government);
 
     events.emit('government.monthProcessed', { countryId, month });
+  }
+
+  /**
+   * AI countries keep the WORLD economy alive (spec §7/§8): occasionally a
+   * non-player country starts a production factory (boosting its strongest
+   * resource) and, on a slow staggered cadence, unlocks the next mine
+   * research level it can afford. Deterministic through the campaign rng.
+   */
+  private processAiEconomy(
+    state: GameState,
+    countryId: string,
+    config: StrategicResourcesConfig,
+    month: number,
+    rng: Random,
+    newId: (kind: string) => string
+  ): void {
+    const record = state.economy.resources[countryId];
+    if (record === undefined) return;
+
+    // The country's strongest produced resource — the AI builds/researches
+    // around what its land actually gives it (no magic numbers).
+    let strongest: string | null = null;
+    let strongestOutput = 0;
+    for (const [resourceId, amount] of Object.entries(record.production)) {
+      if (amount > strongestOutput) {
+        strongestOutput = amount;
+        strongest = resourceId;
+      }
+    }
+    if (strongest === null) return;
+
+    // —— construction: occasionally start a factory for the strong resource,
+    // but ONLY when the stockpile covers the FULL cost (self-limiting AI
+    // demand keeps the world's resources available — spec §8) ——
+    const construction = state.economy.construction[countryId];
+    if (
+      construction !== undefined &&
+      construction.projects.length < AI_PROJECT_CAP &&
+      rng.chance(AI_CONSTRUCTION_CHANCE)
+    ) {
+      const def = config.productionFactories.find((candidate) => candidate.boosts === strongest);
+      const capital = state.countries.countries[countryId]?.capitalId ?? null;
+      const canPay =
+        def !== undefined &&
+        Object.entries(def.cost).every(
+          ([resourceId, cost]) => (record.stock[resourceId] ?? 0) >= cost
+        );
+      if (def !== undefined && canPay && capital !== null) {
+        startProject(state, countryId, config, def.id, capital, month, () => newId('plant'));
+      }
+    }
+
+    // —— research: a slow, staggered, affordable march up the mine levels ——
+    const stagger = [...countryId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AI_RESEARCH_EVERY;
+    if ((month + stagger) % AI_RESEARCH_EVERY === 0) {
+      const cost = config.research.levels[String(unlockedMineLevelOf(state, countryId, strongest) + 1)];
+      const treasury = state.economy.treasury[countryId] ?? 0;
+      if (cost !== undefined && treasury >= cost * 1.5) {
+        unlockMineLevel(state, countryId, config, strongest);
+      }
+    }
   }
 
   /** Ministry efficiency drifts toward a funding-dependent target. */
@@ -174,7 +260,7 @@ export class GovernmentSystem implements SimulationSystemDef {
     );
   }
 
-  /** Protest/strike pressure accumulates from misery and decays with calm. */
+  /** Protest/strike pressure accumulates from scarcity and decays with calm. */
   private processProtestsAndStrikes(
     state: GameState,
     countryId: string,
@@ -183,13 +269,13 @@ export class GovernmentSystem implements SimulationSystemDef {
   ): void {
     const politics = government.politics;
     const approval = government.president.approval;
-    const unemployment = state.economy.macro[countryId]?.unemployment ?? 0;
+    const shortages = acuteShortageCountOf(state, countryId);
 
     politics.protestPressure = clamp01(
       politics.protestPressure -
         approval * 0.018 +
         Math.max(0, -government.opinion.topics.economy) * 0.05 +
-        Math.max(0, unemployment - 0.08) * 0.4 +
+        shortages * 0.02 +
         politics.corruption * 0.012 -
         0.015
     );
@@ -200,7 +286,7 @@ export class GovernmentSystem implements SimulationSystemDef {
     }
 
     politics.strikePressure = clamp01(
-      politics.strikePressure + Math.max(0, unemployment - 0.1) * 0.5 - politics.strikePressure * 0.02 - 0.01
+      politics.strikePressure + shortages * 0.015 - politics.strikePressure * 0.02 - 0.01
     );
     if (politics.generalStrikeUntilMonth === null && politics.strikePressure >= GENERAL_STRIKE_THRESHOLD) {
       politics.generalStrikeUntilMonth = month + GENERAL_STRIKE_MONTHS;

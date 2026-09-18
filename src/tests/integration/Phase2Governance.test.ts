@@ -49,17 +49,18 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     game.setTimeMode('month');
     game.runTicks(150); // ≈ 10 months
     const government = game.gameState.government.countries[countryId];
-    const macro = game.gameState.economy.macro[countryId];
+    // The LIGHT finance ledger (spec §10): three revenue lines, no GDP.
+    const finance = game.gameState.economy.finance[countryId]!;
     expect(government.lastSimMonth).toBeGreaterThanOrEqual(9);
-    expect(macro.gdp).toBeGreaterThan(0);
-    expect(macro.unemployment).toBeGreaterThanOrEqual(0);
-    expect(macro.unemployment).toBeLessThanOrEqual(1);
-    expect(macro.inflation).toBeGreaterThanOrEqual(-0.2);
-    expect(macro.gdpGrowth).toBeGreaterThanOrEqual(-0.5);
-    expect(macro.gdpGrowth).toBeLessThanOrEqual(0.5);
-    expect(macro.lastRevenue).toBeGreaterThan(0);
-    expect(macro.lastSpending).toBeGreaterThan(0);
-    expect(macro.lastBalance).toBeCloseTo(macro.lastRevenue - macro.lastSpending, 3);
+    expect(finance.lastTax).toBeGreaterThan(0);
+    expect(finance.lastCustoms).toBeGreaterThanOrEqual(0);
+    expect(finance.lastExports).toBeGreaterThanOrEqual(0);
+    expect(finance.lastSpending).toBeGreaterThan(0);
+    expect(finance.lastBalance).toBeCloseTo(finance.lastRevenue - finance.lastSpending, 3);
+    // The resource economy produced real stockpiles the whole time.
+    const record = game.gameState.economy.resources[countryId]!;
+    expect(record.stock.food).toBeGreaterThanOrEqual(0);
+    expect(record.production.food).toBeGreaterThan(0);
     expect(government.president.approval).toBeGreaterThanOrEqual(0);
     expect(government.president.approval).toBeLessThanOrEqual(1);
     expect(government.president.termEndMonth).toBeGreaterThanOrEqual(government.lastSimMonth);
@@ -83,12 +84,12 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
 
     game.commandBus.send({ type: 'government.enactDecision', countryId, decisionId: 'industrial_subsidy' });
     game.commandBus.flush();
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 2000, 3);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 3);
     expect(state.government.countries[countryId].decisions.history[0]?.decisionId).toBe('industrial_subsidy');
     // Cooldown blocks the second attempt in the same month.
     game.commandBus.send({ type: 'government.enactDecision', countryId, decisionId: 'industrial_subsidy' });
     game.commandBus.flush();
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 2000, 3);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 3);
     expect(state.government.countries[countryId].decisions.history.length).toBe(1);
     // Unknown decision is a no-op.
     expect(game.governmentEnactDecision(countryId, 'not_a_decision')).toBe(false);
@@ -109,10 +110,13 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
       expiresMonth: state.government.countries[countryId].lastSimMonth + event.expireMonths
     });
     const treasuryBefore = state.economy.treasury[countryId];
+    const negotiateCost = event.choices.find((choice) => choice.id === 'negotiate')!.effects.find(
+      (effect) => effect.target === 'treasury'
+    )?.value ?? 0;
     game.commandBus.send({ type: 'government.resolveEvent', countryId, instanceId: 'gevent-000001', choiceId: 'negotiate' });
     game.commandBus.flush();
     expect(state.government.countries[countryId].events.pending.length).toBe(0);
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 800, 3);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore + negotiateCost, 3);
     game.dispose();
   });
 
@@ -160,9 +164,9 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     game2.init();
     game2.loadFromSlot('phase2-slot');
     const loadedGovernment = game2.gameState.government.countries[countryId];
-    const loadedMacro = game2.gameState.economy.macro[countryId];
+    const loadedFinance = game2.gameState.economy.finance[countryId];
     expect(loadedGovernment).toBeDefined();
-    expect(loadedMacro).toBeDefined();
+    expect(loadedFinance).toBeDefined();
     expect(game2.gameState.economy.treasury[countryId]).toBe(55_555);
     expect(loadedGovernment.decisions.history[0]?.decisionId).toBe('industrial_subsidy');
     expect(game2.gameState.cityAreas.network.areas[areaId].development).toBeCloseTo(0.87, 9);

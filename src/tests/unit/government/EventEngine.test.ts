@@ -20,13 +20,19 @@ function preparedGame(seed: number): { game: Game; countryId: string } {
 }
 
 describe('EventEngine (data-driven events with choices)', () => {
-  it('conditions gate eligibility (worker_strike needs unemployment ≥ 8 %)', () => {
+  it('conditions gate eligibility (worker_strike needs ≥ 2 acute shortages)', () => {
     const { game, countryId } = preparedGame(71);
     const event = game.gameData.event('worker_strike');
     const state = game.gameState;
-    state.economy.macro[countryId].unemployment = 0.02;
+    // Fewer than 2 acutely short resources → not eligible.
+    const record = state.economy.resources[countryId];
+    record!.unfilledShortage = {};
+    for (const resourceId of Object.keys(record!.consumption)) {
+      record!.production[resourceId] = (record!.production[resourceId] ?? 0) + (record!.consumption[resourceId] ?? 0) + 10;
+    }
     expect(isEventEligible(state, countryId, event, 0)).toBe(false);
-    state.economy.macro[countryId].unemployment = 0.2;
+    // Two resources acutely short (unfilled shortage) → eligible.
+    record!.unfilledShortage = { iron: 20, oil: 15 };
     expect(isEventEligible(state, countryId, event, 0)).toBe(true);
     game.dispose();
   });
@@ -35,7 +41,7 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(72);
     const event = game.gameData.event('bank_crisis'); // once: true
     const state = game.gameState;
-    state.economy.macro[countryId].inflation = 0.1;
+    state.economy.finance[countryId]!.lastBalance = -50;
     expect(isEventEligible(state, countryId, event, 0)).toBe(true);
     firePendingEvent(state, countryId, event, 0, newEventInstanceId(game.gameIds));
     expect(state.government.countries[countryId].events.fired).toContain('bank_crisis');
@@ -47,7 +53,7 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(73);
     const event = game.gameData.event('worker_strike');
     const state = game.gameState;
-    state.economy.macro[countryId].unemployment = 0.2;
+    state.economy.resources[countryId]!.unfilledShortage = { iron: 20, oil: 15 };
     firePendingEvent(state, countryId, event, 0, newEventInstanceId(game.gameIds));
     // Cooldown (12 months) blocks even after resolving.
     state.government.countries[countryId].events.pending.length = 0;
@@ -69,8 +75,8 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(74);
     const events = game.gameData.eventList;
     const state = game.gameState;
-    state.economy.macro[countryId].unemployment = 0.2;
-    state.economy.macro[countryId].inflation = 0.2;
+    state.economy.resources[countryId]!.unfilledShortage = { iron: 20, oil: 15 };
+    state.economy.finance[countryId]!.lastBalance = -50;
     const a = rollEvents(state, countryId, events, 0, new Random(123));
     const b = rollEvents(state, countryId, events, 0, new Random(123));
     expect(a?.id).toBe(b?.id);
@@ -91,7 +97,8 @@ describe('EventEngine (data-driven events with choices)', () => {
     const resolved = resolvePendingEvent(state, countryId, 'gevent-000001', 'negotiate', game.gameData.eventList);
     expect(resolved).toBe(true);
     expect(state.government.countries[countryId].events.pending.length).toBe(0);
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 800, 4);
+    const negotiateCost = negotiate!.effects.find((effect) => effect.target === 'treasury')?.value ?? 0;
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore + negotiateCost, 4);
     // Unknown instance/choice → false.
     expect(resolvePendingEvent(state, countryId, 'gevent-000001', 'negotiate', game.gameData.eventList)).toBe(false);
     expect(resolvePendingEvent(state, countryId, 'gevent-000002', 'negotiate', game.gameData.eventList)).toBe(false);

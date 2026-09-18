@@ -22,10 +22,12 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v11 → v12: GLOBAL trade network — policies/pins removed, supplier
  *   amounts, unfilledShortage
  * - v12 → v13: 100% budget pool (economic/military shares) + 4-level tax —
+ * - v13 → v14: the light resource economy — macro dies, finance/mines/
+ *   research/construction/plants appear, resources gain stock/emergencyImports,
  *   legacy taxRates stripped, shares derived from the saved spending mix
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v13)', () => {
+describe('save migrations (v1 → … → v14)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -68,8 +70,10 @@ describe('save migrations (v1 → … → v13)', () => {
     expect(Object.keys(government.countries).length).toBeGreaterThanOrEqual(10);
     expect(Object.keys(cityAreas.network.areas).length).toBeGreaterThan(0);
     expect(Object.keys(cityAreas.network.links).length).toBeGreaterThan(0);
-    const macro = (stateMap.economy as { macro: Record<string, unknown> }).macro;
-    expect(Object.keys(macro).length).toBeGreaterThanOrEqual(10);
+    const finance = (stateMap.economy as { finance: Record<string, unknown> }).finance;
+    expect(Object.keys(finance).length).toBeGreaterThanOrEqual(10);
+    // v13→v14: the macro engine is gone from migrated saves entirely.
+    expect((stateMap.economy as Record<string, unknown>).macro).toBeUndefined();
   });
 
   it('v2 → v3 injects only the country slice (map state untouched)', () => {
@@ -195,8 +199,11 @@ describe('save migrations (v1 → … → v13)', () => {
     // The empty record passes schema validation; the session heal recomputes
     // everything from the live map, so nothing else is injected here.
     expect(economy.resources).toEqual({});
-    // Pre-existing economy fields are untouched.
-    expect((economy.macro as Record<string, unknown>).country_0).toEqual({ gdp: 1 });
+    // The v13→v14 tail of the chain removed the macro engine; the light
+    // finance record container exists (per-country rows come from the heal,
+    // which runs with the live map model).
+    expect(economy.macro).toBeUndefined();
+    expect(economy.finance).toBeDefined();
   });
 
   it('pre-v11 saves without layers/suppliers gain the v12 trade record shape', () => {
@@ -208,7 +215,13 @@ describe('save migrations (v1 → … → v13)', () => {
     expect(version).toBe(SAVE_VERSION);
     const economy = (data as typeof v10).state.economy as Record<string, unknown>;
     expect(economy.resources).toEqual({
-      country_0: { production: { oil: 4 }, suppliers: {}, unfilledShortage: {} }
+      country_0: {
+        production: { oil: 4 },
+        suppliers: {},
+        unfilledShortage: {},
+        stock: {},
+        emergencyImports: {}
+      }
     });
   });
 
@@ -310,7 +323,7 @@ describe('save migrations (v1 → … → v13)', () => {
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
     const { data, version } = applyMigrations(v12, 12, SAVE_VERSION);
-    expect(version).toBe(13);
+    expect(version).toBe(SAVE_VERSION);
     const record = (data as typeof v12).state.government!.countries!.country_0 as Record<string, unknown>;
     const budget = record.budget as Record<string, unknown>;
     // The legacy rate record is GONE; the pool split + level are present.
@@ -327,6 +340,64 @@ describe('save migrations (v1 → … → v13)', () => {
       military: 0.018, healthcare: 0.02, education: 0.018,
       infrastructure: 0.016, welfare: 0.02, government: 0.024, other: 0.004
     });
+  });
+
+  it('v13→v14: the macro engine dies; finance/mines/research/construction/plants are born', () => {
+    const v13 = {
+      state: {
+        economy: {
+          treasury: { country_0: 500 },
+          macro: { country_0: { gdp: 42, debt: 7, inflation: 0.03 } },
+          resources: {
+            country_0: {
+              production: { iron: 40 },
+              consumption: { iron: 30 },
+              imports: {},
+              exports: {},
+              suppliers: {},
+              unfilledShortage: {},
+              importCost: 0,
+              exportIncome: 0
+            }
+          },
+          stockpiles: { republic: { food: 10 } },
+          factories: {}
+        },
+        countries: {
+          countries: {
+            country_0: {
+              economy: { gdp: 25, treasury: 500, income: 12, expenses: 10 }
+            }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v13, 13, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as typeof v13).state.economy as Record<string, unknown>;
+    // The GDP/debt/inflation engine is GONE.
+    expect(economy.macro).toBeUndefined();
+    // The new records exist (finance zeroed for countries; mines empty —
+    // level defaults are implicit).
+    const finance = economy.finance as Record<string, Record<string, unknown>>;
+    // No map model in this fixture → the zeroed per-country rows come from
+    // the load heal; here only the container must exist.
+    expect(finance).toEqual({});
+    expect(economy.mines).toEqual({});
+    expect(economy.research).toEqual({});
+    expect(economy.construction).toEqual({});
+    expect(economy.plants).toEqual({});
+    // Resource records gained stock + emergencyImports (the heal seeds stock).
+    const record = (economy.resources as Record<string, Record<string, unknown>>).country_0!;
+    expect(record.stock).toEqual({});
+    expect(record.emergencyImports).toEqual({});
+    expect(record.production).toEqual({ iron: 40 });
+    // The legacy demo-world fields survive untouched.
+    expect(economy.stockpiles).toEqual({ republic: { food: 10 } });
+    // The country profile's static gdp/income/expenses rows are gone.
+    const country = ((data as typeof v13).state.countries!.countries!.country_0) as Record<string, unknown>;
+    expect(country.economy).toEqual({ treasury: 500 });
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

@@ -36,7 +36,6 @@ import {
   type TaxLevel
 } from '../../government/types';
 import { OPINION_TOPICS } from '../../government/types';
-import { SECTORS } from '../../economy/macro';
 
 /** Static party template (src/data/government/parties.json). */
 export interface PartyTemplate {
@@ -339,10 +338,7 @@ export function governmentRecordIsComplete(record: GovernmentCountryState): bool
   );
 }
 
-/** Sector ids re-export for UI conveniences (avoids import duplication). */
-export { SECTORS };
-
-// ————————————————————————————————————————————————————— power distribution ——
+// ————————————————————————————————————————————————————— power distribution ———
 
 /** One party's slice of the political power pie (Politics panel, spec §5). */
 export interface PoliticalPowerEntry {

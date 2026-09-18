@@ -1,15 +1,15 @@
 {
   "economic_crisis": {
     "id": "economic_crisis",
-    "title": "بحران اقتصادی",
-    "description": "بازارهای اعتباری قفل می‌شوند و پیش‌بینی رشد فرو می‌ریزد. فعالان اقتصادی یک بستهٔ نجات می‌خواهند.",
+    "title": "بحران خزانه",
+    "description": "درآمد دولت از هزینه‌هایش عقب مانده است. مشاوران یک بستهٔ نجات مالی می‌خواهند.",
     "category": "economic",
     "weight": 10,
     "conditions": [
       {
-        "metric": "gdpGrowth",
+        "metric": "monthlyBalance",
         "op": "lt",
-        "value": 0.01
+        "value": 0
       }
     ],
     "cooldownMonths": 18,
@@ -23,12 +23,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -4000
-          },
-          {
-            "target": "gdpGrowth",
-            "mode": "add",
-            "value": 0.01
+            "value": -150
           },
           {
             "target": "approval",
@@ -39,13 +34,8 @@
       },
       {
         "id": "austerity",
-        "text": "خط را نگه دار — ریضت‌گری",
+        "text": "خط را نگه دار — ریاضت",
         "effects": [
-          {
-            "target": "gdpGrowth",
-            "mode": "add",
-            "value": -0.008
-          },
           {
             "target": "approval",
             "mode": "add",
@@ -63,14 +53,14 @@
   "worker_strike": {
     "id": "worker_strike",
     "title": "اعتصاب سراسری",
-    "description": "اتحادیه‌ها بر سر دستمزد و شرایط کار دست به اعتصاب می‌زنند. بنادر و کارخانه‌ها کند می‌شوند.",
+    "description": "با کمبود منابع، اتحادیه‌ها بر سر دستمزد و شرایط کار دست به اعتصاب می‌زنند. معادن و کارخانه‌ها کند می‌شوند.",
     "category": "social",
     "weight": 12,
     "conditions": [
       {
-        "metric": "unemployment",
+        "metric": "shortageResources",
         "op": "gte",
-        "value": 0.08
+        "value": 2
       }
     ],
     "cooldownMonths": 12,
@@ -84,7 +74,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -800
+            "value": -60
           },
           {
             "target": "strikePressure",
@@ -103,11 +93,6 @@
         "text": "امتناع از امتیازدهی",
         "effects": [
           {
-            "target": "sector.industry",
-            "mode": "add",
-            "value": -400
-          },
-          {
             "target": "strikePressure",
             "mode": "add",
             "value": 0.1
@@ -116,6 +101,11 @@
             "target": "protestPressure",
             "mode": "add",
             "value": 0.08
+          },
+          {
+            "target": "approval",
+            "mode": "add",
+            "value": -0.02
           }
         ]
       }
@@ -137,30 +127,20 @@
         "text": "جذب شوک با خزانه",
         "effects": [
           {
-            "target": "sector.energy",
+            "target": "treasury",
             "mode": "add",
-            "value": -600
-          },
-          {
-            "target": "sector.industry",
-            "mode": "add",
-            "value": 300
+            "value": -60
           }
         ]
       },
       {
         "id": "tax_windfall_cut",
-        "text": "کاهش مالیات انرژی برای کمک به تولیدکنندگان",
+        "text": "کاهش عوارض صادرات برای کمک به تولیدکنندگان",
         "effects": [
           {
             "target": "treasury",
             "mode": "add",
-            "value": -500
-          },
-          {
-            "target": "sector.energy",
-            "mode": "add",
-            "value": -200
+            "value": -40
           },
           {
             "target": "approval",
@@ -229,15 +209,15 @@
   },
   "industrial_boom": {
     "id": "industrial_boom",
-    "title": "شکوفایی صنعتی",
-    "description": "سفارش‌های خارجی سرازیر شده و کارخانه‌ها با تمام ظرفیت می‌چرخند.",
+    "title": "شکوفایی صادرات",
+    "description": "سفارش‌های خارجی سرازیر شده و معادن و کارخانه‌ها با تمام ظرفیت می‌چرخند.",
     "category": "economic",
     "weight": 8,
     "conditions": [
       {
-        "metric": "gdpGrowth",
+        "metric": "monthlyBalance",
         "op": "gt",
-        "value": 0.02
+        "value": 40
       }
     ],
     "cooldownMonths": 24,
@@ -249,35 +229,30 @@
         "text": "گذاشتن بازار آزاد",
         "effects": [
           {
-            "target": "sector.industry",
+            "target": "treasury",
             "mode": "add",
-            "value": 500
+            "value": 80
           },
           {
-            "target": "gdpGrowth",
+            "target": "approval",
             "mode": "add",
-            "value": 0.004
-          },
-          {
-            "target": "inflation",
-            "mode": "add",
-            "value": 0.008
+            "value": 0.02
           }
         ]
       },
       {
         "id": "cool_economy",
-        "text": "خنک‌سازی اقتصاد با ذخایر",
+        "text": "بازگشت درآمد اضافی به صندوق کشور",
         "effects": [
           {
             "target": "treasury",
             "mode": "add",
-            "value": 600
+            "value": 40
           },
           {
-            "target": "inflation",
+            "target": "publicTrust",
             "mode": "add",
-            "value": -0.004
+            "value": 0.02
           }
         ]
       }
@@ -285,15 +260,15 @@
   },
   "bank_crisis": {
     "id": "bank_crisis",
-    "title": "هراس بانکی",
-    "description": "شایعهٔ ورشکستگی، صف‌های سپرده‌گذاران می‌سازد. نظام بانکی نیازمند تزریق نقدینگی است.",
+    "title": "ورشکستگی بازرگانان",
+    "description": "شایعهٔ ورشکستگی کاروان‌های بزرگ بازرگانی، بازار را از اعتبار انداخته است. تجارت نیازمند تزریق پول است.",
     "category": "economic",
     "weight": 7,
     "conditions": [
       {
-        "metric": "inflation",
-        "op": "gt",
-        "value": 0.05
+        "metric": "monthlyBalance",
+        "op": "lt",
+        "value": -30
       }
     ],
     "cooldownMonths": 30,
@@ -302,12 +277,12 @@
     "choices": [
       {
         "id": "bailout",
-        "text": "نجات بانک",
+        "text": "نجات بازرگانان با خزانه",
         "effects": [
           {
             "target": "treasury",
             "mode": "add",
-            "value": -5000
+            "value": -200
           },
           {
             "target": "stability",
@@ -323,22 +298,17 @@
       },
       {
         "id": "let_fail",
-        "text": "گذاشتن بانک به سرنوشتش",
+        "text": "گذاشتن بازار به سرنوشتش",
         "effects": [
-          {
-            "target": "gdpGrowth",
-            "mode": "add",
-            "value": -0.012
-          },
-          {
-            "target": "unemployment",
-            "mode": "add",
-            "value": 0.015
-          },
           {
             "target": "publicTrust",
             "mode": "add",
             "value": -0.04
+          },
+          {
+            "target": "protestPressure",
+            "mode": "add",
+            "value": 0.12
           }
         ]
       }
@@ -347,14 +317,14 @@
   "food_shortage": {
     "id": "food_shortage",
     "title": "کمبود غذا",
-    "description": "برداشت ضعیف و اختلال در واردات، قفسه‌ها را خالی کرده است. نارضایتی عمومی در حال رشد است.",
+    "description": "انبار غذا کشور خالی شده است. نارضایتی عمومی در حال رشد است.",
     "category": "social",
     "weight": 9,
     "conditions": [
       {
-        "metric": "inflation",
-        "op": "gt",
-        "value": 0.03
+        "metric": "foodStock",
+        "op": "lt",
+        "value": 100
       }
     ],
     "cooldownMonths": 18,
@@ -368,7 +338,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -1200
+            "value": -80
           },
           {
             "target": "approval",
@@ -390,11 +360,6 @@
             "target": "protestPressure",
             "mode": "add",
             "value": 0.1
-          },
-          {
-            "target": "inflation",
-            "mode": "add",
-            "value": -0.01
           }
         ]
       }
@@ -402,15 +367,15 @@
   },
   "inflation_crisis": {
     "id": "inflation_crisis",
-    "title": "مارپیچ تورم",
-    "description": "قیمت‌ها ماهانه جهش می‌کنند و قدرت خرید خانوارها آب می‌رود.",
+    "title": "گرانی منابع",
+    "description": "قیمت منابع در بازار جهانی جهش کرده و خرید برای کشور گران شده است.",
     "category": "economic",
     "weight": 8,
     "conditions": [
       {
-        "metric": "inflation",
+        "metric": "shortageResources",
         "op": "gte",
-        "value": 0.08
+        "value": 3
       }
     ],
     "cooldownMonths": 20,
@@ -419,43 +384,33 @@
     "choices": [
       {
         "id": "tighten",
-        "text": "پشتیبانی از بانک مرکزی",
+        "text": "سهمیه‌بندی منابع",
         "effects": [
-          {
-            "target": "inflation",
-            "mode": "add",
-            "value": -0.03
-          },
-          {
-            "target": "gdpGrowth",
-            "mode": "add",
-            "value": -0.006
-          },
-          {
-            "target": "unemployment",
-            "mode": "add",
-            "value": 0.008
-          }
-        ]
-      },
-      {
-        "id": "print",
-        "text": "چاپ پول برای عبور از بحران",
-        "effects": [
-          {
-            "target": "inflation",
-            "mode": "add",
-            "value": 0.02
-          },
           {
             "target": "approval",
             "mode": "add",
             "value": -0.03
           },
           {
+            "target": "protestPressure",
+            "mode": "add",
+            "value": 0.08
+          }
+        ]
+      },
+      {
+        "id": "print",
+        "text": "خرید گسترده از بازار جهانی",
+        "effects": [
+          {
             "target": "treasury",
             "mode": "add",
-            "value": 800
+            "value": -150
+          },
+          {
+            "target": "approval",
+            "mode": "add",
+            "value": 0.02
           }
         ]
       }
@@ -520,9 +475,9 @@
     "weight": 7,
     "conditions": [
       {
-        "metric": "unemployment",
-        "op": "gte",
-        "value": 0.1
+        "metric": "publicTrust",
+        "op": "lt",
+        "value": 0.35
       }
     ],
     "cooldownMonths": 24,
@@ -536,17 +491,12 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -900
+            "value": -70
           },
           {
-            "target": "sector.technology",
+            "target": "approval",
             "mode": "add",
-            "value": 200
-          },
-          {
-            "target": "gdpGrowth",
-            "mode": "add",
-            "value": 0.002
+            "value": 0.02
           }
         ]
       },
@@ -554,11 +504,6 @@
         "id": "accept",
         "text": "پذیرش روند",
         "effects": [
-          {
-            "target": "sector.technology",
-            "mode": "add",
-            "value": -300
-          },
           {
             "target": "publicTrust",
             "mode": "add",

@@ -96,13 +96,16 @@ describe('PresidentStatusPanel (quick overview)', () => {
     expect(textOf(identity)).toContain(context.state.government.countries[countryId].president.name);
     expect(textOf(identity)).toContain(context.state.countries.countries[countryId].name);
 
-    // Economy rows read the REAL macro state (no invented UI numbers).
-    const macro = context.state.economy.macro[countryId];
+    // Economy rows read the REAL finance state (no invented UI numbers).
+    const finance = context.state.economy.finance[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     const economyText = sectionText('اقتصاد');
     expect(economyText).toContain('خزانه');
     expect(economyText).toContain(Math.round(treasury).toLocaleString('en-US'));
-    expect(economyText).toContain(Math.round(macro.gdp).toLocaleString('en-US'));
+    expect(finance).toBeDefined();
+    expect(economyText).toContain('مالیات');
+    expect(economyText).toContain('گمرک');
+    expect(economyText).toContain('صادرات');
 
     // Military: strength cache + war count (0 in a fresh world).
     const militaryText = sectionText('نظامی');
@@ -243,8 +246,6 @@ describe('PresidentStatusPanel (quick overview)', () => {
     // Force three problems at once.
     context.state.economy.treasury[countryId] = -100;
     government.politics.protests = 'massive';
-    const macro = context.state.economy.macro[countryId];
-    if (macro !== undefined) macro.unemployment = 0.2;
     panel.refresh();
     const alertRows = findAll(adapter.rootElement, 'psp-alert');
     expect(alertRows.length).toBeLessThanOrEqual(3);
@@ -254,7 +255,6 @@ describe('PresidentStatusPanel (quick overview)', () => {
     // Calm again → the 'All quiet' state.
     context.state.economy.treasury[countryId] = 1_000;
     government.politics.protests = 'none';
-    if (macro !== undefined) macro.unemployment = 0.05;
     // The resource economy must be genuinely calm too — clear consumption so
     // no strategic resource counts as short (production stays ≥ consumption).
     const resources = context.state.economy.resources[countryId];

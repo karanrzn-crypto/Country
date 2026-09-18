@@ -16,10 +16,8 @@ import { buildCountrySlice } from './slices/countrySlice';
 import { buildGovernmentSlice } from './slices/governmentSlice';
 import { repairBudgetRecord } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
-import { createMacroEconomy } from '../economy/EconomySimulation';
 import { recomputeResourceEconomies } from '../economy/resources';
-import { emptyCountryResourceState } from '../economy/resourceTypes';
-import type { MacroEconomyState } from '../economy/macro';
+import { emptyCountryResourceState, emptyCountryFinanceState, emptyResourceResearchState, emptyCountryConstructionState } from '../economy/resourceTypes';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { GameState } from './GameState';
 import type { EconomySlice } from './slices/economySlice';
@@ -65,8 +63,12 @@ export function createInitialState(
       ])
     ),
     supply: Object.fromEntries(Object.keys(world.regions).map((regionId) => [regionId, 1])),
-    macro: {} as Record<string, MacroEconomyState>,
-    resources: {} as EconomySlice['resources']
+    resources: {} as EconomySlice['resources'],
+    finance: {} as EconomySlice['finance'],
+    mines: {} as EconomySlice['mines'],
+    research: {} as EconomySlice['research'],
+    construction: {} as EconomySlice['construction'],
+    plants: {} as EconomySlice['plants']
   };
 
   // —— military ——
@@ -164,7 +166,10 @@ export function createInitialState(
       // Treasury: prefer the declared profile value (data-driven start).
       const profile = state.countries.countries[countryId];
       economy.treasury[countryId] = profile?.economy.treasury ?? config.economy.startingTreasury;
-      economy.macro[countryId] = createMacroEconomy(profile?.population ?? 1_500_000);
+      economy.finance[countryId] = emptyCountryFinanceState();
+      economy.research[countryId] = emptyResourceResearchState();
+      economy.construction[countryId] = emptyCountryConstructionState();
+      economy.plants[countryId] = {};
     }
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
@@ -175,7 +180,8 @@ export function createInitialState(
     );
     state.cityAreas = createCityAreasSlice(mapModel, config.map.columns);
     // Strategic resource economy: computed from the live map + state
-    // (deposit attribution, consumption drivers, world market).
+    // (deposit attribution, consumption drivers, world market). The pass
+    // SEEDS every country's stockpile from the config buffer (no step).
     recomputeResourceEconomies(state, mapModel, data.economyData.strategicResources);
   }
 
@@ -210,8 +216,17 @@ export function healPhase2State(
       // coerces an unknown tax level (idempotent for healthy records).
       repairBudgetRecord(state.government.countries[countryId]);
     }
-    if (state.economy.macro[countryId] === undefined) {
-      state.economy.macro[countryId] = createMacroEconomy(state.countries.countries[countryId]?.population ?? 1_500_000);
+    if (state.economy.finance[countryId] === undefined) {
+      state.economy.finance[countryId] = emptyCountryFinanceState();
+    }
+    if (state.economy.research[countryId] === undefined) {
+      state.economy.research[countryId] = emptyResourceResearchState();
+    }
+    if (state.economy.construction[countryId] === undefined) {
+      state.economy.construction[countryId] = emptyCountryConstructionState();
+    }
+    if (state.economy.plants[countryId] === undefined) {
+      state.economy.plants[countryId] = {};
     }
     if (state.economy.treasury[countryId] === undefined) {
       state.economy.treasury[countryId] = state.countries.countries[countryId]?.economy.treasury ?? 500;
@@ -221,14 +236,23 @@ export function healPhase2State(
     }
   }
 
-  // Drop government/macro records for countries the live model no longer has
-  // (map config changed across versions) — they would be dead weight.
+  // Drop government/finance records for countries the live model no longer
+  // has (map config changed across versions) — they would be dead weight.
   const liveIds = new Set<string>(mapModel.countryOrder);
   for (const countryId of Object.keys(state.government.countries)) {
     if (!liveIds.has(countryId)) delete state.government.countries[countryId];
   }
-  for (const countryId of Object.keys(state.economy.macro)) {
-    if (!liveIds.has(countryId)) delete state.economy.macro[countryId];
+  for (const countryId of Object.keys(state.economy.finance)) {
+    if (!liveIds.has(countryId)) delete state.economy.finance[countryId];
+  }
+  for (const countryId of Object.keys(state.economy.research)) {
+    if (!liveIds.has(countryId)) delete state.economy.research[countryId];
+  }
+  for (const countryId of Object.keys(state.economy.construction)) {
+    if (!liveIds.has(countryId)) delete state.economy.construction[countryId];
+  }
+  for (const countryId of Object.keys(state.economy.plants)) {
+    if (!liveIds.has(countryId)) delete state.economy.plants[countryId];
   }
 
   syncCityAreasSlice(state.cityAreas, mapModel, columns);

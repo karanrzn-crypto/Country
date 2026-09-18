@@ -2,17 +2,18 @@
  * Public opinion (Phase 2) — topic sentiment and presidential approval.
  *
  * Opinion is COMPUTED from state each month, never accumulated blindly:
- * economy (unemployment/inflation/growth), the TAX LEVEL's buff, services
- * (funded by the economic budget), corruption and security each contribute
- * a sentiment; presidential approval drifts toward the weighted blend
- * (partial adjustment — perception lags reality). Future demographic groups
- * extend this module without touching the systems that read `approval`.
+ * economy (the REAL resource situation — acute shortages and empty
+ * stockpiles hurt), the TAX LEVEL's buff, services (funded by the economic
+ * budget), corruption and security each contribute a sentiment;
+ * presidential approval drifts toward the weighted blend (partial
+ * adjustment — perception lags reality). Future demographic groups extend
+ * this module without touching the systems that read `approval`.
  */
 
 import type { GameState } from '../state/GameState';
 import type { OpinionTopic } from './types';
 import { clamp01, clampSigned, OPINION_TOPICS, TAX_LEVEL_SPECS } from './types';
-import { readMetric } from './Metrics';
+import { acuteShortageCountOf } from './Metrics';
 
 /** Topic weights of the aggregate approval blend (Σ = 1). */
 export const TOPIC_WEIGHTS: Readonly<Record<OpinionTopic, number>> = {
@@ -23,8 +24,6 @@ export const TOPIC_WEIGHTS: Readonly<Record<OpinionTopic, number>> = {
   security: 0.1
 };
 
-export const NATURAL_UNEMPLOYMENT = 0.055;
-export const COMFORTABLE_INFLATION = 0.024;
 /**
  * Service funding (healthcare+education+welfare money, share of GDP) where
  * the services sentiment is neutral. Matches the services portion of the
@@ -41,11 +40,8 @@ export function updateOpinionTopics(state: GameState, countryId: string): void {
   const government = state.government.countries[countryId];
   if (government === undefined) return;
 
-  const unemployment = readMetric(state, countryId, 'unemployment');
-  const inflation = readMetric(state, countryId, 'inflation');
-  const growth = readMetric(state, countryId, 'gdpGrowth');
-  const corruption = readMetric(state, countryId, 'corruption');
-  const stability = readMetric(state, countryId, 'stability');
+  const corruption = readCorruption(state, countryId);
+  const stability = readStability(state, countryId);
 
   const budget = government.budget;
   // Taxes: the ONE tax level's buff (LOW positive, MEDIUM neutral,
@@ -54,11 +50,12 @@ export function updateOpinionTopics(state: GameState, countryId: string): void {
   const serviceFunding = budget.spendingShares.healthcare + budget.spendingShares.education + budget.spendingShares.welfare;
   const securityFunding = budget.spendingShares.military;
 
+  // Economy: the REAL resource situation — every acutely short resource
+  // (empty stockpile + uncovered deficit, or an unfilled world shortage)
+  // hurts; a fully supplied country is content.
+  const shortages = acuteShortageCountOf(state, countryId);
   const topics = government.opinion.topics;
-  // Economy: unemployment and inflation hurt; growth helps.
-  topics.economy = clampSigned(
-    (growth - 0.02) * 6 - Math.max(0, unemployment - NATURAL_UNEMPLOYMENT) * 3.2 - Math.max(0, inflation - COMFORTABLE_INFLATION) * 4
-  );
+  topics.economy = clampSigned(0.3 - shortages * 0.14);
   // Taxes: the level's buff, directly.
   topics.taxes = clampSigned(taxSentiment);
   // Services: economic-budget-funded services relative to the neutral level.
@@ -67,6 +64,14 @@ export function updateOpinionTopics(state: GameState, countryId: string): void {
   topics.corruption = clampSigned(0.25 - corruption * 2.2 - Math.max(0, 0.5 - stability) * 0.8);
   // Security: military funding + stability.
   topics.security = clampSigned((securityFunding - 0.06) * 4 + (stability - 0.5) * 1.2);
+}
+
+function readCorruption(state: GameState, countryId: string): number {
+  return state.government.countries[countryId]?.politics.corruption ?? 0;
+}
+
+function readStability(state: GameState, countryId: string): number {
+  return state.political.countries[countryId]?.stability ?? 0;
 }
 
 /** Weighted approval target implied by the current topics (0..1). */

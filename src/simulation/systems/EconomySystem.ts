@@ -44,7 +44,11 @@ export class EconomySystem implements SimulationSystemDef {
     }
 
     // —— treasury: taxes & upkeep ——
+    // LEGACY demo-world factions only: the strategic countries' treasuries
+    // are owned by the monthly resource-economy ledger (processMonthFinance)
+    // — this loop must never touch them.
     for (const countryId of Object.keys(economy.treasury)) {
+      if (state.government.countries[countryId] !== undefined) continue;
       const regions = regionsOfCountry(state.world, countryId).map((region) => region.id);
       const population = totalPopulationOfRegions(state.population.regions, regions);
       const income = (population / 1000) * config.economy.taxPerThousandCitizensPerDay * dayFraction;

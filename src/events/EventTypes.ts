@@ -193,6 +193,19 @@ export interface GameEventMap {
   'government.ministryFundingChanged': { readonly countryId: string; readonly ministryId: string; readonly value: number };
   'government.campaignStarted': { readonly countryId: string; readonly electionMonth: number };
   'government.electionHeld': { readonly countryId: string; readonly winnerId: string; readonly incumbentReelected: boolean };
+
+  // —— resource economy (Phase 3 — spec §5/§11/§12/§15) ——
+  'economy.resourceBought': {
+    readonly buyerId: string;
+    readonly sellerId: string;
+    readonly resourceId: string;
+    readonly amount: number;
+    readonly cost: number;
+  };
+  'economy.constructionStarted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
+  'economy.constructionCompleted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
+  'economy.researchUnlocked': { readonly countryId: string; readonly resourceId: string; readonly level: number };
+  'economy.mineUpgraded': { readonly countryId: string; readonly depositId: string; readonly level: number };
 }
 
 export type GameEventName = keyof GameEventMap;

@@ -104,10 +104,8 @@ describe('country data foundation (Part 2)', () => {
     const slice = build();
     for (const state of Object.values(slice.countries)) {
       expect(state.population).toBeGreaterThan(0);
-      expect(state.economy.gdp).toBeGreaterThan(0);
-      expect(state.economy.treasury).toBeGreaterThanOrEqual(0);
-      expect(state.economy.income).toBeGreaterThanOrEqual(0);
-      expect(state.economy.expenses).toBeGreaterThanOrEqual(0);
+      // The light economy record (spec §10): only the seed treasury.
+      expect(state.economy.treasury).toBeGreaterThan(0);
       for (const amount of Object.values(state.resources)) expect(amount).toBeGreaterThanOrEqual(0);
       expect(state.military.manpower).toBeGreaterThanOrEqual(0);
       expect(state.military.armySize).toBeGreaterThanOrEqual(state.military.manpower * 0); // structural sanity
