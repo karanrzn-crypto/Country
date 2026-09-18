@@ -201,6 +201,8 @@ export interface GameEventMap {
     readonly resourceId: string;
     readonly amount: number;
     readonly cost: number;
+    /** Waiting projects whose escrow the purchase completed (0 = none). */
+    readonly fundedProjects: number;
   };
   'economy.constructionStarted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
   'economy.constructionCompleted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };

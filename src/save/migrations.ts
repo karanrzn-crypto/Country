@@ -512,6 +512,49 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    from: 14,
+    to: 15,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v14\u2192v15: save payload is not an object');
+      }
+      // Construction became a ONE-TIME cost with RESERVED resources and the
+      // waiting/building states (spec \u00a75/\u00a76): each project's monthly-paid
+      // `paid` ledger becomes the `secured` escrow; a fully-paid project
+      // flips to `building` (it still has its build time ahead of it), a
+      // partially-paid one stays `waiting`.
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: { construction?: Record<string, { projects?: Record<string, unknown>[] }> } };
+      };
+      const construction = clone.state?.economy?.construction;
+      if (construction !== undefined) {
+        for (const countryRecord of Object.values(construction)) {
+          const projects = countryRecord?.['projects'];
+          if (!Array.isArray(projects)) continue;
+          for (const project of projects) {
+            if (project === null || typeof project !== 'object') continue;
+            const record = project as Record<string, unknown>;
+            const paid = (record['paid'] ?? {}) as Record<string, number>;
+            const secured: Record<string, number> = {};
+            for (const [resourceId, amount] of Object.entries(paid)) {
+              const units = typeof amount === 'number' && Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+              secured[resourceId] = units;
+            }
+            // Costs come from the config via the typeId — the migration has
+            // no config access, so fully-paid is judged by the OLD progress
+            // value (Σ paid / Σ cost, exactly 1 for a fully-paid project).
+            const progress = typeof record['progress'] === 'number' ? record['progress'] : 0;
+            record['secured'] = secured;
+            record['status'] = progress >= 1 ? 'building' : 'waiting';
+            if (progress >= 1) record['progress'] = 0; // build time starts now
+            delete record['paid'];
+          }
+        }
+      }
+      return clone;
+    }
   }
 ];
 

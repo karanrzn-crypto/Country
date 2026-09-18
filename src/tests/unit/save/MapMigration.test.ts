@@ -25,9 +25,11 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  * - v13 → v14: the light resource economy — macro dies, finance/mines/
  *   research/construction/plants appear, resources gain stock/emergencyImports,
  *   legacy taxRates stripped, shares derived from the saved spending mix
+ * - v14 → v15: construction escrow — `paid` becomes `secured`, projects gain
+ *   the waiting/building states (one-time costs, spec §5/§6)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v14)', () => {
+describe('save migrations (v1 → … → v15)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -398,6 +400,56 @@ describe('save migrations (v1 → … → v14)', () => {
     // The country profile's static gdp/income/expenses rows are gone.
     const country = ((data as typeof v13).state.countries!.countries!.country_0) as Record<string, unknown>;
     expect(country.economy).toEqual({ treasury: 500 });
+  });
+
+  it('v14→v15: construction projects gain the escrow (paid→secured, waiting/building)', () => {
+    const v14 = {
+      state: {
+        economy: {
+          treasury: { country_0: 500 },
+          resources: {},
+          construction: {
+            country_0: {
+              projects: [
+                {
+                  id: 'p1',
+                  typeId: 'iron_works',
+                  cityId: 'city_0',
+                  startedMonth: 3,
+                  progress: 1,
+                  paid: { iron: 1000, coal: 400 }
+                },
+                {
+                  id: 'p2',
+                  typeId: 'oil_refinery',
+                  cityId: 'city_0',
+                  startedMonth: 5,
+                  progress: 0.35,
+                  paid: { iron: 280, oil: 0 }
+                }
+              ]
+            }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v14, 14, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, Record<string, { projects: Record<string, unknown>[] }>> } }).state.economy;
+    const projects = economy.construction.country_0!.projects;
+    // The fully-paid project becomes BUILDING with a full escrow (its build
+    // time starts fresh).
+    const fullyPaid = projects[0]!;
+    expect(fullyPaid['secured']).toEqual({ iron: 1000, coal: 400 });
+    expect(fullyPaid['status']).toBe('building');
+    expect(fullyPaid['progress']).toBe(0);
+    expect(fullyPaid['paid']).toBeUndefined();
+    // The partially-paid project stays WAITING with its escrow kept.
+    const partial = projects[1]!;
+    expect(partial['secured']).toEqual({ iron: 280, oil: 0 });
+    expect(partial['status']).toBe('waiting');
+    expect(partial['paid']).toBeUndefined();
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

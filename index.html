@@ -296,6 +296,20 @@
       .pd-construction, .pd-purchases, .pd-research-list {
         display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
       }
+      /* On-demand resource MARKET (spec §18): hidden until opened; the buy
+         entries on cards/projects reuse the shared button styling. */
+      .pd-resource-buy, .pd-project-buy {
+        border: 1px solid #4a5f88; background: #243149; color: #e8edf5;
+        border-radius: 4px; padding: 3px 10px; cursor: pointer; font-weight: 700;
+        align-self: flex-start; font-size: 12px;
+      }
+      .pd-resource-buy:hover, .pd-project-buy:hover { background: #2c3c5e; }
+      .pd-market-close {
+        border: 1px solid #4a3038; background: transparent; color: #e8b4a0;
+        border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 700;
+        align-self: flex-start;
+      }
+      .pd-market-close:hover { background: #2c2330; }
       .pd-resource-chip {
         font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 8px;
         border: 1px solid #22304a; color: #cfd8e6;

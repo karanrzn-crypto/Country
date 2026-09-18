@@ -124,10 +124,23 @@ export function emptyResourceResearchState(): ResourceResearchState {
 // ——————————————————————————————— construction ————————————————————————————————
 
 /**
- * One construction project (spec §4): consumes its resource cost MONTH BY
- * MONTH from the real stockpile. A project without resources simply stalls
- * (progress freezes) — the player sees Required/Owned/Missing and buys the
- * gap on the market, then the work continues (spec §17's cycle).
+ * The TWO construction states (spec §6): a project waits until its FULL
+ * resource cost is SECURED, then builds by TIME alone.
+ */
+export type ConstructionStatus = 'waiting' | 'building';
+
+/**
+ * One construction project (spec §4/§5/§6):
+ *
+ *  - STARTING is free; the project begins in `waiting`.
+ *  - The cost is SECURED ONCE: units physically move out of the country's
+ *    FREE stockpile into this project's `secured` escrow (spec §5 — the
+ *    reservation another project can never spend). One source of truth:
+ *    stock = free units, secured = reserved units.
+ *  - When every cost line is fully secured the project flips to `building`
+ *    and ONLY construction time (scaled by the economic budget) finishes
+ *    it — resources are never consumed again month by month (spec §6:
+ *    the cost is a ONE-TIME cost).
  */
 export interface ConstructionProject {
   readonly id: string;
@@ -137,10 +150,15 @@ export interface ConstructionProject {
   readonly cityId: string;
   /** Absolute month the project started. */
   readonly startedMonth: number;
-  /** 0..1 — Σ paid / Σ cost (derived from `paid`, kept for cheap reads). */
+  status: ConstructionStatus;
+  /**
+   * 0..1 — for `building` projects the elapsed build time (time-based,
+   * budget-scaled); for `waiting` projects the secured fraction of the
+   * cost (informational).
+   */
   progress: number;
-  /** resourceId → units already paid into this project. */
-  paid: Record<string, number>;
+  /** resourceId → units already SECURED (reserved escrow) for this project. */
+  secured: Record<string, number>;
 }
 
 export interface CountryConstructionState {

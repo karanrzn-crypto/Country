@@ -26,13 +26,15 @@
  *   Final balances + Unfilled Shortage (when global supply < global demand)
  *
  * Matching rules (deterministic, order-independent):
- *  - sellers: LARGEST surplus first (tie → country id);
+ *  - sellers: LARGEST OFFERED surplus first (tie → country id);
  *  - buyers:  LARGEST shortage first (tie → country id) — the most urgent
  *    demand is served first when the world cannot cover everyone;
  *  - a seller's pool decrements as it sells (supply is never sold twice);
- *  - a country NEVER sells what it needs itself (only the true surplus is
- *    on the market) and NEVER buys what it produces (only the true shortage
- *    is bid).
+ *  - a country NEVER sells what it needs itself: the caller passes each
+ *    country's real export OFFER — the net surplus CAPPED by the free
+ *    stockpile above its safety reserve (spec §10/§11: a +1/month net flow
+ *    with an empty warehouse is NOT an exporter, and exports only leave the
+ *    free stock — never the domestic reserve, never construction escrow).
  *
  * The market price tier comes from the GLOBAL supply/demand ratio
  * (market.marketTierFromSupplyDemand): abundant → cheap, scarce → expensive.
@@ -74,12 +76,18 @@ export interface ResourceTradeResult {
  * Resolves the world trade of ONE resource over ALL countries.
  * `countryIds` fixes the deterministic iteration base; all tie-breaks fall
  * back to country id so the result is independent of caller ordering.
+ *
+ * `offers` — OPTIONAL per-country export offers (the REAL free-stock-capped
+ * surplus, derived by the caller's single recompute pass). Absent entries
+ * fall back to the raw net surplus (max(P−C, 0)) — the shape the pure
+ * matcher tests use.
  */
 export function resolveWorldTradeForResource(
   countryIds: readonly string[],
   production: Readonly<Record<string, Readonly<Record<string, number>>>>,
   consumption: Readonly<Record<string, Readonly<Record<string, number>>>>,
-  resourceId: string
+  resourceId: string,
+  offers?: Readonly<Record<string, number>>
 ): ResourceTradeResult {
   // —— stages 1–3: domestic balances (production first, consumption second) ——
   const surplusOf: Record<string, number> = {};
@@ -91,9 +99,12 @@ export function resolveWorldTradeForResource(
     const consumed = consumption[countryId]?.[resourceId] ?? 0;
     const surplus = Math.max(0, produced - consumed);
     const shortage = Math.max(0, consumed - produced);
-    surplusOf[countryId] = surplus;
+    // The OFFER is what the country can actually spare from its free stock
+    // above its safety reserve (spec §10/§11) — never the raw net flow.
+    const offered = Math.max(0, Math.floor(offers?.[countryId] ?? surplus));
+    surplusOf[countryId] = offered;
     shortageOf[countryId] = shortage;
-    globalSupply += surplus;
+    globalSupply += offered;
     globalDemand += shortage;
   }
 

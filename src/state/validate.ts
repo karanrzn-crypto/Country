@@ -58,8 +58,9 @@ const constructionProjectSchema: FieldSchema = {
     typeId: { type: 'string' },
     cityId: { type: 'string' },
     startedMonth: { type: 'number', min: 0, integer: true },
+    status: { type: 'enum', values: ['waiting', 'building'] },
     progress: { type: 'number', min: 0, max: 1 },
-    paid: { type: 'record', values: { type: 'number', min: 0 } }
+    secured: { type: 'record', values: { type: 'number', min: 0 } }
   }
 };
 

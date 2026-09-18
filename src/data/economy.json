@@ -57,11 +57,15 @@
       "levels": { "2": 150, "3": 450 }
     },
     "construction": {
-      "monthlyRate": 0.25,
       "maxProjects": 3
     },
     "safetyBuffer": {
-      "foodMonths": 3
+      "foodMonths": 3,
+      "reserveMonths": 1
+    },
+    "displayStatus": {
+      "surplusBufferMonths": 2,
+      "minSurplusShare": 0.1
     },
     "startingStock": {
       "oil": 250,
@@ -135,7 +139,8 @@
         "boosts": "iron",
         "output": 120,
         "cost": { "iron": 1000, "coal": 400 },
-        "upkeep": { "coal": 30 }
+        "upkeep": { "coal": 30 },
+        "buildMonths": 8
       },
       {
         "id": "oil_refinery",
@@ -143,7 +148,8 @@
         "boosts": "oil",
         "output": 120,
         "cost": { "iron": 800, "oil": 300 },
-        "upkeep": { "iron": 20 }
+        "upkeep": { "iron": 20 },
+        "buildMonths": 7
       },
       {
         "id": "coal_plant",
@@ -151,7 +157,8 @@
         "boosts": "coal",
         "output": 120,
         "cost": { "iron": 700, "wood": 300 },
-        "upkeep": { "wood": 25 }
+        "upkeep": { "wood": 25 },
+        "buildMonths": 6
       },
       {
         "id": "copper_foundry",
@@ -159,7 +166,8 @@
         "boosts": "copper",
         "output": 100,
         "cost": { "iron": 900, "coal": 300 },
-        "upkeep": { "coal": 25 }
+        "upkeep": { "coal": 25 },
+        "buildMonths": 8
       },
       {
         "id": "food_plant",
@@ -167,7 +175,8 @@
         "boosts": "food",
         "output": 180,
         "cost": { "iron": 500, "wood": 400 },
-        "upkeep": { "iron": 15 }
+        "upkeep": { "iron": 15 },
+        "buildMonths": 6
       },
       {
         "id": "lumber_mill",
@@ -175,7 +184,8 @@
         "boosts": "wood",
         "output": 180,
         "cost": { "iron": 400, "wood": 300 },
-        "upkeep": { "iron": 10 }
+        "upkeep": { "iron": 10 },
+        "buildMonths": 5
       }
     ]
   }

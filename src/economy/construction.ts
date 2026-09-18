@@ -1,24 +1,29 @@
 /**
- * Construction system (spec §4/§17) — buildings pay their resource cost
- * MONTH BY MONTH out of the REAL stockpile.
+ * Construction system (spec §4/§5/§6) — ONE-TIME resource costs with
+ * RESERVED (secured) resources and a two-state project life:
  *
- *   start a project (free) → every month it draws rate × cost per resource
- *     → resources available? consumed, progress advances
- *     → stock empty?  the project STALLS (Required/Owned/Missing shown)
- *     → the player buys the missing units on the market → work continues
+ *   start a project (free) → state = WAITING_FOR_RESOURCES
+ *     → the securing pass moves units out of the FREE stockpile into the
+ *       project's `secured` escrow (spec §5's reservation — no other
+ *       project can ever spend the same units)
+ *     → Required / Secured / Missing is visible per resource; the player
+ *       buys the missing units on the market → the escrow fills
+ *     → fully secured?  state = BUILDING → ONLY construction time
+ *       (scaled by the economic budget, spec §14) finishes the project
+ *     → the cost is consumed EXACTLY ONCE — a building project never
+ *       draws resources again (spec §6)
  *
- * The monthly draw is scaled by the ECONOMIC BUDGET share (a real
- * construction-speed lever: 0.75× at a zero economic budget, 1.25× at a
- * full one). On completion the project becomes a production PLANT that
- * boosts its resource forever (spec §13: real simulation effects).
+ * On completion the project becomes a production PLANT that boosts its
+ * resource forever (spec §13: real simulation effects).
  *
  * Pure functions over GameState — the GovernmentSystem calls `stepProjects`
- * once per month per country; the command facade calls `startProject`.
+ * once per month per country; the command facade calls `startProject` and
+ * (after every explicit purchase) `secureWaitingProjects`.
  * Leaf module: state types + config only.
  */
 
 import type { GameState } from '../state/GameState';
-import type { StrategicResourcesConfig } from './types';
+import type { StrategicResourcesConfig, ProductionFactoryDef } from './types';
 import type { ConstructionProject } from './resourceTypes';
 import { roundTo } from '../utils/math';
 
@@ -26,7 +31,10 @@ import { roundTo } from '../utils/math';
 export const CONSTRUCTION_SPEED_BASE = 0.75;
 export const CONSTRUCTION_SPEED_SPAN = 0.5;
 
-/** The monthly construction speed factor of a country (economic budget ↑ → faster). */
+/**
+ * The monthly construction speed factor of a country (economic budget ↑ →
+ * faster, spec §14: the economic share really speeds up construction).
+ */
 export function constructionSpeedFactorOf(state: GameState, countryId: string): number {
   const economic = state.government.countries[countryId]?.budget.shares.economic ?? 0.5;
   return CONSTRUCTION_SPEED_BASE + CONSTRUCTION_SPEED_SPAN * economic;
@@ -37,9 +45,10 @@ export type StartProjectResult =
   | { readonly ok: false; readonly reason: 'unknown-type' | 'limit' };
 
 /**
- * Starts a construction project (spec §4: starting is always possible —
- * the work itself only progresses while the resources hold out).
- * Deterministic id from country + month + type.
+ * Starts a construction project (spec §4/§6: starting is always possible —
+ * an incomplete cost simply means the project WAITS for resources). Right
+ * after starting, the securing pass runs so available free stock is reserved
+ * immediately (oldest projects secure first).
  */
 export function startProject(
   state: GameState,
@@ -62,45 +71,121 @@ export function startProject(
     typeId,
     cityId,
     startedMonth: month,
+    status: 'waiting',
     progress: 0,
-    paid: {}
+    secured: {}
   };
   construction.projects.push(project);
+  secureWaitingProjects(state, countryId, config);
   return { ok: true, project };
 }
 
-/** Per-resource view of ONE project's Required / Owned / Missing numbers. */
+/**
+ * THE reservation pass (spec §5): every WAITING project — oldest first —
+ * pulls its still-missing units out of the FREE stockpile into its escrow.
+ * Reserved units are GONE from `stock` (one source of truth), so neither
+ * another project, nor exports, nor military production can double-spend
+ * them. A project whose every cost line is fully secured flips to BUILDING.
+ *
+ * Returns the projects that became `building` in this call.
+ */
+export function secureWaitingProjects(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): ConstructionProject[] {
+  const construction = state.economy.construction[countryId];
+  const record = state.economy.resources[countryId];
+  if (construction === undefined || record === undefined) return [];
+  const funded: ConstructionProject[] = [];
+  for (const project of construction.projects) {
+    if (project.status !== 'waiting') continue;
+    const def = config.productionFactories.find((candidate) => candidate.id === project.typeId);
+    if (def === undefined) continue;
+    let fullySecured = true;
+    for (const [resourceId, cost] of Object.entries(def.cost)) {
+      const required = Math.ceil(cost);
+      const secured = Math.round(project.secured[resourceId] ?? 0);
+      const missing = required - secured;
+      if (missing <= 0) continue;
+      const free = Math.floor(record.stock[resourceId] ?? 0);
+      const take = Math.min(missing, free);
+      if (take > 0) {
+        // REAL units move stock → escrow (the reservation itself).
+        record.stock[resourceId] = free - take;
+        project.secured[resourceId] = secured + take;
+      }
+      if (secured + take < required) fullySecured = false;
+    }
+    if (fullySecured) {
+      project.status = 'building';
+      project.progress = 0;
+      funded.push(project);
+    } else {
+      project.progress = securedFractionOf(def, project);
+    }
+  }
+  return funded;
+}
+
+/** Σ secured / Σ cost of ONE project (0..1, informational for waiting). */
+function securedFractionOf(def: ProductionFactoryDef, project: ConstructionProject): number {
+  let totalCost = 0;
+  let totalSecured = 0;
+  for (const [resourceId, cost] of Object.entries(def.cost)) {
+    totalCost += Math.ceil(cost);
+    totalSecured += Math.round(project.secured[resourceId] ?? 0);
+  }
+  return totalCost > 0 ? Math.min(1, roundTo(totalSecured / totalCost, 4)) : 1;
+}
+
+/** Per-resource view of ONE project's Required / Secured / Missing numbers. */
 export interface ProjectShortage {
   readonly resourceId: string;
   readonly required: number;
-  readonly owned: number;
+  readonly secured: number;
   readonly missing: number;
 }
 
-/** The Required/Owned/Missing triad of ONE project from the LIVE state. */
+/** The Required/Secured/Missing triad of ONE project from the LIVE state. */
 export function projectShortageOf(
-  state: GameState,
-  countryId: string,
+  _state: GameState,
+  _countryId: string,
   config: StrategicResourcesConfig,
   project: ConstructionProject
 ): ProjectShortage[] {
   const def = config.productionFactories.find((candidate) => candidate.id === project.typeId);
-  const stock = state.economy.resources[countryId]?.stock ?? {};
   const rows: ProjectShortage[] = [];
   if (def === undefined) return rows;
   for (const [resourceId, cost] of Object.entries(def.cost)) {
     const required = Math.ceil(cost);
-    const paid = Math.round(project.paid[resourceId] ?? 0);
-    const remaining = Math.max(0, required - paid);
-    const owned = Math.round(stock[resourceId] ?? 0);
+    const secured = Math.round(project.secured[resourceId] ?? 0);
     rows.push({
       resourceId,
       required,
-      owned,
-      missing: Math.max(0, remaining - owned)
+      secured,
+      missing: Math.max(0, required - secured)
     });
   }
   return rows;
+}
+
+/**
+ * Reserved (secured) units of ONE country across ALL its projects:
+ * resourceId → Σ secured. `stock` already excludes them physically — this
+ * view exists for the UI's free/reserved display (spec §5).
+ */
+export function reservedResourcesOf(
+  state: GameState,
+  countryId: string
+): Record<string, number> {
+  const reserved: Record<string, number> = {};
+  for (const project of state.economy.construction[countryId]?.projects ?? []) {
+    for (const [resourceId, amount] of Object.entries(project.secured)) {
+      reserved[resourceId] = (reserved[resourceId] ?? 0) + Math.round(amount);
+    }
+  }
+  return reserved;
 }
 
 export interface StepOutcome {
@@ -109,10 +194,13 @@ export interface StepOutcome {
 }
 
 /**
- * Advances EVERY project of ONE country by one month: draws the monthly
- * resource share from the stockpile (capped by availability), advances the
- * progress, completes fully-paid projects. Stalled projects simply make no
- * progress that month — never cancelled, never negative.
+ * Advances EVERY project of ONE country by one month:
+ *  1. the securing pass runs first (units produced/imported this month may
+ *     complete a waiting project's escrow — never the reverse);
+ *  2. BUILDING projects advance by TIME ONLY (speed = economic budget
+ *     lever) and consume NOTHING (spec §6: one-time cost);
+ *  3. finished projects graduate into plants (real production boosters).
+ * Waiting projects simply wait — never cancelled, never negative.
  */
 export function stepProjects(
   state: GameState,
@@ -123,35 +211,20 @@ export function stepProjects(
   const construction = state.economy.construction[countryId];
   const record = state.economy.resources[countryId];
   if (construction === undefined || record === undefined) return { completed: [] };
-  const speed = constructionSpeedFactorOf(state, countryId);
-  const fraction = Math.min(1, config.construction.monthlyRate * speed);
-  const completed: ConstructionProject[] = [];
 
+  secureWaitingProjects(state, countryId, config);
+
+  const speed = constructionSpeedFactorOf(state, countryId);
+  const completed: ConstructionProject[] = [];
   for (const project of construction.projects) {
+    if (project.status !== 'building') continue;
     const def = config.productionFactories.find((candidate) => candidate.id === project.typeId);
     if (def === undefined) continue;
-    let totalCost = 0;
-    let totalPaid = 0;
-    for (const [resourceId, cost] of Object.entries(def.cost)) {
-      const share = Math.ceil(cost * fraction);
-      const available = Math.floor(record.stock[resourceId] ?? 0);
-      const paid = Math.min(share, available);
-      if (paid > 0) {
-        record.stock[resourceId] = available - paid;
-        project.paid[resourceId] = (project.paid[resourceId] ?? 0) + paid;
-      }
-      totalCost += Math.ceil(cost);
-      totalPaid += Math.round(project.paid[resourceId] ?? 0);
-    }
-    project.progress = totalCost > 0 ? Math.min(1, roundTo(totalPaid / totalCost, 4)) : 1;
-    if (totalCost > 0 && totalPaid >= totalCost) {
-      project.progress = 1;
-      completed.push(project);
-    }
+    project.progress = Math.min(1, roundTo(project.progress + speed / def.buildMonths, 4));
+    if (project.progress >= 1) completed.push(project);
   }
 
   if (completed.length > 0) {
-    // Completed projects graduate into plants (real production boosters).
     const plants = (state.economy.plants[countryId] ??= {});
     construction.projects = construction.projects.filter((project) => {
       if (!completed.includes(project)) return true;

@@ -40,7 +40,7 @@ import {
 import { syncCountryCapitals } from '../state/slices/countrySlice';
 import { recomputeResourceEconomies } from '../economy/resources';
 import { purchaseResource } from '../economy/purchase';
-import { startProject } from '../economy/construction';
+import { startProject, secureWaitingProjects } from '../economy/construction';
 import { upgradeMine, unlockMineLevel } from '../economy/research';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
@@ -1114,12 +1114,17 @@ export class Game {
       this.log.debug(`buyResource blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId})`);
       return false;
     }
+    // The bought units land in the FREE stockpile; the securing pass runs
+    // NOW so waiting construction projects reserve them immediately (spec
+    // §6: buying the missing units lets the project proceed at once).
+    const funded = secureWaitingProjects(this.state, countryId, this.data.economyData.strategicResources);
     this.events.emit('economy.resourceBought', {
       buyerId: countryId,
       sellerId: result.sellerId,
       resourceId: result.resourceId,
       amount: result.amount,
-      cost: result.cost
+      cost: result.cost,
+      fundedProjects: funded.length
     });
     return true;
   }

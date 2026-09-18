@@ -13,6 +13,7 @@
 import type { GameState } from '../state/GameState';
 import type { StrategicResourcesConfig } from './types';
 import { marketPriceTierOf } from './market';
+import { safetyReserveUnits } from './resources';
 import { roundTo } from '../utils/math';
 
 /** The per-unit prices of ONE deal (what the UI may show on selection). */
@@ -101,18 +102,22 @@ export function purchaseResource(
 
 /**
  * The sellers of ONE resource for the purchase panel: every country that
- * currently has units in its stockpile, largest first. Amounts are REAL
- * stockpiles — what a seller actually owns (spec §5's example list).
+ * can actually spare units, largest first. The AVAILABLE amount is the
+ * seller's FREE stockpile above its safety reserve (spec §11 — a country
+ * never sells the units its own consumption needs; construction escrow is
+ * already out of its stock). These are the real, buyable units.
  */
 export function sellersOf(
   state: GameState,
   buyerId: string,
-  resourceId: string
+  resourceId: string,
+  config: StrategicResourcesConfig
 ): { countryId: string; amount: number }[] {
   const sellers: { countryId: string; amount: number }[] = [];
   for (const [countryId, record] of Object.entries(state.economy.resources)) {
     if (countryId === buyerId) continue;
-    const amount = Math.floor(record.stock[resourceId] ?? 0);
+    const free = Math.floor(record.stock[resourceId] ?? 0) - safetyReserveUnits(record, resourceId, config);
+    const amount = Math.max(0, free);
     if (amount > 0) sellers.push({ countryId, amount });
   }
   return sellers.sort((a, b) => b.amount - a.amount || (a.countryId < b.countryId ? -1 : 1));

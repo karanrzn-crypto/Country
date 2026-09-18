@@ -277,6 +277,24 @@ export function resourceStatusOf(record: CountryResourceState, resourceId: strin
   return 'balanced';
 }
 
+/**
+ * The SAFETY RESERVE of ONE resource for ONE country (spec §8/§11): months
+ * of consumption the country keeps out of exports — food its own (larger)
+ * buffer, every other resource `reserveMonths`. THE shared definition used
+ * by the world matcher's export offers AND the manual seller list.
+ */
+export function safetyReserveUnits(
+  record: Pick<CountryResourceState, 'consumption'>,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  const consumption = record.consumption[resourceId] ?? 0;
+  const months = resourceId === 'food'
+    ? config.safetyBuffer.foodMonths
+    : config.safetyBuffer.reserveMonths;
+  return Math.ceil(months * consumption);
+}
+
 /** Net monthly balance of ONE resource (production + imports − consumption − exports). */
 export function resourceBalanceOf(record: CountryResourceState, resourceId: string): number {
   return roundTo(
@@ -307,37 +325,54 @@ export function resourceRawBalanceOf(record: CountryResourceState, resourceId: s
 /** The THREE user-facing statuses (spec: Surplus / Balanced / Shortage). */
 export type ResourceDisplayStatus = 'surplus' | 'balanced' | 'shortage';
 
+/** Defaults of the display-status thresholds (mirrors economy.json). */
+const DEFAULT_DISPLAY_STATUS = { surplusBufferMonths: 2, minSurplusShare: 0.1 } as const;
+
 /**
  * Derives the clear display status of ONE resource from the REAL numbers —
- * never hand-set, recomputed with every recompute pass:
- * - production > consumption                          → surplus (exportable);
- * - covered (exact, or shortage fully imported away)  → balanced;
- * - still uncovered deficit                           → shortage.
+ * never hand-set, recomputed with every recompute pass (spec §2/§10:
+ * statuses must not mislead):
+ *
+ *  - SHORTAGE — production + import contracts cannot cover consumption and
+ *    the stockpile can no longer absorb the gap (realShortageOf > 0);
+ *  - SURPLUS — production really exceeds consumption by a MEANINGFUL flow
+ *    (≥ max(1, minSurplusShare × consumption): a +1/month is NOT a surplus)
+ *    AND the country holds enough stock to cover its domestic consumption
+ *    (≥ surplusBufferMonths × consumption) — only then is it a real
+ *    exporter with export capacity;
+ *  - BALANCED — everything else (needs covered, or a trivial net flow the
+ *    country keeps at home).
  */
 export function resourceDisplayStatusOf(
   record: CountryResourceState,
-  resourceId: string
+  resourceId: string,
+  thresholds: { surplusBufferMonths: number; minSurplusShare: number } = DEFAULT_DISPLAY_STATUS
 ): ResourceDisplayStatus {
   const production = record.production[resourceId] ?? 0;
   const consumption = record.consumption[resourceId] ?? 0;
-  const imports = record.imports[resourceId] ?? 0;
-  if (production > consumption + EPSILON) return 'surplus';
-  if (production + imports >= consumption - 1e-4) return 'balanced';
-  return 'shortage';
+  const stock = record.stock[resourceId] ?? 0;
+  if (realShortageOf(record, resourceId) > 0) return 'shortage';
+  const net = production - consumption;
+  const minFlow = Math.max(1, Math.ceil(thresholds.minSurplusShare * consumption));
+  const bufferUnits = thresholds.surplusBufferMonths * consumption;
+  if (net >= minFlow && stock >= bufferUnits) return 'surplus';
+  return 'balanced';
 }
 
 /**
- * TRUE shortage of ONE resource after stock: the uncovered monthly deficit
- * that the stockpile can no longer absorb (stock empty). This is what the
- * player must resolve by buying or producing more.
+ * TRUE shortage of ONE resource: the monthly deficit that production AND
+ * import contracts cannot cover (spec §2) MINUS what the stockpile can
+ * still absorb. Zero while the warehouse covers the gap (a draw-down, not
+ * an emergency) — positive when the player/AI must actually buy or the
+ * country runs dry. This is THE number the shortage status, the economy
+ * card and the protest model all read.
  */
 export function realShortageOf(record: CountryResourceState, resourceId: string): number {
-  const uncovered = (record.consumption[resourceId] ?? 0) -
+  const gap = (record.consumption[resourceId] ?? 0) -
     (record.production[resourceId] ?? 0) -
-    (record.imports[resourceId] ?? 0) +
-    (record.unfilledShortage[resourceId] ?? 0);
-  if (uncovered <= 0) return 0;
-  return Math.max(0, Math.round(uncovered - (record.stock[resourceId] ?? 0)));
+    (record.imports[resourceId] ?? 0);
+  if (gap <= 0) return 0;
+  return Math.max(0, Math.round(gap - (record.stock[resourceId] ?? 0)));
 }
 
 export interface RecomputeOptions {
@@ -426,12 +461,49 @@ export function recomputeResourceEconomies(
     consumptionByCountry[countryId] = record.consumption;
   }
 
+  // Export OFFERS (spec §10/§11): a country offers only its net surplus
+  // CAPPED by what its free stockpile can spare above the safety reserve —
+  // a +1/month trickle with an empty warehouse is NOT an export, and a
+  // country short of a resource for its own consumption never exports it.
+  const offersByResource: Record<string, Record<string, number>> = {};
+  for (const resourceId of strategicResourceIds(config)) {
+    const offers: Record<string, number> = {};
+    for (const countryId of order) {
+      const net =
+        (productionByCountry[countryId][resourceId] ?? 0) -
+        (consumptionByCountry[countryId][resourceId] ?? 0);
+      if (net <= 0) continue;
+      // The CURRENT free stock — on the very first pass (no records yet)
+      // the seeded starting buffer is what the country holds.
+      const stockNow = Math.floor(
+        state.economy.resources[countryId]?.stock[resourceId] ??
+          config.startingStock[resourceId] ??
+          0
+      );
+      const reserve = safetyReserveUnits(
+        { consumption: consumptionByCountry[countryId] },
+        resourceId,
+        config
+      );
+      // End-of-month stock after this month's net flow must stay ≥ reserve.
+      const headroom = stockNow + net - reserve;
+      offers[countryId] = Math.max(0, Math.min(net, Math.floor(headroom)));
+    }
+    offersByResource[resourceId] = offers;
+  }
+
   const priceOf = new Map<string, number>(config.resources.map((resource) => [resource.id, resource.price]));
   const resolved = new Map<string, ReturnType<typeof resolveWorldTradeForResource>>();
   for (const resourceId of strategicResourceIds(config)) {
     resolved.set(
       resourceId,
-      resolveWorldTradeForResource(order, productionByCountry, consumptionByCountry, resourceId)
+      resolveWorldTradeForResource(
+        order,
+        productionByCountry,
+        consumptionByCountry,
+        resourceId,
+        offersByResource[resourceId]
+      )
     );
   }
 

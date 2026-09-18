@@ -13,8 +13,9 @@ export interface ResourceDef {
 // ———————————————— resource-economy production factories (new model) ————————
 
 /**
- * A BUILDABLE production factory (spec §4): costs resources to construct,
- * then boosts ONE resource's monthly production forever and consumes a small
+ * A BUILDABLE production factory (spec §4): costs resources to construct
+ * (a ONE-TIME cost, secured into the project's escrow — spec §5/§6), then
+ * boosts ONE resource's monthly production forever and consumes a small
  * upkeep amount of another resource (living demand → trade).
  */
 export interface ProductionFactoryDef {
@@ -24,10 +25,12 @@ export interface ProductionFactoryDef {
   readonly boosts: string;
   /** Monthly units added to the boosted resource while active. */
   readonly output: number;
-  /** Construction cost in resources (paid month by month during building). */
+  /** Construction cost in resources (secured ONCE, never re-drawn). */
   readonly cost: Readonly<Record<string, number>>;
   /** Monthly upkeep in resources (consumption while active). */
   readonly upkeep: Readonly<Record<string, number>>;
+  /** Base build time in months once fully secured (economic budget scales it). */
+  readonly buildMonths: number;
 }
 
 /** Data-driven factory archetype (src/data/economy.json). */
@@ -126,10 +129,19 @@ export interface StrategicResourcesConfig {
   readonly mineLevels: { readonly multipliers: Readonly<Record<string, number>> };
   /** Research: target mine level → unlock cost (M$). */
   readonly research: { readonly levels: Readonly<Record<string, number>> };
-  /** Construction pacing: monthly progress fraction + concurrent-project cap. */
-  readonly construction: { readonly monthlyRate: number; readonly maxProjects: number };
-  /** Anti-famine safety buffer (spec §8.ز): months of consumption kept in reserve. */
-  readonly safetyBuffer: { readonly foodMonths: number };
+  /** Construction pacing: concurrent-project cap (costs are one-time now). */
+  readonly construction: { readonly maxProjects: number };
+  /** Anti-famine safety buffer (spec §8/§11): months of consumption kept
+   *  out of exports — food uses its own (larger) reserve, every other
+   *  resource keeps at least `reserveMonths` months for domestic use. */
+  readonly safetyBuffer: { readonly foodMonths: number; readonly reserveMonths: number };
+  /** Display-status thresholds (spec §2/§10 — a +1/month is NOT a surplus). */
+  readonly displayStatus: {
+    /** A surplus needs at least this many months of consumption in stock. */
+    readonly surplusBufferMonths: number;
+    /** …and a net flow of at least this share of consumption (and ≥ 1). */
+    readonly minSurplusShare: number;
+  };
   /** The stockpile every country starts the campaign with (units per resource). */
   readonly startingStock: Readonly<Record<string, number>>;
   /** Geography-driven minimum domestic production (spec §3). */
