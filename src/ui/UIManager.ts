@@ -138,12 +138,21 @@ export class UIManager implements PhaseSystem {
         if (buyerId === context.state.player.countryId) this.dashboard.refresh();
       }),
       this.events.on('economy.constructionStarted', ({ countryId }) => {
-        if (countryId === context.state.player.countryId) this.dashboard.refresh();
+        if (countryId === context.state.player.countryId) {
+          // AUTO-RETURN (spec §1.11/1.12/§13): after a successful region
+          // pick the player is back IN the economy panel — the new project
+          // card (months remaining) is visible without hunting for the
+          // panel. Also refreshes the map's cell panel + economy colors.
+          this.dashboard.openAt('economy');
+          this.mapUI.refreshInfo();
+        }
       }),
       this.events.on('economy.constructionCompleted', ({ countryId }) => {
         if (countryId === context.state.player.countryId) {
           this.notify('info', 'ساخت‌وساز', 'یک ساختمان به بهره‌برداری رسید.');
           this.dashboard.refresh();
+          // The map's cell panel + economy colors follow immediately (§2).
+          this.mapUI.refreshInfo();
         }
       })
     );

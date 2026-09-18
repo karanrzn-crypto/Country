@@ -9,6 +9,7 @@ import { decisionBlockReason } from '../government/DecisionEngine';
 import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 import { resourceDisplayStatusOf } from '../economy/resources';
+import { projectMonthsRemaining, constructionSpeedFactorOf } from '../economy/construction';
 import { sellersOf, unitPriceOf } from '../economy/purchase';
 import type { StrategicResourcesConfig } from '../economy/types';
 import { faNum, faSigned, faPopulation, toFaDigits } from '../utils/format';
@@ -291,7 +292,7 @@ export class PresidentDashboard {
     const resourcesList = this.create('div', 'pd-resources');
     section.appendChild(resourcesList);
     this.track(resourcesList, 'resources');
-    // Construction — one project card per active project (progress only —
+    // Construction — one project card per active project (MONTHS remaining —
     // the cost was paid once at start, spec §8) + the buildables.
     const constructionTitle = this.create('div', 'pd-subtitle');
     constructionTitle.setText('ساخت‌وساز');
@@ -598,7 +599,9 @@ export class PresidentDashboard {
         hint.appendChild(cancel);
         rows.push(hint);
       }
-      // — active projects (top): progress + the cell they are built on —
+      // — active projects (top): the MONTHS REMAINING (spec §1.9/§1.15 —
+      //   construction time is shown ONLY in months, never a percentage)
+      //   + the cell they are built on —
       for (const project of projects) {
         const def = config.buildings.find((candidate) => candidate.id === project.typeId);
         if (def === undefined) continue;
@@ -607,8 +610,13 @@ export class PresidentDashboard {
         const name = this.create('span', 'pd-project-name');
         name.setText(`${def.name} — منطقه ${gridIdOf(project.cellKey)}`);
         head.appendChild(name);
+        const remaining = projectMonthsRemaining(
+          project.progress,
+          def.buildMonths,
+          constructionSpeedFactorOf(state, countryId)
+        );
         const progress = this.create('span', 'pd-project-progress');
-        progress.setText(`${Math.round(project.progress * 100)}٪`);
+        progress.setText(`باقی‌مانده: ${faNum(remaining)} ماه`);
         head.appendChild(progress);
         card.appendChild(head);
         const status = this.create('div', 'pd-project-status running');

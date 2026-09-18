@@ -1,6 +1,15 @@
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { MapThemeData } from '../data/types';
-import { biomeBaseColor, rampGradientStops, rgbToHex, type GradientStopHex } from '../rendering/map/MapSurface';
+import {
+  biomeBaseColor,
+  rampGradientStops,
+  rgbToHex,
+  economyTintRGB,
+  rgb,
+  lerpColor,
+  ECONOMY_CONSTRUCTION_LIGHTEN,
+  type GradientStopHex
+} from '../rendering/map/MapSurface';
 
 /**
  * Map legends (biomes + elevation) — PURE data builders, no DOM.
@@ -71,6 +80,37 @@ export function buildElevationLegend(theme: MapThemeData): ElevationLegendData {
     lowLabel: legend.lowLabel,
     highLabel: legend.highLabel
   };
+}
+
+/** A config building (id + Persian name) — the economy legend's input. */
+export interface EconomyLegendBuilding {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * The ECONOMY legend (spec §3) — one row per economic building (THE SAME
+ * `economyTintRGB` definition the economy fill layer paints with: active
+ * colors + the pale under-construction variant) plus the explicit
+ * «در حال ساخت» and «بدون ساختمان اقتصادی» rows, so the player can read
+ * every colored region on the map at a glance.
+ */
+export function buildEconomyLegend(
+  buildings: readonly EconomyLegendBuilding[],
+  theme: MapThemeData
+): MapLegendEntry[] {
+  const entries: MapLegendEntry[] = [];
+  for (const building of buildings) {
+    const color = economyTintRGB(building.id, false, theme);
+    if (color === null) continue; // theme defines no color for this type
+    entries.push({ id: building.id, label: building.name, color: rgbToHex(color) });
+  }
+  // The under-construction row: the pale variant of a NEUTRAL base — the
+  // map shows each type's own pale color, the legend communicates the state.
+  const pale = rgbToHex(lerpColor(rgb('#8a8a7a'), { r: 1, g: 1, b: 1 }, ECONOMY_CONSTRUCTION_LIGHTEN));
+  entries.push({ id: 'under-construction', label: 'در حال ساخت (رنگ کم‌رنگ)', color: pale });
+  entries.push({ id: 'no-building', label: 'بدون ساختمان اقتصادی', color: '#e6e1d3' });
+  return entries;
 }
 
 /** CSS linear-gradient stops for the elevation bar (same sampled colors). */

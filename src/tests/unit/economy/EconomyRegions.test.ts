@@ -30,9 +30,13 @@ import {
   buildingProductionOf,
   economicBuildingAtCell,
   cellIsUnderConstruction,
+  cellUnderConstruction,
+  cellEconomyTintOf,
   strategicResourceIds
 } from '../../../economy/resources';
-import { startProject, stepProjects } from '../../../economy/construction';
+import { startProject, stepProjects, projectMonthsRemaining } from '../../../economy/construction';
+import { aiBuildingTypeId } from '../../../economy/aiEconomy';
+import { economyTintRGB, rgb } from '../../../rendering/map/MapSurface';
 import { countryBaselineProduction } from '../../../economy/domesticBaseline';
 import { gridCellKey } from '../../../world/map/MapTypes';
 import { findGridCell } from '../../../world/map/MapGeography';
@@ -387,5 +391,139 @@ describe('wider simple economy (11-section spec)', () => {
       expect(consumption).toBeGreaterThan(0);
       void resourceId;
     }
+  });
+
+  // ————————————————————— §1.9 — زمان ساخت فقط با ماه ——————————————————————
+
+  it('T12 the construction time reads ONLY in months — exact remaining-month math (§1.9/§1.15)', () => {
+    // The ONE definition the dashboard card and the grid panel share:
+    // the un-built share divided by the monthly speed, rounded UP.
+    expect(projectMonthsRemaining(0, 4, 1)).toBe(4); // fresh farm, speed 1
+    expect(projectMonthsRemaining(0.5, 4, 1)).toBe(2); // half built
+    expect(projectMonthsRemaining(0.5, 6, 1.25)).toBe(3); // ceil(2.4)
+    expect(projectMonthsRemaining(0.75, 4, 0.75)).toBe(2); // ceil(1/0.75)
+    expect(projectMonthsRemaining(1, 4, 1)).toBe(0); // done
+    // Real state: a started project reports its months through the SAME
+    // helpers the UI reads (cellUnderConstruction → months remaining).
+    const state = context.state;
+    const countryId = ids()[1];
+    const def = config.buildings.find((candidate) => candidate.id === 'iron_mine')!;
+    state.economy.treasury[countryId] = def.cost * 2;
+    const cell = freeCellOf(countryId);
+    expect(cell).not.toBeNull();
+    const started = startProject(state, countryId, config, def.id, cell!, 20, () => 'bp-t12');
+    expect(started.ok).toBe(true);
+    const project = cellUnderConstruction(state, cell!);
+    expect(project).not.toBeNull();
+    expect(project?.typeId).toBe(def.id);
+    expect(project?.countryId).toBe(countryId);
+    const speed = 0.75 + 0.5 * ((state.government.countries[countryId]?.budget.shares.economic ?? 0.5));
+    expect(projectMonthsRemaining(project!.progress, def.buildMonths, speed)).toBe(
+      Math.ceil((def.buildMonths * 1) / speed)
+    );
+    // No percentage semantics anywhere: the remaining months come only from
+    // progress + buildMonths + speed — never a 0..100 display value.
+    expect(project!.progress).toBeLessThanOrEqual(1);
+    // Cleanup: finish the project so other tests see a free world.
+    for (let month = 20; month <= 20 + def.buildMonths + 2; month += 1) {
+      stepProjects(state, countryId, config, month);
+    }
+    expect(cellUnderConstruction(state, cell!)).toBeNull();
+    state.economy.buildings[countryId] = {};
+  });
+
+  // ————————————————————— §3 — رنگ مناطق اقتصادی روی نقشه ———————————————————
+
+  it('T13 the economy tint resolves per cell — active color, pale construction, empty none (§3)', () => {
+    const state = context.state;
+    const theme = context.data.mapTheme;
+    const countryId = ids()[2];
+    const farm = config.buildings.find((candidate) => candidate.id === 'farm')!;
+
+    // An empty cell has NO tint (the land keeps its normal look).
+    const cell = freeCellOf(countryId);
+    expect(cell).not.toBeNull();
+    expect(cellEconomyTintOf(state, cell!)).toBeNull();
+
+    // UNDER CONSTRUCTION → the type + the construction flag (pale variant).
+    state.economy.treasury[countryId] = farm.cost * 2;
+    expect(startProject(state, countryId, config, farm.id, cell!, 30, () => 'bp-t13').ok).toBe(true);
+    const buildingTint = cellEconomyTintOf(state, cell!);
+    expect(buildingTint).toEqual({ typeId: farm.id, underConstruction: true });
+
+    // The pale variant is the SAME hue but strictly lighter than the active
+    // color — and both come from the ONE theme definition the legend uses.
+    const active = economyTintRGB(farm.id, false, theme);
+    const pale = economyTintRGB(farm.id, true, theme);
+    expect(active).not.toBeNull();
+    expect(pale).not.toBeNull();
+    expect(pale!.r).toBeGreaterThan(active!.r);
+    expect(pale!.g).toBeGreaterThan(active!.g);
+    expect(pale!.b).toBeGreaterThan(active!.b);
+    expect(active).toEqual(rgb(theme.layerColors.economyBuildingColors[farm.id]));
+
+    // Completion flips the tint to the ACTIVE building (same cell).
+    for (let month = 30; month <= 30 + farm.buildMonths + 2; month += 1) {
+      stepProjects(state, countryId, config, month);
+    }
+    expect(cellEconomyTintOf(state, cell!)).toEqual({ typeId: farm.id, underConstruction: false });
+    // Cleanup.
+    state.economy.buildings[countryId] = {};
+    // A type without a theme color stays untinted (never a guess).
+    expect(economyTintRGB('unknown-type', false, theme)).toBeNull();
+  });
+
+  // ————————————————————— §6 — اولویت ساخت AI بر اساس نیاز —————————————————
+
+  it('T14 the AI builds by NEED — the largest shortage picks the building; otherwise specialization (§6)', () => {
+    const state = context.state;
+    const countryId = ids()[3] ?? ids()[0];
+    const record = state.economy.resources[countryId]!;
+
+    // Food shortage → مزرعه (the food building).
+    record.shortage = { food: 300 };
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+      config.buildings.find((candidate) => candidate.resource === 'food')?.id ?? null
+    );
+
+    // Oil shortage LARGER than the food one → میدان نفتی (need ranking).
+    record.shortage = { food: 100, oil: 400 };
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+      config.buildings.find((candidate) => candidate.resource === 'oil')?.id ?? null
+    );
+
+    // Iron-only shortage → معدن آهن.
+    record.shortage = { iron: 60 };
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+      config.buildings.find((candidate) => candidate.resource === 'iron')?.id ?? null
+    );
+
+    // NO shortage → the strongest good NOT already in surplus (developing a
+    // surplus good again would be irrational — spec §6). With the stockpile
+    // drained nothing counts as surplus, so the strongest (oil) wins.
+    record.shortage = {};
+    const savedProduction = { ...record.production };
+    const savedStock = { ...record.stock };
+    record.production = { food: 50, iron: 20, oil: 900, industrial: 30 };
+    record.stock = {};
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+      config.buildings.find((candidate) => candidate.resource === 'oil')?.id ?? null
+    );
+
+    // OIL IN SURPLUS (huge stock, net ≫ consumption) → skipped; the next-best
+    // non-surplus good (food here) is developed instead — diversification.
+    record.stock = { oil: 10_000 };
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+      config.buildings.find((candidate) => candidate.resource === 'food')?.id ?? null
+    );
+
+    // NO production at all → develop the FIRST config good (deterministic —
+    // a country producing nothing still develops, the world stays alive).
+    record.production = {};
+    record.stock = {};
+    expect(aiBuildingTypeId(state, countryId, config)).toBe(config.buildings[0].id);
+    record.production = savedProduction;
+    record.stock = savedStock;
+    record.shortage = {};
   });
 });

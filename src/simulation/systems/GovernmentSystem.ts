@@ -35,6 +35,7 @@ import type { StrategicResourcesConfig } from '../../economy/types';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject } from '../../economy/construction';
+import { aiBuildingTypeId } from '../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
 import { gridCellKey } from '../../world/map/MapTypes';
 import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
@@ -172,11 +173,14 @@ export class GovernmentSystem implements SimulationSystemDef {
   }
 
   /**
-   * AI countries keep the WORLD economy alive (spec §8): occasionally a
-   * non-player country starts a production building around its strongest
-   * resource — but ONLY when the treasury covers the full one-time money
-   * cost with a margin. The site is a FREE grid cell of its OWN land (spec
-   * §1 — one economic building per region), picked deterministically.
+   * AI countries keep the WORLD economy alive (spec §6): occasionally a
+   * non-player country starts the building its economy actually NEEDS —
+   * the largest uncovered shortage picks the type (food shortage → مزرعه,
+   * oil shortage → میدان نفتی …, aiEconomy.ts); without an urgent need it
+   * reinforces its strongest (specialization) good. ONLY when the treasury
+   * covers the full one-time money cost with a margin — construction must
+   * never bankrupt the world. The site is a FREE grid cell of its OWN land
+   * (spec §1 — one economic building per region), picked deterministically.
    */
   private processAiEconomy(
     state: GameState,
@@ -190,29 +194,17 @@ export class GovernmentSystem implements SimulationSystemDef {
     const record = state.economy.resources[countryId];
     if (record === undefined) return;
 
-    // The country's strongest produced resource — the AI builds around what
-    // its land actually gives it (no magic numbers).
-    let strongest: string | null = null;
-    let strongestOutput = 0;
-    for (const [resourceId, amount] of Object.entries(record.production)) {
-      if (amount > strongestOutput) {
-        strongestOutput = amount;
-        strongest = resourceId;
-      }
-    }
-    if (strongest === null) return;
-
-    // —— construction: occasionally start a building, ONLY when affordable
-    //    with a margin (self-limiting AI demand keeps treasuries healthy) ——
+    // —— construction: occasionally start the NEEDED building, ONLY when
+    //    affordable with a margin (self-limiting AI demand keeps treasuries
+    //    healthy) ——
     const construction = state.economy.construction[countryId];
     if (
       construction !== undefined &&
       construction.projects.length < AI_PROJECT_CAP &&
       rng.chance(AI_CONSTRUCTION_CHANCE)
     ) {
-      const def = config.buildings.find(
-        (candidate) => candidate.resource === strongest
-      );
+      const typeId = aiBuildingTypeId(state, countryId, config);
+      const def = config.buildings.find((candidate) => candidate.id === typeId);
       const treasury = state.economy.treasury[countryId] ?? 0;
       const affordable = def !== undefined && treasury >= def.cost * AI_TREASURY_MARGIN;
       if (def !== undefined && affordable) {

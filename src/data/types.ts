@@ -208,10 +208,22 @@ export interface MapLayerColorsData {
     readonly samples: number;
   };
   readonly tintFillOpacity: number;
+  /**
+   * The ECONOMY layer's own fill opacity (spec §3): HIGHER than the other
+   * tints so each building color keeps its hue identity over any country
+   * fill (a green farm must never read as yellow over red land).
+   */
+  readonly economyFillOpacity: number;
   readonly populationLow: string;
   readonly populationHigh: string;
-  readonly economyLow: string;
-  readonly economyHigh: string;
+  /**
+   * THE economy-layer colors (spec §3): one color PER ECONOMIC-BUILDING id
+   * (config ids — farm/oil_field/iron_mine/factory …) so the map's economy
+   * mode shows each building kind in its own color. A building under
+   * construction is painted in the PALE variant of the same color (the
+   * lighten factor is the renderer's ECONOMY_CONSTRUCTION_LIGHTEN).
+   */
+  readonly economyBuildingColors: Readonly<Record<string, string>>;
   /** Strategic-information tint (province strategic value ramp). */
   readonly strategicLow: string;
   readonly strategicHigh: string;

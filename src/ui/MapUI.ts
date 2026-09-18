@@ -14,13 +14,16 @@ import {
   depositMonthlyProduction,
   provinceResourceProduction,
   economicBuildingAtCell,
+  cellUnderConstruction,
   economyLevelBuildingFactor
 } from '../economy/resources';
+import { projectMonthsRemaining, constructionSpeedFactorOf } from '../economy/construction';
 import type { StrategicResourcesConfig } from '../economy/types';
 import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
 import type { CityConnection } from '../world/cityareas/CityConnections';
 import {
   buildBiomeLegend,
+  buildEconomyLegend,
   buildElevationLegend,
   elevationGradientCss,
   elevationLegendSignature,
@@ -535,11 +538,14 @@ export class MapUI {
         }
         addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(config, id)));
         // THE ECONOMIC BUILDING OF THIS REGION (spec §2) — read from the
-        // LIVE Game State (never copied); every region shows its building
-        // and its REAL production (base × economy level, spec §3), or the
-        // explicit بدون ساختمان اقتصادی line.
+        // LIVE Game State (never copied): an ACTIVE building shows its real
+        // production (base × economy level, spec §3); a project UNDER
+        // CONSTRUCTION shows «در حال ساخت» + the MONTHS remaining (spec
+        // §1.9 — never a percentage); an empty cell says explicitly
+        // بدون ساختمان اقتصادی.
         {
           const atCell = economicBuildingAtCell(context.state, info.cellKey);
+          const inBuild = cellUnderConstruction(context.state, info.cellKey);
           if (atCell !== null) {
             const def = config.buildings.find((candidate) => candidate.id === atCell.typeId);
             const produced = config.resources.find((candidate) => candidate.id === def?.resource);
@@ -549,6 +555,18 @@ export class MapUI {
               addRow(`تولید ${produced.name}`, `+${faNum(amount)} / ماه`);
             }
             addRow('وضعیت', 'فعال');
+          } else if (inBuild !== null) {
+            const def = config.buildings.find((candidate) => candidate.id === inBuild.typeId);
+            const remaining = def !== undefined
+              ? projectMonthsRemaining(
+                  inBuild.progress,
+                  def.buildMonths,
+                  constructionSpeedFactorOf(context.state, inBuild.countryId)
+                )
+              : 0;
+            addRow('ساختمان اقتصادی', def?.name ?? inBuild.typeId);
+            addRow('وضعیت', 'در حال ساخت');
+            addRow('زمان باقی‌مانده', `${faNum(remaining)} ماه`);
           } else {
             addRow('ساختمان اقتصادی', 'بدون ساختمان اقتصادی');
           }
@@ -767,6 +785,22 @@ export class MapUI {
       sections.push({ title: 'زیست‌بوم‌ها', rows: buildBiomeLegend(context.map, context.data.mapTheme) });
     } else if (visibility.terrain === true) {
       sections.push({ title: 'ارتفاع', gradient: buildElevationLegend(context.data.mapTheme) });
+    }
+    // THE ECONOMY LEGEND (spec §3): when the economy layer is on, the map
+    // paints building-colored regions — the legend names every color, the
+    // under-construction state and the building-free look (SAME definitions
+    // the fill layer paints with — one source, no drift).
+    if (visibility.economy === true) {
+      sections.push({
+        title: 'اقتصاد',
+        rows: buildEconomyLegend(
+          context.data.economyData.strategicResources.buildings.map((building) => ({
+            id: building.id,
+            name: building.name
+          })),
+          context.data.mapTheme
+        )
+      });
     }
     const visible = sections.length > 0;
     this.legendContainer.setVisible(visible);

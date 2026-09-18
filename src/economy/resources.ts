@@ -258,12 +258,45 @@ export function economicBuildingAtCell(
 
 /** TRUE when a construction project already occupies the cell. */
 export function cellIsUnderConstruction(state: GameState, cellKey: string): boolean {
-  for (const construction of Object.values(state.economy.construction)) {
+  return cellUnderConstruction(state, cellKey) !== null;
+}
+
+/**
+ * The construction project standing on ONE grid cell (spec §1/§2 — one per
+ * region): reads the LIVE state (the single source); the grid panel renders
+ * «در حال ساخت · باقی‌مانده: X ماه» from it. Covers every country so foreign
+ * cells report their owner's project too.
+ */
+export function cellUnderConstruction(
+  state: GameState,
+  cellKey: string
+): { countryId: string; typeId: string; progress: number } | null {
+  for (const [countryId, construction] of Object.entries(state.economy.construction)) {
     for (const project of construction.projects) {
-      if (project.cellKey === cellKey) return true;
+      if (project.cellKey === cellKey) {
+        return { countryId, typeId: project.typeId, progress: project.progress };
+      }
     }
   }
-  return false;
+  return null;
+}
+
+/**
+ * The ECONOMY-MAP tint resolution of ONE cell (spec §3): WHAT the economy
+ * layer paints there — the building type + whether it is still under
+ * construction (the renderer derives the color/pale variant from it). ONE
+ * definition shared by the fill layer AND the legend, so map and legend can
+ * never disagree. Null = no economic building (the cell keeps its land look).
+ */
+export function cellEconomyTintOf(
+  state: GameState,
+  cellKey: string
+): { typeId: string; underConstruction: boolean } | null {
+  const active = economicBuildingAtCell(state, cellKey);
+  if (active !== null) return { typeId: active.typeId, underConstruction: false };
+  const building = cellUnderConstruction(state, cellKey);
+  if (building !== null) return { typeId: building.typeId, underConstruction: true };
+  return null;
 }
 
 // ———————————————————————— consumption: population × military ————————————————

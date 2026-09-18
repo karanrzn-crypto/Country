@@ -161,10 +161,15 @@
       "samples": 24
     },
     "tintFillOpacity": 0.4,
+    "economyFillOpacity": 0.78,
     "populationLow": "#fdf6d8",
     "populationHigh": "#a02c2c",
-    "economyLow": "#ece7d4",
-    "economyHigh": "#2e6b4f",
+    "economyBuildingColors": {
+      "farm": "#3f9b4f",
+      "oil_field": "#2f6fb8",
+      "iron_mine": "#a06a2c",
+      "factory": "#d8b825"
+    },
     "strategicLow": "#efe9d6",
     "strategicHigh": "#8e2418",
     "riverStroke": "#2e78b8",

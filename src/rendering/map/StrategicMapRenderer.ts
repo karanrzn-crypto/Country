@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { SystemContext } from '../../core/GameContext';
 import type { GameState } from '../../state/GameState';
 import { MAP_LAYER_ORDER, type MapLayerId } from '../../world/map/MapLayers';
-import type { StrategicMapModel } from '../../world/map/MapTypes';
+import { gridCellKey, type StrategicMapModel } from '../../world/map/MapTypes';
+import { cellEconomyTintOf } from '../../economy/resources';
 import { findGridCell } from '../../world/map/MapGeography';
 import { MapCamera } from './MapCamera';
 import { CountryLayer } from './CountryLayer';
@@ -10,7 +11,7 @@ import { BorderLayer } from './BorderLayer';
 import { CityLayer } from './CityLayer';
 import { CityNetworkLayer } from './CityNetworkLayer';
 import { LabelLayer } from './LabelLayer';
-import { SurfaceLayer, type SurfaceMode } from './MapSurface';
+import { SurfaceLayer, economyTintRGB, type SurfaceMode, type RGB } from './MapSurface';
 import {
   createPopulationFillLayer,
   createEconomyFillLayer,
@@ -120,16 +121,28 @@ export class StrategicMapRenderer {
     const surfaceLayer = new SurfaceLayer(this.columns);
     this.surfaceLayer = surfaceLayer;
     const populationLayer = createPopulationFillLayer(this.columns, theme);
-    const economyLayer = createEconomyFillLayer(this.columns, theme, (countryId) => {
-      // Economy tint = the country's real monthly PRODUCTION VALUE (units ×
-      // price — the light resource economy's output, spec §10). No GDP.
-      const record = context.state.economy.resources[countryId];
-      if (record === undefined) return 0;
-      let value = 0;
-      for (const resource of context.data.economyData.strategicResources.resources) {
-        value += (record.production[resource.id] ?? 0) * resource.price;
-      }
-      return value;
+    // Economy tint (spec §3): the LIVE economic building of each cell — the
+    // type's own theme color, the PALE variant while it is still under
+    // construction, and NO tint on building-free cells. The tint lookup is
+    // cached per rebuild (one Map, dropped on every construction event) so
+    // the per-cell state reads stay cheap on big maps.
+    let economyTintCache: Map<string, RGB | null> | null = null;
+    const economyTintFor = (cellKey: string): RGB | null => {
+      if (economyTintCache === null) economyTintCache = new Map<string, RGB | null>();
+      const cached = economyTintCache.get(cellKey);
+      if (cached !== undefined) return cached;
+      const tint = cellEconomyTintOf(context.state, cellKey);
+      const color = tint !== null ? economyTintRGB(tint.typeId, tint.underConstruction, theme) : null;
+      economyTintCache.set(cellKey, color);
+      return color;
+    };
+    const economyLayer = createEconomyFillLayer(this.columns, theme, (cellIndex, model) => {
+      const owner = model.features.cellOwner[cellIndex];
+      if (owner < 0) return null; // ocean
+      const countryId = model.countryOrder[owner];
+      const gridId = model.features.gridIds[cellIndex];
+      if (countryId === undefined || gridId === null) return null;
+      return economyTintFor(gridCellKey(countryId, gridId));
     });
     const strategicLayer = createStrategicFillLayer(this.columns, theme);
     const riverLayer = new RiverLayer(this.columns, theme);
@@ -228,6 +241,18 @@ export class StrategicMapRenderer {
       // cell, the renderer just paints its preallocated overlay quad.
       context.events.on('map.hoverChanged', ({ hover }) => {
         this.gridLayer.setHoveredCell(hover !== null ? hover.cellIndex : null);
+      }),
+      // Economy colors follow the LIVE buildings (spec §2/§3): a project
+      // starting or completing repaints the economy layer immediately.
+      context.events.on('economy.constructionStarted', () => {
+        economyTintCache = null;
+        const layer = this.fillLayers.get('economy');
+        if (layer?.isBuilt === true) layer.invalidate();
+      }),
+      context.events.on('economy.constructionCompleted', () => {
+        economyTintCache = null;
+        const layer = this.fillLayers.get('economy');
+        if (layer?.isBuilt === true) layer.invalidate();
       })
     );
 

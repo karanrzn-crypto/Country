@@ -150,25 +150,26 @@ export function createPopulationFillLayer(columns: number, theme: MapTheme): Cel
 }
 
 /**
- * Economy tint: per-country value from the LIVE country state (state.countries)
- * — when the future economy simulation mutates those values, rebuilding on
- * visibility change makes this layer follow automatically. No renderer
- * rewrite needed, no duplicated economy state.
+ * Economy tint (spec §3): per-CELL economic-building coloring from the LIVE
+ * game state — every building type its own color (مزرعه/میدان نفت/معدن
+ * آهن/کارخانه), under-construction cells pale, cells without an economic
+ * building untinted. The renderer supplies `tintAt` (state → color) so this
+ * module stays renderer-pure; rebuilding on visibility change (and on the
+ * construction events the renderer subscribes to) makes the layer follow
+ * the live economy automatically. No duplicated economy state.
+ * (The color definition itself — economyTintRGB — lives in MapSurface so
+ * the legend shows THE SAME colors the layer paints.)
  */
 export function createEconomyFillLayer(
   columns: number,
   theme: MapTheme,
-  countryShare: (countryId: string) => number
+  tintAt: (cellIndex: number, model: StrategicMapModel) => RGB | null
 ): CellFillLayer {
-  const low = rgb(theme.layerColors.economyLow);
-  const high = rgb(theme.layerColors.economyHigh);
-  return new CellFillLayer(columns, theme.layerColors.tintFillOpacity, (cellIndex, model) => {
-    const owner = model.features.cellOwner[cellIndex];
-    if (owner < 0) return null; // ocean
-    const countryId = model.countryOrder[owner];
-    if (countryId === undefined) return null;
-    return lerpColor(low, high, countryShare(countryId));
-  });
+  // The economy layer paints with its OWN opacity (theme economyFillOpacity —
+  // higher than the generic tint) so every building color keeps its hue
+  // identity over any country fill underneath (spec §3 — the differences
+  // between buildings must be unmistakable at a glance).
+  return new CellFillLayer(columns, theme.layerColors.economyFillOpacity, tintAt);
 }
 
 // ———————————————————————————— line features ————————————————————————————

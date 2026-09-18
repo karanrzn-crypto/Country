@@ -419,10 +419,10 @@ export const MAP_THEME_SCHEMA: FieldSchema = {
           }
         },
         tintFillOpacity: { type: 'number', min: 0, max: 1 },
+        economyFillOpacity: { type: 'number', min: 0, max: 1 },
         populationLow: colorField,
         populationHigh: colorField,
-        economyLow: colorField,
-        economyHigh: colorField,
+        economyBuildingColors: { type: 'record', values: colorField },
         strategicLow: colorField,
         strategicHigh: colorField,
         riverStroke: colorField,

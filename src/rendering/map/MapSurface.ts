@@ -63,6 +63,35 @@ export function lerpColor(a: RGB, b: RGB, t: number): RGB {
   return { r: lerp(a.r, b.r, clamped), g: lerp(a.g, b.g, clamped), b: lerp(a.b, b.b, clamped) };
 }
 
+// ————————————— economy-layer building colors (spec §3) —————————————
+
+/**
+ * How much the UNDER-CONSTRUCTION tint is lightened toward white (spec §3 —
+ * «رنگ متفاوت یا حالت نیمه‌شفاف»): the pale variant of the type color reads
+ * as a building still being built. Shared by the economy fill layer AND the
+ * economy legend — they can never disagree.
+ */
+export const ECONOMY_CONSTRUCTION_LIGHTEN = 0.55;
+
+/**
+ * The color of ONE economic-building type on the economy layer (spec §3 —
+ * theme-data colors keyed by building id). A building UNDER CONSTRUCTION is
+ * painted in the PALE variant of its type color; null when the theme has no
+ * color for the type (the cell simply stays untinted). THE single definition
+ * the map fill and the legend both consume.
+ */
+export function economyTintRGB(
+  typeId: string,
+  underConstruction: boolean,
+  theme: MapTheme
+): RGB | null {
+  const hex = theme.layerColors.economyBuildingColors[typeId];
+  if (hex === undefined) return null;
+  const base = rgb(hex);
+  if (!underConstruction) return base;
+  return lerpColor(base, { r: 1, g: 1, b: 1 }, ECONOMY_CONSTRUCTION_LIGHTEN);
+}
+
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }

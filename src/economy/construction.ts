@@ -31,6 +31,20 @@ export const CONSTRUCTION_SPEED_BASE = 0.75;
 export const CONSTRUCTION_SPEED_SPAN = 0.5;
 
 /**
+ * The MONTHS REMAINING of ONE project (spec §1.9/§1.15 — the construction
+ * time is shown ONLY in months, never a percentage): the un-built share of
+ * the build time divided by the country's monthly speed, rounded UP (a
+ * partially-built month is still a month of waiting). This ONE function is
+ * the definition the dashboard cards and the map's grid panel both read —
+ * the number can never disagree between UI surfaces.
+ */
+export function projectMonthsRemaining(progress: number, buildMonths: number, speed: number): number {
+  const remaining = Math.max(0, 1 - progress);
+  if (speed <= 0) return Math.ceil(remaining * buildMonths);
+  return Math.ceil((remaining * buildMonths) / speed);
+}
+
+/**
  * The monthly construction speed factor of a country (economic budget ↑ →
  * faster): the ONE place the budget pool touches construction.
  */
