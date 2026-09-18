@@ -7,8 +7,15 @@ import type { GameState } from '../state/GameState';
  *  specialization over the baseline, population-based consumption for every
  *  good (zero-consumption bug fixed), graded shortage → satisfaction. */
 export const SAVE_VERSION_ECONOMY_LEVEL = 17;
+/** Version of the HARD economy (spec §1-§24): per-region land quality,
+ *  country potentials, finite extraction reserves, money + materials +
+ *  workforce construction, limited population-scaled starting stockpiles,
+ *  diminishing returns and shortage-duration satisfaction. Adds
+ *  `shortageMonths` to every resource record and `buildPreview` to the map
+ *  slice (the heal fills missing building reserve fields). */
+export const SAVE_VERSION_ECONOMY_HARD_MODE = 18;
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = SAVE_VERSION_ECONOMY_LEVEL;
+export const SAVE_VERSION = SAVE_VERSION_ECONOMY_HARD_MODE;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */

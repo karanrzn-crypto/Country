@@ -92,4 +92,7 @@ export type GameCommand =
     }
   /** BUILD MODE (spec §1): activate (typeId) or cancel (null) build
    *  placement — while active, map clicks place the building. */
-  | { readonly type: 'economy.buildMode'; readonly typeId: string | null };
+  | { readonly type: 'economy.buildMode'; readonly typeId: string | null }
+  /** CONFIRM the build preview (spec §21): starts the construction on the
+   *  previewed cell (the player saw the quality + estimated output). */
+  | { readonly type: 'economy.confirmConstruction'; readonly countryId: string };

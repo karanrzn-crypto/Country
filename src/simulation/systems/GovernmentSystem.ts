@@ -34,9 +34,10 @@ import { absoluteMonthIndex } from '../../time/Calendar';
 import type { StrategicResourcesConfig } from '../../economy/types';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
-import { stepProjects, startProject } from '../../economy/construction';
-import { aiBuildingTypeId } from '../../economy/aiEconomy';
+import { stepProjects, startProject, workforceCapacityOf, workforceUsedBy } from '../../economy/construction';
+import { aiBuildingTypeId, aiSecureConstructionMaterials } from '../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
+import { cellQualityOf } from '../../economy/quality';
 import { gridCellKey } from '../../world/map/MapTypes';
 import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
@@ -51,12 +52,11 @@ const EVENT_FIRE_CHANCE = 0.3;
 /** Strike pressure that triggers a general strike. */
 const GENERAL_STRIKE_THRESHOLD = 0.65;
 const GENERAL_STRIKE_MONTHS = 3;
-/** Monthly chance an AI country starts one building (ONLY when its treasury
- *  covers the full one-time money cost with a safety margin — construction
- *  must never bankrupt the world, spec §8/§14). */
+/** Monthly chance an AI country TRIES to start one building (ONLY when its
+ *  treasury covers the full one-time money cost with a safety margin —
+ *  construction must never bankrupt the world; materials/workforce/capacity
+ *  are enforced by the same startProject gates the player faces, §16). */
 const AI_CONSTRUCTION_CHANCE = 0.08;
-/** Max concurrent AI projects (the player gets the config cap). */
-const AI_PROJECT_CAP = 1;
 /** AI pays only when it keeps this multiple of the cost after paying. */
 const AI_TREASURY_MARGIN = 1.5;
 
@@ -111,7 +111,9 @@ export class GovernmentSystem implements SimulationSystemDef {
     // REAL stockpile; building projects advance by time (paid in full).
     growUrbanDevelopment(state, countryId);
     produceMilitary(state, countryId, config.militaryMaterials);
-    const built = stepProjects(state, countryId, config, month);
+    const built = context.map !== undefined
+      ? stepProjects(state, context.map, countryId, config, month)
+      : { completed: [] };
     for (const project of built.completed) {
       events.emit('economy.constructionCompleted', { countryId, projectId: project.id, typeId: project.typeId });
     }
@@ -173,14 +175,16 @@ export class GovernmentSystem implements SimulationSystemDef {
   }
 
   /**
-   * AI countries keep the WORLD economy alive (spec §6): occasionally a
+   * AI countries keep the WORLD economy alive (spec §16): occasionally a
    * non-player country starts the building its economy actually NEEDS —
    * the largest uncovered shortage picks the type (food shortage → مزرعه,
    * oil shortage → میدان نفتی …, aiEconomy.ts); without an urgent need it
-   * reinforces its strongest (specialization) good. ONLY when the treasury
-   * covers the full one-time money cost with a margin — construction must
-   * never bankrupt the world. The site is a FREE grid cell of its OWN land
-   * (spec §1 — one economic building per region), picked deterministically.
+   * reinforces its strongest (specialization) good. The AI faces EXACTLY
+   * the player's constraints: money (with a safety margin), construction
+   * materials, workforce pool and the concurrent-project capacity (§6),
+   * all enforced by the SAME startProject gates. The site is a FREE grid
+   * cell of its OWN land (spec §1), picked by land QUALITY (§3/§16 — the
+   * AI builds where the yield is best, never randomly into barren land).
    */
   private processAiEconomy(
     state: GameState,
@@ -195,51 +199,68 @@ export class GovernmentSystem implements SimulationSystemDef {
     if (record === undefined) return;
 
     // —— construction: occasionally start the NEEDED building, ONLY when
-    //    affordable with a margin (self-limiting AI demand keeps treasuries
-    //    healthy) ——
+    //    affordable with a margin AND the same gates the player faces ——
     const construction = state.economy.construction[countryId];
     if (
       construction !== undefined &&
-      construction.projects.length < AI_PROJECT_CAP &&
+      construction.projects.length < config.construction.maxProjects &&
       rng.chance(AI_CONSTRUCTION_CHANCE)
     ) {
-      const typeId = aiBuildingTypeId(state, countryId, config);
+      const typeId = aiBuildingTypeId(state, mapModel, countryId, config);
       const def = config.buildings.find((candidate) => candidate.id === typeId);
       const treasury = state.economy.treasury[countryId] ?? 0;
-      const affordable = def !== undefined && treasury >= def.cost * AI_TREASURY_MARGIN;
+      const affordable =
+        def !== undefined &&
+        treasury >= def.cost * AI_TREASURY_MARGIN &&
+        workforceUsedBy(state, countryId, config) + def.workforce <=
+          workforceCapacityOf(state, countryId, config);
       if (def !== undefined && affordable) {
-        const cell = this.pickFreeCell(state, mapModel, countryId, rng);
-        if (cell !== null) {
-          startProject(state, countryId, config, def.id, cell, month, () => newId('building'));
+        // Materials may need the WORLD MARKET (spec §16): the missing
+        // industrial units are bought from real sellers — no purchase, no
+        // project (a broke country simply skips construction this month).
+        if (aiSecureConstructionMaterials(state, countryId, config, def.materials)) {
+          const cell = this.pickBestCell(state, mapModel, countryId, def.resource, config, rng);
+          if (cell !== null) {
+            startProject(state, countryId, config, def.id, cell, month, () => newId('building'));
+          }
         }
       }
     }
   }
 
   /**
-   * ONE free grid cell of the country's OWN land (spec §1): no economic
-   * building, no running project. Samples deterministically through the
-   * campaign rng (bounded scan keeps the monthly tick cheap).
+   * The BEST free grid cell of the country's OWN land for ONE good (spec
+   * §3/§16): samples a bounded set through the campaign rng, keeps the
+ * highest land QUALITY (tie → the first sampled — deterministic). null
+   * when the country has no free cell.
    */
-  private pickFreeCell(
+  private pickBestCell(
     state: GameState,
     mapModel: StrategicMapModel,
     countryId: string,
+    resourceId: string,
+    config: StrategicResourcesConfig,
     rng: Random
   ): string | null {
     const country = mapModel.countries[countryId];
     if (country === undefined || country.cellIds.length === 0) return null;
-    const scanned = Math.min(country.cellIds.length, 32);
-    for (let attempt = 0; attempt < scanned; attempt += 1) {
+    let bestKey: string | null = null;
+    let bestQuality = -1;
+    const samples = Math.min(country.cellIds.length, 32);
+    for (let attempt = 0; attempt < samples; attempt += 1) {
       const cellIndex = country.cellIds[rng.int(country.cellIds.length)];
       const gridId = mapModel.features.gridIds[cellIndex];
       if (gridId === null) continue;
       const key = gridCellKey(countryId, gridId);
       if (economicBuildingAtCell(state, key) !== null) continue;
       if (cellIsUnderConstruction(state, key)) continue;
-      return key;
+      const quality = cellQualityOf(mapModel, cellIndex, resourceId, config);
+      if (quality > bestQuality) {
+        bestQuality = quality;
+        bestKey = key;
+      }
     }
-    return null;
+    return bestKey;
   }
 
   /** Ministry efficiency drifts toward a funding-dependent target. */

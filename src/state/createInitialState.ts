@@ -17,8 +17,11 @@ import { buildGovernmentSlice } from './slices/governmentSlice';
 import { repairBudgetRecord } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
 import { seedResourceEconomies } from '../economy/resources';
+import { cellQualityOf, reserveCapacityOf } from '../economy/quality';
+import type { StrategicResourcesConfig } from '../economy/types';
 import { emptyCountryResourceState, emptyCountryFinanceState, emptyCountryConstructionState } from '../economy/resourceTypes';
 import type { StrategicMapModel } from '../world/map/MapTypes';
+import { findGridCell } from '../world/map/MapGeography';
 import { DEFAULT_CONFIG } from '../config/configTypes';
 import type { GameState } from './GameState';
 import type { EconomySlice } from './slices/economySlice';
@@ -274,11 +277,44 @@ export function healPhase2State(
     if (state.economy.resources[countryId] === undefined) {
       state.economy.resources[countryId] = emptyCountryResourceState();
     }
+    // Shortage-duration tracking (spec §13) — records predating v18 gain
+    // the empty map (no history is KNOWN, none is invented).
+    const record = state.economy.resources[countryId];
+    if (record.shortageMonths === undefined) record.shortageMonths = {};
   }
   for (const countryId of Object.keys(state.economy.resources)) {
     if (!liveIds.has(countryId)) delete state.economy.resources[countryId];
   }
+  // Extractive buildings (spec §8) predating v18 have no reserve fields —
+  // size them from the LIVE cell quality (the same rule completion uses).
+  healBuildingReserves(state, mapModel, data.economyData.strategicResources);
   seedResourceEconomies(state, mapModel, data.economyData.strategicResources);
+}
+
+/**
+ * Sizes the FINITE extraction reserves (spec §8) of completed oil/iron
+ * buildings that lack them (saves predating v18): the SAME rule completion
+ * uses — reserveUnits × (0.5 + 0.5 × cell quality). Idempotent: records
+ * already carrying a reserve are untouched.
+ */
+function healBuildingReserves(
+  state: GameState,
+  mapModel: StrategicMapModel,
+  config: StrategicResourcesConfig
+): void {
+  for (const [countryId, buildings] of Object.entries(state.economy.buildings)) {
+    for (const building of Object.values(buildings)) {
+      if (building.reserveRemaining !== undefined && building.reserveCapacity !== undefined) continue;
+      const def = config.buildings.find((candidate) => candidate.id === building.typeId);
+      if (def === undefined || def.reserveUnits <= 0) continue;
+      const cellIndex = findGridCell(mapModel, building.cellKey);
+      const quality = cellQualityOf(mapModel, cellIndex, def.resource, config);
+      const capacity = reserveCapacityOf(def, quality, config);
+      building.reserveRemaining = capacity;
+      building.reserveCapacity = capacity;
+      void countryId;
+    }
+  }
 }
 
 /**

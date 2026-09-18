@@ -15,6 +15,9 @@ import {
   provinceResourceProduction,
   economicBuildingAtCell,
   cellUnderConstruction,
+  buildPreviewInfoOf,
+  singleBuildingOutput,
+  buildingIndexOfType,
   economyLevelBuildingFactor
 } from '../economy/resources';
 import { projectMonthsRemaining, constructionSpeedFactorOf } from '../economy/construction';
@@ -125,6 +128,7 @@ export class MapUI {
    */
   private buildTip: UIElement | null = null;
   private buildTipText: UIElement | null = null;
+  private buildTipConfirm: UIElement | null = null;
   private buildTipReason: string | null = null;
   private detailNodes: {
     flagImg: UIElement;
@@ -161,8 +165,10 @@ export class MapUI {
     this.buildLegend(root);
     this.screens.registerScreen('map', (container) => this.buildMapScreen(container));
     this.screens.registerScreen('countrySelect', (container) => this.buildCountrySelectScreen(container));
-    // —— BUILD MODE (spec §1) — the chip follows the CORE state; the map
-    // click itself is resolved by the core (mapPick → build placement).
+    // —— BUILD MODE + PREVIEW (spec §1/§3/§21) — the chip follows the CORE
+    // state: while placing, it names the building; after a cell pick it
+    // shows the region's QUALITY and the ESTIMATED output and asks for
+    // CONFIRMATION (تأیید ساخت) — the project only starts on confirm.
     const buildingName = (typeId: string): string =>
       context.data.economyData.strategicResources.buildings.find((candidate) => candidate.id === typeId)?.name ?? typeId;
     const refreshBuildTip = (): void => {
@@ -173,6 +179,27 @@ export class MapUI {
         this.buildTipReason = null;
         return;
       }
+      const preview = context.state.map.buildPreview;
+      if (preview !== null && preview.typeId === typeId) {
+        const info = buildPreviewInfoOf(
+          context.state,
+          context.map,
+          context.state.player.countryId,
+          context.data.economyData.strategicResources,
+          preview.typeId,
+          preview.cellKey
+        );
+        if (info !== null) {
+          const reserve = info.reserveUnits > 0 ? ` · ذخیرهٔ منطقه: ${faNum(info.reserveUnits)}` : '';
+          this.buildTipText.setText(
+            `منطقه ${info.gridId} — کیفیت زمین: ${info.qualityLabel} · تولید پایه ${faNum(info.baseOutput)} → تخمینی ${faNum(info.estimatedOutput)} / ماه${reserve}`
+          );
+          if (this.buildTipConfirm !== null) this.buildTipConfirm.setVisible(true);
+          this.buildTip.setVisible(true);
+          return;
+        }
+      }
+      if (this.buildTipConfirm !== null) this.buildTipConfirm.setVisible(false);
       const reason = this.buildTipReason !== null ? ` — ${this.buildTipReason}` : '';
       this.buildTipText.setText(`حالت ساخت: ${buildingName(typeId)} — یک خانهٔ شبکه از کشور خود را انتخاب کنید${reason}`);
       this.buildTip.setVisible(true);
@@ -182,6 +209,7 @@ export class MapUI {
       refreshBuildTip();
       void typeId;
     });
+    context.events.on('economy.buildPreview', refreshBuildTip);
     context.events.on('economy.buildRejected', ({ reason }) => {
       this.buildTipReason =
         reason === 'foreign-cell' ? 'فقط روی کشور خودتان می‌توانید بسازید'
@@ -326,6 +354,20 @@ export class MapUI {
     const buildTip = this.create('div', 'map-build-tip');
     const buildTipText = this.create('span', 'map-build-tip-text');
     buildTip.appendChild(buildTipText);
+    const buildTipConfirm = this.create('button', 'map-build-tip-cancel');
+    buildTipConfirm.setText('تأیید ساخت');
+    buildTipConfirm.onClick(() =>
+      this.commands.send({ type: 'economy.confirmConstruction', countryId: this.context?.state.player.countryId ?? '' })
+    );
+    buildTip.appendChild(buildTipConfirm);
+    const buildTipReselect = this.create('button', 'map-build-tip-cancel');
+    buildTipReselect.setText('خانهٔ دیگر');
+    buildTipReselect.onClick(() => {
+      const typeId = this.context?.state.map.buildMode ?? null;
+      // Re-asserting the SAME mode clears the preview, keeps the placement.
+      if (typeId !== null) this.commands.send({ type: 'economy.buildMode', typeId });
+    });
+    buildTip.appendChild(buildTipReselect);
     const buildTipCancel = this.create('button', 'map-build-tip-cancel');
     buildTipCancel.setText('لغو');
     buildTipCancel.onClick(() => this.commands.send({ type: 'economy.buildMode', typeId: null }));
@@ -334,6 +376,7 @@ export class MapUI {
     root.appendChild(buildTip);
     this.buildTip = buildTip;
     this.buildTipText = buildTipText;
+    this.buildTipConfirm = buildTipConfirm;
 
     // —— layer toggles (generated from the data-driven registry) ——
     const layerTitle = this.create('div', 'map-layers-title');
@@ -548,11 +591,28 @@ export class MapUI {
           const inBuild = cellUnderConstruction(context.state, info.cellKey);
           if (atCell !== null) {
             const def = config.buildings.find((candidate) => candidate.id === atCell.typeId);
+            const building = context.state.economy.buildings[atCell.countryId]?.[atCell.buildingId];
             const produced = config.resources.find((candidate) => candidate.id === def?.resource);
-            const amount = Math.round((def?.output ?? 0) * economyLevelBuildingFactor(context.state, atCell.countryId, config));
+            // The building's REAL output (quality × potential × level ×
+            // diminishing, reserve-capped) — never the flat config number.
+            const amount = building !== undefined
+              ? singleBuildingOutput(
+                  context.state,
+                  model,
+                  atCell.countryId,
+                  config,
+                  building,
+                  buildingIndexOfType(context.state, atCell.countryId, atCell.buildingId)
+                ).amount
+              : Math.round((def?.output ?? 0) * economyLevelBuildingFactor(context.state, atCell.countryId, config));
             addRow('ساختمان اقتصادی', def?.name ?? atCell.typeId);
             if (produced !== undefined && amount > 0) {
               addRow(`تولید ${produced.name}`, `+${faNum(amount)} / ماه`);
+            }
+            // Finite reserve (spec §8): extractive buildings show what is
+            // left — the region visibly depletes as it produces.
+            if (building?.reserveRemaining !== undefined && building.reserveCapacity !== undefined) {
+              addRow('ذخیرهٔ منطقه', `${faNum(Math.round(building.reserveRemaining))} از ${faNum(Math.round(building.reserveCapacity))}`);
             }
             addRow('وضعیت', 'فعال');
           } else if (inBuild !== null) {

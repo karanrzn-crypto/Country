@@ -75,6 +75,13 @@ export interface MapSlice {
    * are visible and clickable.
    */
   buildMode: string | null;
+  /**
+   * BUILD PREVIEW (spec §3/§21): the cell the player picked WHILE a build
+   * mode is active, held for CONFIRMATION — the UI shows the region's land
+   * quality and the estimated output, then the player confirms (the project
+   * starts) or cancels. Null when no cell is previewed.
+   */
+  buildPreview: { readonly typeId: string; readonly cellKey: string } | null;
   layerVisibility: Record<MapLayerId, boolean>;
   camera: MapCameraState;
   viewport: MapViewport;
@@ -103,6 +110,7 @@ export function createDefaultMapSlice(columns = 30, rows = 20, cellSize = 10): M
     selectedCityConnectionId: null,
     selectionMode: 'country',
     buildMode: null,
+    buildPreview: null,
     layerVisibility: { ...DEFAULT_LAYER_VISIBILITY },
     camera: { x: (columns * cellSize) / 2, z: (rows * cellSize) / 2, viewHeight: rows * cellSize },
     viewport: { width: 1280, height: 720 }

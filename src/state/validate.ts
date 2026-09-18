@@ -357,6 +357,9 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               imports: { type: 'record', values: { type: 'number', min: 0 } },
               exports: { type: 'record', values: { type: 'number', min: 0 } },
               shortage: { type: 'record', values: { type: 'number', min: 0 } },
+              // Duration of the running shortages (spec §13) — the heal
+              // fills {} for saves predating v18.
+              shortageMonths: { type: 'record', values: { type: 'number', min: 0, max: 120 } },
               tradeIncome: { type: 'number', min: 0 },
               tradeExpense: { type: 'number', min: 0 }
             }
@@ -385,7 +388,11 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
                 // Canonical grid-cell key (spec §1/§2) + the same LEGACY
                 // tolerated cityId the heal strips after resolving.
                 cellKey: { type: 'string' },
-                cityId: { type: 'optional', inner: { type: 'string' } }
+                cityId: { type: 'optional', inner: { type: 'string' } },
+                // Finite extraction reserve (spec §8) — oil/iron only; the
+                // heal fills the fields for records predating v18.
+                reserveRemaining: { type: 'optional', inner: { type: 'number', min: 0 } },
+                reserveCapacity: { type: 'optional', inner: { type: 'number', min: 0 } }
               }
             }
           }
@@ -518,6 +525,19 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
         selectedCityConnectionId: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
         selectionMode: { type: 'enum', values: ['country', 'province'] },
         buildMode: { type: 'union', options: [{ type: 'string' }, { type: 'null' }] },
+        buildPreview: {
+          type: 'union',
+          options: [
+            { type: 'null' },
+            {
+              type: 'object',
+              fields: {
+                typeId: { type: 'string' },
+                cellKey: { type: 'string' }
+              }
+            }
+          ]
+        },
         layerVisibility: { type: 'record', values: { type: 'boolean' } },
         camera: {
           type: 'object',

@@ -56,6 +56,7 @@ import {
   countryResourceProduction,
   countryResourceConsumption,
   buildingProductionOf,
+  spendBuildingReserves,
   safetyReserveUnits,
   specializedBaselineProduction,
   satisfactionPenaltyTotalOf
@@ -158,9 +159,12 @@ export function runEconomyCycle(
   // The MONTH-START stock is captured before the production lands — the
   // shortage check (step ۴) measures the deficit against what the country
   // actually HAD when the month began, never double-counting this month's
-  // production.
+  // production. Buildings now produce through QUALITY × POTENTIAL ×
+  // DIMINISHING × level (spec §3/§7/§15); extractive buildings pull from
+  // their FINITE reserve, which this pass spends (spec §8).
   const productionCache = new Map<string, Record<string, number>>();
   const stockAtMonthStart = new Map<string, Record<string, number>>();
+  const extractions = new Map<string, Record<string, number>>();
   for (const countryId of order) {
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
     const record = state.economy.resources[countryId]!;
@@ -169,14 +173,16 @@ export function runEconomyCycle(
       startStock[resourceId] = Math.max(0, Math.round(record.stock[resourceId] ?? 0));
     }
     stockAtMonthStart.set(countryId, startStock);
+    const buildings = buildingProductionOf(state, mapModel, countryId, config);
     record.production = { ...deposits };
-    for (const [resourceId, amount] of Object.entries(buildingProductionOf(state, countryId, config))) {
+    for (const [resourceId, amount] of Object.entries(buildings.totals)) {
       record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
     }
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
     for (const [resourceId, amount] of Object.entries(baseline)) {
       record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
     }
+    extractions.set(countryId, buildings.extraction);
     if (applyStep) {
       for (const resourceId of resourceIds) {
         const produced = record.production[resourceId] ?? 0;
@@ -191,6 +197,12 @@ export function runEconomyCycle(
   for (const countryId of order) {
     const record = state.economy.resources[countryId]!;
     record.consumption = countryResourceConsumption(state, countryId, config);
+    if (applyStep) {
+      // The extraction reserves (spec §8) are spent ONCE the production
+      // landed — the reserve caps what the building actually pulled out.
+      const extraction = extractions.get(countryId);
+      if (extraction !== undefined) spendBuildingReserves(state, countryId, extraction);
+    }
     if (!applyStep) continue;
     const startStock = stockAtMonthStart.get(countryId)!;
     for (const resourceId of resourceIds) {
@@ -201,8 +213,18 @@ export function runEconomyCycle(
       // month-start buffer. Positive = the country ran DRY this month.
       const gap = consumed - (record.production[resourceId] ?? 0) - Math.max(0, startStock[resourceId] ?? 0);
       const short = Math.max(0, Math.round(gap));
-      if (short > 0) record.shortage[resourceId] = short;
-      else delete record.shortage[resourceId];
+      if (short > 0) {
+        record.shortage[resourceId] = short;
+        // Duration tracking (§13): consecutive months the country could
+        // NOT cover the need itself — escalates the satisfaction penalty.
+        record.shortageMonths[resourceId] = Math.min(
+          120,
+          Math.round((record.shortageMonths[resourceId] ?? 0) + 1)
+        );
+      } else {
+        delete record.shortage[resourceId];
+        delete record.shortageMonths[resourceId];
+      }
     }
   }
 
@@ -317,6 +339,14 @@ export function economyLevelTargetOf(
  * simply buys nothing (no debt exists). Sellers never dip below their
  * safety reserve (food keeps the larger buffer — §5's anti-famine guard).
  *
+ * BUDGET HONESTY (spec §11/§12): one buyer buys in SEVERAL resource passes
+ * per month — the affordability of EVERY deal draws down the SAME running
+ * budget, so a country can never commit more import money than its
+ * treasury holds (food is settled first — config order — the essential
+ * good is protected). Without this, the per-resource caps would each see
+ * the whole treasury and over-commit it, draining the floor month after
+ * month into a famine the real budget could never have caused.
+ *
  * POST-trade honesty (spec §8): whatever the imports covered is no longer a
  * shortage — every buyer's record keeps only the UNCOVERED deficit, the ONE
  * number the coverage ratio, the satisfaction penalty, opinion and the
@@ -336,6 +366,13 @@ export function resolveWorldTrade(
       record.imports = {};
       record.exports = {};
     }
+  }
+  // The running IMPORT BUDGET of every buyer (spec §11/§12): every deal
+  // this month draws it down — the sum of a country's deals can never
+  // exceed what its treasury actually holds.
+  const importBudget = new Map<string, number>();
+  for (const countryId of order) {
+    importBudget.set(countryId, Math.max(0, state.economy.treasury[countryId] ?? 0));
   }
   for (const resourceId of resourceIds) {
     const price = config.resources.find((resource) => resource.id === resourceId)?.price ?? 0;
@@ -377,7 +414,9 @@ export function resolveWorldTrade(
         );
         if (spare <= 0) continue;
         const affordable =
-          price > 0 ? Math.floor((state.economy.treasury[buyer.countryId] ?? 0) / price) : needed;
+          price > 0
+            ? Math.floor((importBudget.get(buyer.countryId) ?? 0) / price)
+            : needed;
         const amount = Math.max(0, Math.min(needed, spare, affordable));
         if (amount <= 0) continue;
 
@@ -385,6 +424,8 @@ export function resolveWorldTrade(
         // REAL units move: seller −, buyer +.
         sellerRecord.stock[resourceId] = (sellerRecord.stock[resourceId] ?? 0) - amount;
         buyerRecord.stock[resourceId] = Math.round((buyerRecord.stock[resourceId] ?? 0) + amount);
+        // The buyer's import budget draws down across ALL resource passes.
+        importBudget.set(buyer.countryId, roundTo((importBudget.get(buyer.countryId) ?? 0) - cost, 2));
         // Ledger lines (treasury is written ONCE in step ۷ — never here).
         buyerRecord.imports[resourceId] = Math.round((buyerRecord.imports[resourceId] ?? 0) + amount);
         sellerRecord.exports[resourceId] = Math.round((sellerRecord.exports[resourceId] ?? 0) + amount);
@@ -397,7 +438,9 @@ export function resolveWorldTrade(
   }
 
   // POST-trade deficit bookkeeping (spec §8): imports shrink the shortage;
-  // only the UNCOVERED part survives as the record's shortage.
+  // only the UNCOVERED part survives as the record's shortage. A deficit
+  // the market covered resets that good's duration clock too (§13 measures
+  // the CONSECUTIVE months the people were actually left unsupplied).
   for (const countryId of order) {
     const record = state.economy.resources[countryId];
     if (record === undefined) continue;
@@ -407,7 +450,10 @@ export function resolveWorldTrade(
         Math.round((record.shortage[resourceId] ?? 0) - (record.imports[resourceId] ?? 0))
       );
       if (remaining > 0) record.shortage[resourceId] = remaining;
-      else delete record.shortage[resourceId];
+      else {
+        delete record.shortage[resourceId];
+        delete record.shortageMonths[resourceId];
+      }
     }
   }
 }

@@ -32,6 +32,16 @@ import type { StrategicResourcesConfig, SatisfactionConfig } from './types';
 import { liveUnits } from '../state/slices/militarySlice';
 import { type CountryResourceState, type ResourceDisplayStatus, type ResourceStatus } from './resourceTypes';
 import { countryBaselineProduction } from './domesticBaseline';
+import { findGridCell } from '../world/map/MapGeography';
+import {
+  cellQualityOf,
+  countryPotentialFactor,
+  diminishingFactorOf,
+  qualityLabelOf,
+  reserveCapacityOf,
+  specializationRankingOf,
+  estimatedBuildingOutputOf
+} from './quality';
 import { roundTo } from '../utils/math';
 
 export { emptyCountryResourceState } from './resourceTypes';
@@ -214,26 +224,185 @@ export function economyLevelBuildingFactor(
 }
 
 /**
- * Monthly BASE production added by the country's completed buildings,
- * scaled by the economy-level factor (spec §1/§3 — production depends on
- * the building AND the overall economy, never multi-fold).
+ * The BUILDING production breakdown of ONE country (spec §1/§3/§7/§8/§15):
+ * every completed building's output scales by its CELL QUALITY, the
+ * country's resource POTENTIAL, the economy level (deliberately weak, §14)
+ * and the country's DIMINISHING RETURNS per type — and an extractive
+ * building (oil, iron) can never produce more than the reserve it still
+ * holds.
+ *
+ * PURE: the reserve is READ here, never spent — the monthly cycle owns the
+ * depletion (`extraction` tells it exactly how many units each extractive
+ * building pulled out this month).
  */
+export interface BuildingOutputBreakdown {
+  /** Resource totals (the record.production merge). */
+  readonly totals: Record<string, number>;
+  /** buildingId → units ACTUALLY extracted this month (oil/iron only). */
+  readonly extraction: Record<string, number>;
+}
+
 export function buildingProductionOf(
   state: GameState,
+  model: StrategicMapModel,
   countryId: string,
   config: StrategicResourcesConfig
-): Record<string, number> {
-  const output: Record<string, number> = {};
+): BuildingOutputBreakdown {
+  const totals: Record<string, number> = {};
+  const extraction: Record<string, number> = {};
   const buildings = state.economy.buildings[countryId];
-  if (buildings === undefined) return output;
-  const factor = economyLevelBuildingFactor(state, countryId, config);
-  for (const building of Object.values(buildings)) {
-    const def = config.buildings.find((candidate) => candidate.id === building.typeId);
-    if (def === undefined) continue;
-    const amount = Math.round((def.output ?? 0) * factor);
-    if (amount > 0) addToRecord(output, def.resource, amount);
+  if (buildings === undefined) return { totals, extraction };
+  // Diminishing ranks buildings of ONE type by id (deterministic across
+  // save/load — JSON object order is preserved, but sorting is safer).
+  const idsByType = new Map<string, string[]>();
+  for (const buildingId of Object.keys(buildings).sort()) {
+    const typeId = buildings[buildingId].typeId;
+    const list = idsByType.get(typeId);
+    if (list !== undefined) list.push(buildingId);
+    else idsByType.set(typeId, [buildingId]);
   }
-  return output;
+  for (const [typeId, buildingIds] of idsByType) {
+    void typeId;
+    buildingIds.forEach((buildingId, index) => {
+      const one = singleBuildingOutput(state, model, countryId, config, buildings[buildingId], index);
+      if (one.amount > 0) addToRecord(totals, one.resource, one.amount);
+      if (one.extraction > 0) extraction[buildingId] = one.extraction;
+    });
+  }
+  return { totals, extraction };
+}
+
+/** The monthly output of ONE building — its cell's quality × the country's
+ *  potential × the economy level × diminishing returns, capped by the
+ *  remaining extraction reserve (spec §3/§7/§8/§15). */
+export interface SingleBuildingOutput {
+  readonly resource: string;
+  readonly amount: number;
+  /** The units this building ACTUALLY pulled from its reserve (0 for
+   *  inexhaustible types — the caller spends the reserve from this). */
+  readonly extraction: number;
+}
+
+/** The 0-based DIMINISHING index of ONE building inside its type stack. */
+export function buildingIndexOfType(
+  state: GameState,
+  countryId: string,
+  buildingId: string
+): number {
+  const buildings = state.economy.buildings[countryId];
+  if (buildings === undefined) return 0;
+  const typeId = buildings[buildingId]?.typeId;
+  if (typeId === undefined) return 0;
+  const ids = Object.keys(buildings).filter((id) => buildings[id].typeId === typeId).sort();
+  return Math.max(0, ids.indexOf(buildingId));
+}
+
+/** The monthly output of ONE building record (see SingleBuildingOutput). */
+export function singleBuildingOutput(
+  state: GameState,
+  model: StrategicMapModel,
+  countryId: string,
+  config: StrategicResourcesConfig,
+  building: { readonly typeId: string; readonly cellKey: string; readonly reserveRemaining?: number },
+  index: number
+): SingleBuildingOutput {
+  const def = config.buildings.find((candidate) => candidate.id === building.typeId);
+  if (def === undefined) return { resource: 'food', amount: 0, extraction: 0 };
+  const cellIndex = findGridCell(model, building.cellKey);
+  const quality = cellQualityOf(model, cellIndex, def.resource, config);
+  const potential = countryPotentialFactor(model, countryId, def.resource, config);
+  const levelFactor = economyLevelBuildingFactor(state, countryId, config);
+  const diminish = diminishingFactorOf(index, config);
+  let amount = Math.max(0, Math.round(def.output * quality * potential * levelFactor * diminish));
+  let extraction = 0;
+  // Finite reserve (spec §8): extraction is capped by what is LEFT.
+  if (def.reserveUnits > 0) {
+    const remaining = building.reserveRemaining ?? def.reserveUnits;
+    amount = Math.min(amount, Math.max(0, Math.floor(remaining)));
+    extraction = Math.max(0, amount);
+  }
+  return { resource: def.resource, amount, extraction };
+}
+
+/**
+ * Spends the reserve of ONE country's extractive buildings (spec §8) —
+ * called by the monthly cycle AFTER the production landed on the stock.
+ * A building whose reserve reached zero simply produces nothing next month
+ * (the region is exhausted; the building stands but is silent).
+ */
+export function spendBuildingReserves(
+  state: GameState,
+  countryId: string,
+  extraction: Readonly<Record<string, number>>
+): void {
+  const buildings = state.economy.buildings[countryId];
+  if (buildings === undefined) return;
+  for (const [buildingId, amount] of Object.entries(extraction)) {
+    const building = buildings[buildingId];
+    if (building === undefined || building.reserveRemaining === undefined) continue;
+    building.reserveRemaining = Math.max(0, Math.round(building.reserveRemaining - amount));
+  }
+}
+
+/** The build PREVIEW of ONE cell (spec §3/§21) — what the UI shows BEFORE
+ *  the player confirms a construction: land quality, base vs estimated
+ *  output, and the extractive reserve the region would start with. */
+export interface BuildPreviewInfo {
+  readonly cellKey: string;
+  readonly gridId: string;
+  readonly quality: number;
+  readonly qualityLabel: string;
+  /** The building's config output (قبل از کیفیت/پتانسیل). */
+  readonly baseOutput: number;
+  /** The estimated REAL monthly output on this cell. */
+  readonly estimatedOutput: number;
+  /** The extraction reserve this cell would hold (0 = inexhaustible). */
+  readonly reserveUnits: number;
+}
+
+/**
+ * Computes the preview of building `typeId` on `cellKey` (pure — reads the
+ * live state only for the economy level and the diminishing index). Null
+ * for an unknown type or a cell that is not real land.
+ */
+export function buildPreviewInfoOf(
+  state: GameState,
+  model: StrategicMapModel,
+  countryId: string,
+  config: StrategicResourcesConfig,
+  typeId: string,
+  cellKey: string
+): BuildPreviewInfo | null {
+  const def = config.buildings.find((candidate) => candidate.id === typeId);
+  if (def === undefined) return null;
+  const cellIndex = findGridCell(model, cellKey);
+  if (cellIndex < 0) return null;
+  const gridId = model.features.gridIds[cellIndex] ?? '';
+  const quality = cellQualityOf(model, cellIndex, def.resource, config);
+  const potential = countryPotentialFactor(model, countryId, def.resource, config);
+  const levelFactor = economyLevelBuildingFactor(state, countryId, config);
+  const existing = Object.values(state.economy.buildings[countryId] ?? {}).filter(
+    (building) => building.typeId === typeId
+  ).length;
+  const estimatedOutput = estimatedBuildingOutputOf(
+    def,
+    quality,
+    potential,
+    levelFactor,
+    existing,
+    config
+  );
+  const reserveUnits =
+    def.reserveUnits > 0 ? reserveCapacityOf(def, quality, config) : 0;
+  return {
+    cellKey,
+    gridId,
+    quality,
+    qualityLabel: qualityLabelOf(quality, config),
+    baseOutput: def.output,
+    estimatedOutput,
+    reserveUnits
+  };
 }
 
 /**
@@ -453,10 +622,12 @@ export function satisfactionPenaltyOf(coverage: number, config: SatisfactionConf
 }
 
 /**
- * The TOTAL satisfaction penalty of ONE country this month (spec §7): the
- * sum of the graded penalties over ALL goods — the ONE number the opinion
- * economy topic, the stability drop and the UI read. Zero when fully
- * supplied.
+ * The TOTAL satisfaction penalty of ONE country this month (spec §7/§13):
+ * the sum of the graded penalties over ALL goods, each ESCALATED by how
+ * many consecutive months that shortage has lasted (a long shortage bites
+ * harder; one bad month never collapses satisfaction). The ONE number the
+ * opinion economy topic, the stability drop and the UI read. Zero when
+ * fully supplied.
  */
 export function satisfactionPenaltyTotalOf(
   state: GameState,
@@ -465,9 +636,12 @@ export function satisfactionPenaltyTotalOf(
 ): number {
   const record = state.economy.resources[countryId];
   if (record === undefined) return 0;
+  const { perMonth, maxMultiplier } = config.satisfaction.durationEscalation;
   let total = 0;
   for (const resource of config.resources) {
-    total += satisfactionPenaltyOf(coverageOf(record, resource.id), config.satisfaction);
+    const months = Math.max(0, Math.round(record.shortageMonths[resource.id] ?? 0));
+    const factor = Math.min(maxMultiplier, 1 + perMonth * Math.max(0, months - 1));
+    total += satisfactionPenaltyOf(coverageOf(record, resource.id), config.satisfaction) * factor;
   }
   return roundTo(total, 4);
 }
@@ -515,9 +689,11 @@ export function resourceStatusOf(record: CountryResourceState, resourceId: strin
 /**
  * Seeds the resource records at state creation / after every load: computes
  * production + consumption from the LIVE map and state and fills empty
- * stockpiles from the configured starting buffer. NO stock step, NO trade,
- NO money — the monthly cycle owns all of that (a heal must never
- * double-apply a month).
+ * stockpiles with the country's LIMITED starting buffer (spec §1/§10 —
+ * a few MONTHS of its own consumption per good, flavored by its economic
+ * profile: a food-rich country holds relatively more food). NO stock step,
+ * NO trade, NO money — the monthly cycle owns all of that (a heal must
+ * never double-apply a month).
  */
 export function seedResourceEconomies(
   state: GameState,
@@ -529,9 +705,9 @@ export function seedResourceEconomies(
   for (const countryId of countryIds) {
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
-    const buildings = buildingProductionOf(state, countryId, config);
+    const buildings = buildingProductionOf(state, mapModel, countryId, config);
     const production: Record<string, number> = { ...deposits };
-    for (const source of [baseline, buildings]) {
+    for (const source of [baseline, buildings.totals]) {
       for (const [resourceId, amount] of Object.entries(source)) {
         production[resourceId] = Math.round((production[resourceId] ?? 0) + amount);
       }
@@ -539,10 +715,18 @@ export function seedResourceEconomies(
     const consumption = countryResourceConsumption(state, countryId, config);
     const previous = state.economy.resources[countryId];
     const stock: Record<string, number> = { ...(previous?.stock ?? {}) };
+    // LIMITED starting buffer (spec §1/§10): months of the country's OWN
+    // consumption × its economic profile flavor, floored for tiny countries.
+    const ranks = specializationRankingOf(mapModel, countryId, config);
+    const flavorTable = config.startingStock.flavorByRank;
     for (const resourceId of strategicResourceIds(config)) {
-      if (stock[resourceId] === undefined) {
-        stock[resourceId] = Math.round(config.startingStock[resourceId] ?? 0);
-      }
+      if (stock[resourceId] !== undefined) continue;
+      const months = config.startingStock.months[resourceId] ?? 2;
+      const floor = config.startingStock.floor[resourceId] ?? 0;
+      const rank = ranks[resourceId] ?? config.resources.length - 1;
+      const flavor = flavorTable[Math.min(rank, flavorTable.length - 1)] ?? 1;
+      const buffer = months * (consumption[resourceId] ?? 0) * flavor;
+      stock[resourceId] = Math.round(Math.max(floor, buffer));
     }
     state.economy.resources[countryId] = {
       stock,
@@ -551,6 +735,7 @@ export function seedResourceEconomies(
       imports: {},
       exports: {},
       shortage: {},
+      shortageMonths: { ...(previous?.shortageMonths ?? {}) },
       tradeIncome: 0,
       tradeExpense: 0
     };

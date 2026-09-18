@@ -138,9 +138,10 @@ describe('wider simple economy (11-section spec)', () => {
     expect(economyLevelOf(state, countryId, config)).toBe(config.economyLevel.start);
     expect(economyLevelBuildingFactor(state, countryId, config)).toBe(1);
 
-    // Level 70 → +12% (config 0.006/point) — moderate, never multi-fold.
+    // Level 70 → +8% (config 0.004/point) — deliberately WEAK (spec §14:
+    // the economy is a booster, never a substitute for resources/quality).
     state.economy.economyLevel[countryId] = 70;
-    expect(economyLevelBuildingFactor(state, countryId, config)).toBeCloseTo(1.12, 3);
+    expect(economyLevelBuildingFactor(state, countryId, config)).toBeCloseTo(1.08, 3);
     // Level 35 → below 1 — the weak economy produces LESS (spec §3).
     state.economy.economyLevel[countryId] = 35;
     expect(economyLevelBuildingFactor(state, countryId, config)).toBeLessThan(1);
@@ -148,11 +149,11 @@ describe('wider simple economy (11-section spec)', () => {
 
     // The building output follows the factor through the REAL state read.
     state.economy.economyLevel[countryId] = config.economyLevel.start;
-    const neutral = buildingProductionOf(state, countryId, config);
+    const neutral = buildingProductionOf(state, context.map, countryId, config).totals;
     state.economy.economyLevel[countryId] = 80;
-    const boosted = buildingProductionOf(state, countryId, config);
+    const boosted = buildingProductionOf(state, context.map, countryId, config).totals;
     state.economy.economyLevel[countryId] = 20;
-    const cut = buildingProductionOf(state, countryId, config);
+    const cut = buildingProductionOf(state, context.map, countryId, config).totals;
     for (const [resourceId, amount] of Object.entries(neutral)) {
       expect(boosted[resourceId] ?? 0).toBeGreaterThan(amount);
       expect(cut[resourceId] ?? 0).toBeLessThan(amount);
@@ -202,6 +203,7 @@ describe('wider simple economy (11-section spec)', () => {
     const countryId = playerCountryId;
     const def = config.buildings[0]; // the farm
     state.economy.treasury[countryId] = def.cost * 4;
+    state.economy.resources[countryId]!.stock.industrial = def.materials * 10;
 
     const ownCell = freeCellOf(countryId);
     expect(ownCell).not.toBeNull();
@@ -231,7 +233,7 @@ describe('wider simple economy (11-section spec)', () => {
     // Completion anchors the BUILDING on the same cell (spec §1.8).
     const speed = 0.75 + 0.5 * 0.5;
     for (let month = 11; month <= 10 + Math.ceil(def.buildMonths / speed) + 2; month += 1) {
-      stepProjects(state, countryId, config, month);
+      stepProjects(state, context.map, countryId, config, month);
     }
     const done = economicBuildingAtCell(state, ownCell!);
     expect(done).not.toBeNull();
@@ -409,6 +411,7 @@ describe('wider simple economy (11-section spec)', () => {
     const countryId = ids()[1];
     const def = config.buildings.find((candidate) => candidate.id === 'iron_mine')!;
     state.economy.treasury[countryId] = def.cost * 2;
+    state.economy.resources[countryId]!.stock.industrial = def.materials * 10;
     const cell = freeCellOf(countryId);
     expect(cell).not.toBeNull();
     const started = startProject(state, countryId, config, def.id, cell!, 20, () => 'bp-t12');
@@ -426,7 +429,7 @@ describe('wider simple economy (11-section spec)', () => {
     expect(project!.progress).toBeLessThanOrEqual(1);
     // Cleanup: finish the project so other tests see a free world.
     for (let month = 20; month <= 20 + def.buildMonths + 2; month += 1) {
-      stepProjects(state, countryId, config, month);
+      stepProjects(state, context.map, countryId, config, month);
     }
     expect(cellUnderConstruction(state, cell!)).toBeNull();
     state.economy.buildings[countryId] = {};
@@ -447,6 +450,7 @@ describe('wider simple economy (11-section spec)', () => {
 
     // UNDER CONSTRUCTION → the type + the construction flag (pale variant).
     state.economy.treasury[countryId] = farm.cost * 2;
+    state.economy.resources[countryId]!.stock.industrial = farm.materials * 10;
     expect(startProject(state, countryId, config, farm.id, cell!, 30, () => 'bp-t13').ok).toBe(true);
     const buildingTint = cellEconomyTintOf(state, cell!);
     expect(buildingTint).toEqual({ typeId: farm.id, underConstruction: true });
@@ -464,7 +468,7 @@ describe('wider simple economy (11-section spec)', () => {
 
     // Completion flips the tint to the ACTIVE building (same cell).
     for (let month = 30; month <= 30 + farm.buildMonths + 2; month += 1) {
-      stepProjects(state, countryId, config, month);
+      stepProjects(state, context.map, countryId, config, month);
     }
     expect(cellEconomyTintOf(state, cell!)).toEqual({ typeId: farm.id, underConstruction: false });
     // Cleanup.
@@ -482,46 +486,48 @@ describe('wider simple economy (11-section spec)', () => {
 
     // Food shortage → مزرعه (the food building).
     record.shortage = { food: 300 };
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBe(
       config.buildings.find((candidate) => candidate.resource === 'food')?.id ?? null
     );
 
     // Oil shortage LARGER than the food one → میدان نفتی (need ranking).
     record.shortage = { food: 100, oil: 400 };
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBe(
       config.buildings.find((candidate) => candidate.resource === 'oil')?.id ?? null
     );
 
     // Iron-only shortage → معدن آهن.
     record.shortage = { iron: 60 };
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBe(
       config.buildings.find((candidate) => candidate.resource === 'iron')?.id ?? null
     );
 
-    // NO shortage → the strongest good NOT already in surplus (developing a
-    // surplus good again would be irrational — spec §6). With the stockpile
-    // drained nothing counts as surplus, so the strongest (oil) wins.
+    // NO shortage → the strongest good NOT already covered (developing a
+    // covered good again would be irrational — spec §16). Oil is massively
+    // over-produced (900 ≫ 1.1 × its need), so the skip now falls to the
+    // strongest UNDER-covered good with real potential: food here.
     record.shortage = {};
     const savedProduction = { ...record.production };
     const savedStock = { ...record.stock };
     record.production = { food: 50, iron: 20, oil: 900, industrial: 30 };
     record.stock = {};
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(
-      config.buildings.find((candidate) => candidate.resource === 'oil')?.id ?? null
-    );
-
-    // OIL IN SURPLUS (huge stock, net ≫ consumption) → skipped; the next-best
-    // non-surplus good (food here) is developed instead — diversification.
-    record.stock = { oil: 10_000 };
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBe(
       config.buildings.find((candidate) => candidate.resource === 'food')?.id ?? null
     );
+
+    // DEEP SURPLUS everywhere (all goods covered, the strongest ≥ 2× its
+    // consumption) → the AI builds NOTHING: stacking more of an already-
+    // dominant export good would grind toward effortless self-sufficiency
+    // (§24 S8's prohibition; the developed economy stops building instead).
+    record.production = { food: 1200, iron: 300, oil: 900, industrial: 400 };
+    record.stock = { oil: 10_000 };
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBeNull();
 
     // NO production at all → develop the FIRST config good (deterministic —
     // a country producing nothing still develops, the world stays alive).
     record.production = {};
     record.stock = {};
-    expect(aiBuildingTypeId(state, countryId, config)).toBe(config.buildings[0].id);
+    expect(aiBuildingTypeId(state, context.map, countryId, config)).toBe(config.buildings[0].id);
     record.production = savedProduction;
     record.stock = savedStock;
     record.shortage = {};

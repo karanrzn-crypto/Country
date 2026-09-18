@@ -45,6 +45,7 @@ export interface CoreGameApi {
   economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean;
   economyStartConstruction(countryId: string, typeId: string, cellKey: string): boolean;
   economyBuildMode(typeId: string | null): boolean;
+  economyConfirmConstruction(countryId: string): boolean;
   readonly ui: UIManager | null;
   readonly bus: EventBus;
   readonly log: Logger;
@@ -101,4 +102,5 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('economy.buyResource', (cmd) => game.economyBuyResource(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amount));
   bus.register('economy.startConstruction', (cmd) => game.economyStartConstruction(cmd.countryId, cmd.typeId, cmd.cellKey));
   bus.register('economy.buildMode', (cmd) => game.economyBuildMode(cmd.typeId));
+  bus.register('economy.confirmConstruction', (cmd) => game.economyConfirmConstruction(cmd.countryId));
 }

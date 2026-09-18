@@ -212,6 +212,9 @@ export interface GameEventMap {
   'economy.constructionCompleted': { readonly countryId: string; readonly projectId: string; readonly typeId: string };
   /** BUILD MODE (spec §1): activated (typeId) or cancelled (null). */
   'economy.buildModeChanged': { readonly typeId: string | null };
+  /** A build click picked a PREVIEW cell (spec §21) — the UI shows the
+   *  region's quality + estimated output and asks for confirmation. */
+  'economy.buildPreview': { readonly typeId: string; readonly cellKey: string };
   /** A build click did NOT place a building — the mode stays active. */
   'economy.buildRejected': { readonly reason: 'no-cell' | 'foreign-cell' | 'start-failed'; readonly typeId: string };
 }

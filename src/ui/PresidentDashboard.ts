@@ -9,7 +9,12 @@ import { decisionBlockReason } from '../government/DecisionEngine';
 import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
 import { resourceDisplayStatusOf } from '../economy/resources';
-import { projectMonthsRemaining, constructionSpeedFactorOf } from '../economy/construction';
+import {
+  projectMonthsRemaining,
+  constructionSpeedFactorOf,
+  workforceCapacityOf,
+  workforceUsedBy
+} from '../economy/construction';
 import { sellersOf, unitPriceOf } from '../economy/purchase';
 import type { StrategicResourcesConfig } from '../economy/types';
 import { faNum, faSigned, faPopulation, toFaDigits } from '../utils/format';
@@ -575,10 +580,14 @@ export class PresidentDashboard {
     const construction = state.economy.construction[countryId];
     const projects = construction?.projects ?? [];
     const treasury = Math.floor(state.economy.treasury[countryId] ?? 0);
+    const record = state.economy.resources[countryId];
+    const materialsStock = Math.round(record?.stock.industrial ?? 0);
+    const heldWorkforce = workforceUsedBy(state, countryId, config);
+    const workforceCapacity = workforceCapacityOf(state, countryId, config);
     const gridIdOf = (cellKey: string): string => cellKey.slice(cellKey.indexOf('#') + 1);
     const signature =
       JSON.stringify(projects.map((project) => [project.id, project.typeId, project.progress, project.cellKey])) +
-      `#${projects.length}#${treasury}#${state.map.buildMode ?? ''}`;
+      `#${projects.length}#${treasury}#${materialsStock}#${heldWorkforce}#${workforceCapacity}#${state.map.buildMode ?? ''}#${state.map.buildPreview?.cellKey ?? ''}`;
     if (signature === this.dynamicSignatures.get('construction')) return;
     this.dynamicSignatures.set('construction', signature);
     this.rebuild('construction', this.parents.get('construction'), () => {
@@ -624,24 +633,30 @@ export class PresidentDashboard {
         card.appendChild(status);
         rows.push(card);
       }
-      // — the buildable buildings (bottom) — cost + effect BEFORE building
-      //   (spec §1.7), then ساخت starts the placement mode —
+      // — the buildable buildings (bottom) — the FULL cost block BEFORE
+      //   building (spec §4): money + materials + workforce + months + the
+      //   base output; ساخت starts the placement mode —
+      const workHead = this.create('div', 'pd-buildable-detail');
+      workHead.setText(`ظرفیت ساخت: ${faNum(projects.length)}/${faNum(config.construction.maxProjects)} · نیروی کار ساخت: ${faNum(heldWorkforce)} از ${faNum(workforceCapacity)} · مصالح (کالاهای صنعتی): ${faNum(materialsStock)}`);
+      rows.push(workHead);
       for (const def of config.buildings) {
         const row = this.create('div', 'pd-buildable');
         const info = this.create('div', 'pd-buildable-info');
         const name = this.create('span', 'pd-buildable-name');
         name.setText(def.name);
         info.appendChild(name);
-        const effect = `تولید +${faNum(def.output)} ${this.resourceName(config, def.resource)} / ماه`;
+        const effect = `تولید پایه +${faNum(def.output)} ${this.resourceName(config, def.resource)} / ماه`;
         const detail = this.create('div', 'pd-buildable-detail');
         detail.setText(
-          `هزینهٔ ساخت (یک‌بار): ${faNum(def.cost)} · مدت ساخت ${faNum(def.buildMonths)} ماه → ${effect}`
+          `هزینه: ${faNum(def.cost)} پول · ${faNum(def.materials)} مصالح · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه → ${effect}`
         );
         info.appendChild(detail);
         row.appendChild(info);
         const build = this.create('button', 'pd-build');
         const atCap = projects.length >= config.construction.maxProjects;
         const tooExpensive = treasury < def.cost;
+        const noMaterials = materialsStock < def.materials;
+        const noWorkforce = heldWorkforce + def.workforce > workforceCapacity;
         if (state.map.buildMode === def.id) {
           build.setText('در حال انتخاب منطقه…');
           build.setAttribute('disabled', 'true');
@@ -651,11 +666,18 @@ export class PresidentDashboard {
         } else if (tooExpensive) {
           build.setText(`پول کافی نیست (${faNum(def.cost)})`);
           build.setAttribute('disabled', 'true');
+        } else if (noMaterials) {
+          build.setText(`مصالح کافی نیست (${faNum(def.materials)})`);
+          build.setAttribute('disabled', 'true');
+        } else if (noWorkforce) {
+          build.setText(`نیروی کار کافی نیست (${faNum(def.workforce)})`);
+          build.setAttribute('disabled', 'true');
         } else {
           build.setText('ساخت');
           build.onClick(() => {
-            // ACTIVATE THE BUILD MODE (core state): map clicks now place
-            // the building. The dashboard closes so the map is reachable.
+            // ACTIVATE THE BUILD MODE (core state): map clicks now PREVIEW
+            // the region (quality + estimated output, then تأیید). The
+            // dashboard closes so the map is reachable.
             this.send({ type: 'economy.buildMode', typeId: def.id });
             this.send({ type: 'ui.closeScreen', screenId: 'president' });
           });

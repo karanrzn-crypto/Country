@@ -90,7 +90,7 @@
       {
         "id": "food",
         "name": "غذا",
-        "price": 0.5
+        "price": 0.4
       },
       {
         "id": "iron",
@@ -110,25 +110,39 @@
     ],
     "productionScale": 2.4,
     "startingStock": {
-      "food": 4000,
-      "iron": 1200,
-      "oil": 600,
-      "industrial": 600
+      "months": {
+        "food": 3,
+        "iron": 2,
+        "oil": 2,
+        "industrial": 2
+      },
+      "floor": {
+        "food": 250,
+        "iron": 80,
+        "oil": 50,
+        "industrial": 50
+      },
+      "flavorByRank": [
+        1.4,
+        1.15,
+        0.9,
+        0.7
+      ]
     },
     "consumption": {
       "food": {
-        "perMillionPopulation": 50
+        "perMillionPopulation": 68
       },
       "iron": {
-        "perMillionPopulation": 12,
+        "perMillionPopulation": 16,
         "perMilitaryUnit": 0.6
       },
       "oil": {
-        "perMillionPopulation": 3,
+        "perMillionPopulation": 3.8,
         "perMilitaryUnit": 0.9
       },
       "industrial": {
-        "perMillionPopulation": 12
+        "perMillionPopulation": 18
       }
     },
     "militaryMaterials": {
@@ -146,12 +160,18 @@
     "specialization": {
       "boostBest": 0.5,
       "boostSecond": 0.15,
-      "reduceWeakest": 0.35
+      "reduceWeakest": 0.35,
+      "potentialByRank": [
+        1.35,
+        1.1,
+        0.85,
+        0.6
+      ]
     },
     "economyLevel": {
       "start": 50,
       "maxStepPerMonth": 1.5,
-      "buildingBonusPerPoint": 0.006,
+      "buildingBonusPerPoint": 0.004,
       "targetBase": 50,
       "balanceFactor": 0.15,
       "balanceCap": 15,
@@ -159,16 +179,34 @@
     },
     "satisfaction": {
       "breakpoints": [
-        { "coverage": 1, "penalty": 0 },
-        { "coverage": 0.9, "penalty": 0.03 },
-        { "coverage": 0.7, "penalty": 0.1 },
-        { "coverage": 0.4, "penalty": 0.22 }
+        {
+          "coverage": 1,
+          "penalty": 0
+        },
+        {
+          "coverage": 0.9,
+          "penalty": 0.03
+        },
+        {
+          "coverage": 0.7,
+          "penalty": 0.1
+        },
+        {
+          "coverage": 0.4,
+          "penalty": 0.22
+        }
       ],
       "maxPenalty": 0.3,
-      "stabilityFactor": 0.4
+      "stabilityFactor": 0.4,
+      "durationEscalation": {
+        "perMonth": 0.15,
+        "maxMultiplier": 2
+      }
     },
     "construction": {
-      "maxProjects": 3
+      "maxProjects": 2,
+      "workforceBase": 150,
+      "workforcePerMillion": 55
     },
     "buildings": [
       {
@@ -176,38 +214,50 @@
         "name": "مزرعه",
         "resource": "food",
         "output": 150,
-        "cost": 600,
-        "buildMonths": 4
+        "cost": 800,
+        "materials": 100,
+        "workforce": 150,
+        "reserveUnits": 0,
+        "buildMonths": 6
       },
       {
         "id": "iron_mine",
         "name": "معدن آهن",
         "resource": "iron",
         "output": 100,
-        "cost": 900,
-        "buildMonths": 5
+        "cost": 1500,
+        "materials": 250,
+        "workforce": 220,
+        "reserveUnits": 10000,
+        "buildMonths": 9
       },
       {
         "id": "oil_field",
         "name": "میدان نفتی",
         "resource": "oil",
         "output": 80,
-        "cost": 1200,
-        "buildMonths": 6
+        "cost": 1800,
+        "materials": 300,
+        "workforce": 250,
+        "reserveUnits": 12000,
+        "buildMonths": 11
       },
       {
         "id": "factory",
         "name": "کارخانه",
         "resource": "industrial",
         "output": 60,
-        "cost": 1500,
-        "buildMonths": 6
+        "cost": 2500,
+        "materials": 500,
+        "workforce": 400,
+        "reserveUnits": 0,
+        "buildMonths": 12
       }
     ],
     "finance": {
       "startingTreasury": 12000,
       "populationGrowthPerMonth": 0.001,
-      "taxIncomePerMillionPerRate": 100,
+      "taxIncomePerMillionPerRate": 130,
       "governmentCostPerMillion": 2,
       "armyCostPerThousandSoldiers": 0.5,
       "infrastructureCostPerArea": 1
@@ -271,10 +321,28 @@
           }
         },
         "industrial": {
-          "base": 40,
-          "cityFactor": 2.0
+          "base": 34,
+          "cityFactor": 2.0,
+          "terrain": {
+            "lowland": 0.9,
+            "valley": 0.85,
+            "plains": 0.8,
+            "plateau": 0.65,
+            "hills": 0.55,
+            "mountain": 0.3,
+            "highMountain": 0.15
+          }
         }
       }
+    },
+    "diminishingReturns": {
+      "step": 0.08,
+      "min": 0.5
+    },
+    "cellQuality": {
+      "excellent": 0.75,
+      "good": 0.55,
+      "fair": 0.35
     }
   }
 }

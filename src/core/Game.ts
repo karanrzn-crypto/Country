@@ -1184,11 +1184,39 @@ export class Game {
       return false;
     }
     this.state.map.buildMode = typeId;
+    // A mode change invalidates any pending preview (§21 — the preview
+    // belongs to exactly one mode).
+    this.state.map.buildPreview = null;
     if (typeId !== null) {
       this.state.map.layerVisibility.grid = true;
     }
     this.events.emit('economy.buildModeChanged', { typeId });
     return true;
+  }
+
+  /**
+   * CONFIRMS the pending build preview (spec §21): the player picked a
+   * cell, saw the land quality + the estimated output, and accepted — the
+   * project starts on that cell and the preview clears. A preview that no
+   * longer matches the active mode is rejected.
+   */
+  economyConfirmConstruction(countryId: string): boolean {
+    this.assertInitialized();
+    const preview = this.state.map.buildPreview;
+    if (preview === null) return false;
+    if (this.state.map.buildMode !== preview.typeId) {
+      this.state.map.buildPreview = null;
+      return false;
+    }
+    if (this.economyStartConstruction(countryId, preview.typeId, preview.cellKey)) {
+      this.state.map.buildPreview = null;
+      this.state.map.buildMode = null;
+      this.events.emit('economy.buildModeChanged', { typeId: null });
+      return true;
+    }
+    // The gates refused (cap full / funds gone / cell taken in the
+    // meantime) — the preview stays so the UI can hint the reason.
+    return false;
   }
 
   /** Owner country id of a canonical cell key, or null when invalid. */
@@ -1201,11 +1229,12 @@ export class Game {
   }
 
   /**
-   * Resolves a map click WHILE build mode is active (spec §1): the clicked
-   * grid cell becomes the building site. A click on anything but a valid
-   * cell of the player's own country keeps the mode alive and reports the
-   * reason as an event (the UI shows the hint) — the mode exits only on a
-   * successful placement (or an explicit cancel).
+   * Resolves a map click WHILE build mode is active (spec §3/§21): the
+   * clicked grid cell becomes the BUILD PREVIEW — the UI shows the region's
+   * land quality, the base and estimated output, and the confirmation
+   * buttons. A click on anything but a valid cell of the player's own
+   * country keeps the mode alive and reports the reason as an event — the
+   * mode exits only after a CONFIRMED placement (or an explicit cancel).
    */
   private resolveBuildClick(x: number, z: number, typeId: string): void {
     const result = pickAt(this.mapModel, { x, z }, this.pickOptions());
@@ -1219,14 +1248,8 @@ export class Game {
       this.events.emit('economy.buildRejected', { reason: 'foreign-cell', typeId });
       return;
     }
-    if (this.economyStartConstruction(countryId, typeId, result.gridCellKey)) {
-      this.state.map.buildMode = null;
-      this.events.emit('economy.buildModeChanged', { typeId: null });
-    } else {
-      // Occupied cell / project cap / no funds — the mode stays active so
-      // the player can pick another cell (or cancel from the hint).
-      this.events.emit('economy.buildRejected', { reason: 'start-failed', typeId });
-    }
+    this.state.map.buildPreview = { typeId, cellKey: result.gridCellKey };
+    this.events.emit('economy.buildPreview', { typeId, cellKey: result.gridCellKey });
   }
 
   private emitSelectionChanged(): void {

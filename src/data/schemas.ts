@@ -70,7 +70,13 @@ export const ECONOMY_SCHEMA: FieldSchema = {
           fields: {
             boostBest: { type: 'number', min: 0, max: 2 },
             boostSecond: { type: 'number', min: 0, max: 2 },
-            reduceWeakest: { type: 'number', min: 0, max: 1 }
+            reduceWeakest: { type: 'number', min: 0, max: 1 },
+            // The country's per-good POTENTIAL by specialization rank (§15).
+            potentialByRank: {
+              type: 'array',
+              minLength: 1,
+              items: { type: 'number', min: 0, max: 3 }
+            }
           }
         },
         economyLevel: {
@@ -103,7 +109,16 @@ export const ECONOMY_SCHEMA: FieldSchema = {
               }
             },
             maxPenalty: { type: 'number', min: 0, max: 1 },
-            stabilityFactor: { type: 'number', min: 0, max: 1 }
+            stabilityFactor: { type: 'number', min: 0, max: 1 },
+            // Duration escalation of the penalty (spec §13).
+            durationEscalation: {
+              type: 'object',
+              allowUnknown: false,
+              fields: {
+                perMonth: { type: 'number', min: 0, max: 1 },
+                maxMultiplier: { type: 'number', min: 1, max: 5 }
+              }
+            }
           }
         },
         finance: {
@@ -130,6 +145,12 @@ export const ECONOMY_SCHEMA: FieldSchema = {
               resource: idField,
               output: { type: 'number', min: 0 },
               cost: { type: 'number', min: 0 },
+              // ONE-TIME construction materials (industrial units, §4).
+              materials: { type: 'number', min: 0 },
+              // Workforce capacity held while building (§4).
+              workforce: { type: 'number', min: 0 },
+              // Finite extraction reserve (§8); 0 = inexhaustible.
+              reserveUnits: { type: 'number', min: 0 },
               buildMonths: { type: 'number', min: 1, max: 60, integer: true }
             }
           }
@@ -138,7 +159,28 @@ export const ECONOMY_SCHEMA: FieldSchema = {
           type: 'object',
           allowUnknown: false,
           fields: {
-            maxProjects: { type: 'number', min: 1, max: 20, integer: true }
+            maxProjects: { type: 'number', min: 1, max: 20, integer: true },
+            workforceBase: { type: 'number', min: 0 },
+            workforcePerMillion: { type: 'number', min: 0 }
+          }
+        },
+        // Per-region quality thresholds → Persian labels (§3).
+        cellQuality: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            excellent: { type: 'number', min: 0, max: 1 },
+            good: { type: 'number', min: 0, max: 1 },
+            fair: { type: 'number', min: 0, max: 1 }
+          }
+        },
+        // Diminishing returns per building type (§7).
+        diminishingReturns: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            step: { type: 'number', min: 0, max: 1 },
+            min: { type: 'number', min: 0, max: 1 }
           }
         },
         safetyBuffer: {
@@ -157,7 +199,22 @@ export const ECONOMY_SCHEMA: FieldSchema = {
             minSurplusShare: { type: 'number', min: 0, max: 1 }
           }
         },
-        startingStock: { type: 'record', values: { type: 'number', min: 0 } },
+        startingStock: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            // Months of the country's own consumption per good (§10).
+            months: { type: 'record', values: { type: 'number', min: 0, max: 24 } },
+            // Absolute floor per good for tiny countries (§10).
+            floor: { type: 'record', values: { type: 'number', min: 0 } },
+            // Profile multipliers by specialization rank (§1).
+            flavorByRank: {
+              type: 'array',
+              minLength: 1,
+              items: { type: 'number', min: 0, max: 3 }
+            }
+          }
+        },
         militaryMaterials: { type: 'record', values: { type: 'number', min: 0 } },
         domesticBaseline: {
           type: 'object',

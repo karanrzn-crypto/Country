@@ -34,7 +34,7 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  *   economy-level record appears
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v17)', () => {
+describe('save migrations (v1 → … → v18)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -573,6 +573,7 @@ describe('save migrations (v1 → … → v17)', () => {
     expect(Object.keys(map).sort()).toEqual(
       [
         'buildMode',
+        'buildPreview',
         'camera',
         'layerVisibility',
         'selectedBuildingId',

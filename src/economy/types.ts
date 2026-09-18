@@ -1,9 +1,11 @@
 /**
  * Economy domain model — the SIMPLE economy (spec §1-§9): four goods
  * (غذا / آهن / نفت / کالاهای صنعتی), one stockpile per country, one
- * transparent monthly cycle, base prices, money-paid construction on
- * geographic grid cells, country specialization, a 0-100 economy level and
- * graded shortage satisfaction. Leaf module.
+ * transparent monthly cycle, base prices, construction on geographic grid
+ * cells paid in money + materials + workforce, per-region land quality,
+ * finite extraction reserves, diminishing returns, country specialization,
+ * a 0-100 economy level and duration-graded shortage satisfaction. Leaf
+ * module.
  */
 
 /** Data-driven resource definition (src/data/economy.json). */
@@ -85,22 +87,31 @@ export interface DomesticBaselineConfig {
 }
 
 /**
- * One BUILDABLE building (spec §1) — production of exactly ONE good:
- * adds `output` monthly units of `resource` when complete. The real output
- * is scaled by the country's ECONOMY LEVEL (spec §3 — a healthy economy
- * builds/works better, a weak one worse). The cost is ONE-TIME money, paid
- * fully at start (never re-drawn), and the building sits on exactly ONE
- * grid cell of its owner (one economic building per region).
+ * One BUILDABLE building (spec §1/§4) — production of exactly ONE good:
+ * adds `output` monthly units of `resource` when complete. The REAL output
+ * is scaled by the REGION QUALITY of its cell (§3), the country's resource
+ * POTENTIAL (§2/§15), the ECONOMY LEVEL (§14 — deliberately weak) and the
+ * country's DIMINISHING RETURNS per building type (§7). Starting one costs
+ * THREE one-time resources (§4): money + construction materials (drawn
+ * from the industrial-goods stock) + workforce (a CAPACITY held while the
+ * project builds, released on completion). Extractive buildings (oil, iron)
+ * also hold a FINITE reserve (§8) that depletes with every produced unit.
  */
 export interface BuildingDef {
   readonly id: string;
   readonly name: string;
   /** Which good this building produces (config resource id). */
   readonly resource: string;
-  /** BASE monthly units added while active (before the economy level). */
+  /** BASE monthly units added while active (before all modifiers). */
   readonly output: number;
   /** ONE-TIME money cost, deducted from the treasury at start. */
   readonly cost: number;
+  /** ONE-TIME construction materials (industrial-goods units) at start. */
+  readonly materials: number;
+  /** Workforce CAPACITY held for the whole build time (spec §4). */
+  readonly workforce: number;
+  /** Finite extraction reserve (oil/iron); 0 = inexhaustible (farm/factory). */
+  readonly reserveUnits: number;
   /** Base build time in months (the economic budget scales the speed). */
   readonly buildMonths: number;
 }
@@ -122,10 +133,10 @@ export interface EconomyFinanceConfig {
 }
 
 /**
- * Country SPECIALIZATION (spec §4): every country is BETTER at some goods
- * and WEAKER at others — ranked against its own geography-derived baseline
- * (best / second / weakest). Multipliers stay moderate so every country
- * still produces every good (specialization ≠ inability).
+ * Country SPECIALIZATION (spec §4/§15): every country is BETTER at some
+ * goods and WEAKER at others — ranked against its own geography-derived
+ * baseline (best / second / weakest). Multipliers stay moderate so every
+ * country still produces every good (specialization ≠ inability).
  */
 export interface EconomySpecializationConfig {
   /** Multiplier bonus for the country's strongest good (e.g. 0.5 → ×1.5). */
@@ -134,6 +145,13 @@ export interface EconomySpecializationConfig {
   readonly boostSecond: number;
   /** Multiplier cut for the weakest good (e.g. 0.35 → ×0.65). */
   readonly reduceWeakest: number;
+  /**
+   * The country's resource POTENTIAL per specialization rank (§2/§15):
+   * a building's output scales by its good's rank multiplier — an oil
+   * field in an oil-poor country yields far less than in an oil-rich one.
+   * Index 0 = the country's BEST good; the array is read by rank.
+   */
+  readonly potentialByRank: readonly number[];
 }
 
 /**
@@ -161,10 +179,12 @@ export interface EconomyLevelConfig {
 }
 
 /**
- * Graded SHORTAGE → SATISFACTION penalties (spec §7): the penalty is a
+ * Graded SHORTAGE → SATISFACTION penalties (spec §7/§13): the penalty is a
  * piecewise-linear function of the supply COVERAGE ratio (تولید + واردات
  * against مصرف). Full coverage costs nothing; 90% hurts a little; 70%
- * moderately; 40% badly. Breakpoints stay sorted descending by coverage.
+ * moderately; 40% badly. A shortage that persists for MONTHS escalates
+ * (durationEscalation) — one bad month never collapses satisfaction.
+ * Breakpoints stay sorted descending by coverage.
  */
 export interface SatisfactionConfig {
   readonly breakpoints: readonly { readonly coverage: number; readonly penalty: number }[];
@@ -172,14 +192,58 @@ export interface SatisfactionConfig {
   readonly maxPenalty: number;
   /** Share of the total penalty applied to political stability per month. */
   readonly stabilityFactor: number;
+  /** Escalation of the penalty per EXTRA shortage month (spec §13). */
+  readonly durationEscalation: { readonly perMonth: number; readonly maxMultiplier: number };
+}
+
+/**
+ * Per-REGION economic quality (spec §3): every grid cell carries its own
+ * land quality per good — an excellent farm belt, a barren oil province…
+ * The quality is DERIVED from the cell's biome/terrain through the same
+ * weight tables the domestic baseline uses (one geography, one truth);
+ * these thresholds only map a 0..1 quality to its Persian label.
+ */
+export interface CellQualityConfig {
+  /** quality ≥ THIS → «عالی». */
+  readonly excellent: number;
+  /** quality ≥ THIS → «خوب» (below excellent). */
+  readonly good: number;
+  /** quality ≥ THIS → «متوسط» (below good); anything lower is «ضعیف». */
+  readonly fair: number;
+}
+
+/**
+ * DIMINISHING RETURNS per building type (spec §7): the k-th building of
+ * one type in a country yields less than the first — multiplier
+ * max(min, 1 − step × (k − 1)). Moderate by design: stacking farms still
+ * adds food, but never linearly forever.
+ */
+export interface DiminishingReturnsConfig {
+  /** Multiplier lost per additional building of the same type. */
+  readonly step: number;
+  /** The multiplier floor (the stack never becomes worthless). */
+  readonly min: number;
+}
+
+/**
+ * Starting-stock rules (spec §1/§10): every country starts with a LIMITED
+ * buffer — a few MONTHS of its own consumption per good (population-scaled
+ * automatically), flavored by its economic profile (a food-rich country
+ * holds relatively more food), with an absolute floor for tiny countries.
+ */
+export interface StartingStockConfig {
+  /** Months of the country's OWN consumption the initial stock covers. */
+  readonly months: Readonly<Record<string, number>>;
+  /** The absolute floor per good (tiny populations still get a seed). */
+  readonly floor: Readonly<Record<string, number>>;
+  /** Profile multipliers by the country's specialization rank per good. */
+  readonly flavorByRank: readonly number[];
 }
 
 /** Data-driven tuning of the simple economy (economy.json). */
 export interface StrategicResourcesConfig {
   /** Deposit quantity (1..100) → monthly production multiplier. */
   readonly productionScale: number;
-  /** The stockpile every country starts the campaign with (units). */
-  readonly startingStock: Readonly<Record<string, number>>;
   /** Anti-famine safety buffer (§5): months of consumption kept out of
    *  exports — food its own (larger) reserve, others `reserveMonths`. */
   readonly safetyBuffer: { readonly foodMonths: number; readonly reserveMonths: number };
@@ -188,8 +252,22 @@ export interface StrategicResourcesConfig {
     readonly surplusBufferMonths: number;
     readonly minSurplusShare: number;
   };
-  /** Concurrent construction cap. */
-  readonly construction: { readonly maxProjects: number };
+  /**
+   * Concurrent construction limits (spec §6): at most `maxProjects`
+   * projects at once AND their combined workforce must fit the country's
+   * construction workforce (base + per-million, spec §4).
+   */
+  readonly construction: {
+    readonly maxProjects: number;
+    readonly workforceBase: number;
+    readonly workforcePerMillion: number;
+  };
+  /** Diminishing returns per building type (spec §7). */
+  readonly diminishingReturns: DiminishingReturnsConfig;
+  /** Per-region quality thresholds → labels (spec §3). */
+  readonly cellQuality: CellQualityConfig;
+  /** Limited starting-stock rules (spec §1/§10). */
+  readonly startingStock: StartingStockConfig;
   /** The buildable buildings (spec §8 — one effect each). */
   readonly buildings: readonly BuildingDef[];
   /** The money side (tax formula, expenses, starting treasury). */

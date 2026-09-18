@@ -760,6 +760,42 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v17 → v18: the HARD economy (spec §1-§24). The new fields are purely
+    // additive and the session heal fills anything missing:
+    //  - every resource record gains `shortageMonths: {}` (spec §13's
+    //    shortage-duration tracking);
+    //  - the map slice gains `buildPreview: null` (spec §21's confirm flow);
+    //  - extractive buildings keep producing with their full reserve until
+    //    the heal sizes it from the LIVE map (no map in the save payload).
+    from: 17,
+    to: 18,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v17\u2192v18: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: {
+          economy?: {
+            resources?: Record<string, Record<string, unknown>>;
+          };
+          map?: Record<string, unknown>;
+        };
+      };
+      const economy = clone.state?.economy;
+      if (economy?.resources !== undefined && typeof economy.resources === 'object') {
+        for (const record of Object.values(economy.resources)) {
+          if (record === null || typeof record !== 'object') continue;
+          if (record['shortageMonths'] === undefined) record['shortageMonths'] = {};
+        }
+      }
+      const map = clone.state?.map;
+      if (map !== undefined && typeof map === 'object' && map['buildPreview'] === undefined) {
+        map['buildPreview'] = null;
+      }
+      return clone;
+    }
   }
 ];
 

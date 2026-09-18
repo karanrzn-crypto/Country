@@ -46,6 +46,12 @@ export interface CountryResourceState {
    * population-growth penalty all read.
    */
   shortage: Record<string, number>;
+  /**
+   * How many CONSECUTIVE months each resource has been short (spec §13):
+   * a shortage that persists escalates its satisfaction penalty. Reset the
+   * month the shortage ends. Same keys as `shortage`.
+   */
+  shortageMonths: Record<string, number>;
   /** Money RECEIVED this month from selling resources (spec §3 تجارت). */
   tradeIncome: number;
   /** Money PAID this month for buying resources (spec §3 تجارت). */
@@ -61,6 +67,7 @@ export function emptyCountryResourceState(): CountryResourceState {
     imports: {},
     exports: {},
     shortage: {},
+    shortageMonths: {},
     tradeIncome: 0,
     tradeExpense: 0
   };
@@ -107,10 +114,11 @@ export function emptyCountryFinanceState(): CountryFinanceState {
 // ——————————————————————————————— construction ————————————————————————————————
 
 /**
- * One construction project (spec §1): the ONE-TIME money cost is paid IN
- * FULL at start (a project that cannot be paid cannot be started), so a
- * project is always BUILDING — only its build time remains. No escrow, no
- * waiting-for-resources state, no monthly draws.
+ * One construction project (spec §1): the ONE-TIME costs (money +
+ * construction materials) are paid IN FULL at start (a project that cannot
+ * pay cannot be started) and the project holds WORKFORCE capacity for its
+ * whole build time (released on completion), so a project is always
+ * BUILDING — only its build time remains. No escrow, no waiting state.
  */
 export interface BuildingProject {
   readonly id: string;
@@ -136,10 +144,19 @@ export function emptyCountryConstructionState(): CountryConstructionState {
   return { projects: [] };
 }
 
-/** A COMPLETED building — anchored to its grid cell (spec §1/§2). */
+/**
+ * A COMPLETED building — anchored to its grid cell (spec §1/§2).
+ * Extractive buildings (oil field, iron mine) additionally hold a FINITE
+ * reserve (spec §8): every produced unit drains `reserveRemaining`; at zero
+ * the extraction stops. Farm/factory records carry no reserve fields.
+ */
 export interface BuildingRecord {
   readonly id: string;
   readonly typeId: string;
   /** Canonical cell key `countryId#gridId` the building stands on. */
   readonly cellKey: string;
+  /** Extractable units left (oil/iron only — omitted for other types). */
+  reserveRemaining?: number;
+  /** The reserve the building STARTED with (display / depletion ratio). */
+  reserveCapacity?: number;
 }
