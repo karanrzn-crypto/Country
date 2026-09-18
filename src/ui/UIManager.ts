@@ -132,13 +132,8 @@ export class UIManager implements PhaseSystem {
           this.notify('info', 'کارزار انتخاباتی', 'مهلت کارزار انتخاباتی گشوده شد.');
         }
       }),
-      // —— Phase 3 resource-economy events: map panel + dashboard refresh ——
-      // A mine upgrade changes the data the map panels show (level/production).
-      this.events.on('economy.mineUpgraded', ({ countryId }) => {
-        if (countryId === context.state.player.countryId) this.mapUI.refreshInfo();
-        this.dashboard.refresh();
-      }),
-      // Purchases/construction/research move the dashboard's live lists.
+      // —— Phase 3 simple-economy events: map panel + dashboard refresh ——
+      // Purchases/construction move the dashboard's live lists.
       this.events.on('economy.resourceBought', ({ buyerId }) => {
         if (buyerId === context.state.player.countryId) this.dashboard.refresh();
       }),
@@ -147,13 +142,7 @@ export class UIManager implements PhaseSystem {
       }),
       this.events.on('economy.constructionCompleted', ({ countryId }) => {
         if (countryId === context.state.player.countryId) {
-          this.notify('info', 'ساخت‌وساز', 'یک کارخانه به بهره‌برداری رسید.');
-          this.dashboard.refresh();
-        }
-      }),
-      this.events.on('economy.researchUnlocked', ({ countryId, resourceId, level }) => {
-        if (countryId === context.state.player.countryId) {
-          this.notify('info', 'تحقیقات', `سطح ${level} معادن ${resourceId} باز شد.`);
+          this.notify('info', 'ساخت‌وساز', 'یک ساختمان به بهره‌برداری رسید.');
           this.dashboard.refresh();
         }
       })

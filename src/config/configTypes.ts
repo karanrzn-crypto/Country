@@ -138,7 +138,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     defaultWorldId: 'demo-country'
   },
   economy: {
-    startingTreasury: 10_000,
+    startingTreasury: 12_000,
     taxPerThousandCitizensPerDay: 5,
     unitUpkeepPerDay: 1,
     lowTreasuryWarnThreshold: 500

@@ -1,16 +1,34 @@
 {
   "resources": [
-    { "id": "food", "name": "Food", "weight": 1 },
-    { "id": "steel", "name": "Steel", "weight": 3 },
-    { "id": "oil", "name": "Oil", "weight": 2 },
-    { "id": "electronics", "name": "Electronics", "weight": 4 }
+    {
+      "id": "food",
+      "name": "Food",
+      "weight": 1
+    },
+    {
+      "id": "steel",
+      "name": "Steel",
+      "weight": 3
+    },
+    {
+      "id": "oil",
+      "name": "Oil",
+      "weight": 2
+    },
+    {
+      "id": "electronics",
+      "name": "Electronics",
+      "weight": 4
+    }
   ],
   "factoryTypes": [
     {
       "id": "farm",
       "name": "Farm",
       "inputs": {},
-      "outputs": { "food": 10 },
+      "outputs": {
+        "food": 10
+      },
       "cyclesPerDay": 1,
       "workforce": 200
     },
@@ -18,46 +36,93 @@
       "id": "oil_derrick",
       "name": "Oil Derrick",
       "inputs": {},
-      "outputs": { "oil": 6 },
+      "outputs": {
+        "oil": 6
+      },
       "cyclesPerDay": 1,
       "workforce": 100
     },
     {
       "id": "steel_mill",
       "name": "Steel Mill",
-      "inputs": { "oil": 2 },
-      "outputs": { "steel": 5 },
+      "inputs": {
+        "oil": 2
+      },
+      "outputs": {
+        "steel": 5
+      },
       "cyclesPerDay": 2,
       "workforce": 400
     },
     {
       "id": "electronics_plant",
       "name": "Electronics Plant",
-      "inputs": { "steel": 1, "oil": 1 },
-      "outputs": { "electronics": 2 },
+      "inputs": {
+        "steel": 1,
+        "oil": 1
+      },
+      "outputs": {
+        "electronics": 2
+      },
       "cyclesPerDay": 1,
-      "workforce": 300 }
+      "workforce": 300
+    }
   ],
   "startingStockpiles": {
-    "resources": { "food": 100, "steel": 80, "oil": 60, "electronics": 20 },
-    "equipment": { "rifle": 200, "at_rifle": 20, "tank_gun": 10, "tank_armor_kit": 10, "ifv_gun": 12, "heli_gun": 4, "artillery_battery": 4 }
+    "resources": {
+      "food": 100,
+      "steel": 80,
+      "oil": 60,
+      "electronics": 20
+    },
+    "equipment": {
+      "rifle": 200,
+      "at_rifle": 20,
+      "tank_gun": 10,
+      "tank_armor_kit": 10,
+      "ifv_gun": 12,
+      "heli_gun": 4,
+      "artillery_battery": 4
+    }
   },
   "strategicResources": {
-    "productionScale": 1.4,
-    "importMarkup": 1.25,
-    "customsRate": 0.1,
-    "priceTiers": {
-      "supply": { "low": 0.85, "medium": 1.0, "high": 1.25 },
-      "demand": { "low": 0.85, "medium": 1.0, "high": 1.15 }
+    "resources": [
+      {
+        "id": "food",
+        "name": "غذا",
+        "price": 0.5
+      },
+      {
+        "id": "iron",
+        "name": "آهن",
+        "price": 1
+      },
+      {
+        "id": "oil",
+        "name": "نفت",
+        "price": 2
+      }
+    ],
+    "productionScale": 2.4,
+    "startingStock": {
+      "food": 4000,
+      "iron": 1200,
+      "oil": 600
     },
-    "mineLevels": {
-      "multipliers": { "1": 1.0, "2": 1.5, "3": 2.0 }
+    "consumption": {
+      "food": {
+        "perMillionPopulation": 50
+      },
+      "iron": {
+        "perMilitaryUnit": 0.6
+      },
+      "oil": {
+        "perMilitaryUnit": 0.9
+      }
     },
-    "research": {
-      "levels": { "2": 150, "3": 450 }
-    },
-    "construction": {
-      "maxProjects": 3
+    "militaryMaterials": {
+      "iron": 4,
+      "oil": 3
     },
     "safetyBuffer": {
       "foodMonths": 3,
@@ -67,13 +132,53 @@
       "surplusBufferMonths": 2,
       "minSurplusShare": 0.1
     },
-    "startingStock": {
-      "oil": 250,
-      "iron": 400,
-      "coal": 250,
-      "copper": 150,
-      "food": 600,
-      "wood": 350
+    "construction": {
+      "maxProjects": 3
+    },
+    "buildings": [
+      {
+        "id": "farm",
+        "name": "مزرعه",
+        "effect": "production",
+        "resource": "food",
+        "output": 150,
+        "cost": 600,
+        "buildMonths": 4
+      },
+      {
+        "id": "iron_mine",
+        "name": "معدن آهن",
+        "effect": "production",
+        "resource": "iron",
+        "output": 100,
+        "cost": 900,
+        "buildMonths": 5
+      },
+      {
+        "id": "oil_field",
+        "name": "میدان نفتی",
+        "effect": "production",
+        "resource": "oil",
+        "output": 80,
+        "cost": 1200,
+        "buildMonths": 6
+      },
+      {
+        "id": "factory",
+        "name": "کارخانه",
+        "effect": "income",
+        "income": 60,
+        "cost": 1500,
+        "buildMonths": 6
+      }
+    ],
+    "finance": {
+      "startingTreasury": 12000,
+      "populationGrowthPerMonth": 0.001,
+      "taxIncomePerMillionPerRate": 100,
+      "governmentCostPerMillion": 2,
+      "armyCostPerThousandSoldiers": 0.5,
+      "infrastructureCostPerArea": 1
     },
     "domesticBaseline": {
       "cityTermScale": 0.25,
@@ -82,111 +187,58 @@
       "terrainWeight": 0.2,
       "resources": {
         "food": {
-          "base": 18,
-          "biomes": { "grassland": 1.0, "jungle": 0.7, "drylands": 0.55, "forest": 0.5, "tundra": 0.2, "desert": 0.1 },
-          "terrain": { "lowland": 1.0, "valley": 0.9, "plains": 0.85, "hills": 0.45, "plateau": 0.4, "mountain": 0.2, "highMountain": 0.1 }
-        },
-        "wood": {
-          "base": 8,
-          "biomes": { "forest": 1.0, "jungle": 0.85, "tundra": 0.45, "grassland": 0.3, "drylands": 0.15, "desert": 0.05 },
-          "terrain": { "valley": 0.8, "lowland": 0.7, "hills": 0.6, "plains": 0.5, "mountain": 0.5, "plateau": 0.4, "highMountain": 0.3 }
+          "base": 130,
+          "biomes": {
+            "grassland": 1.0,
+            "jungle": 0.7,
+            "drylands": 0.55,
+            "forest": 0.5,
+            "tundra": 0.2,
+            "desert": 0.1
+          },
+          "terrain": {
+            "lowland": 1.0,
+            "valley": 0.9,
+            "plains": 0.85,
+            "hills": 0.45,
+            "plateau": 0.4,
+            "mountain": 0.2,
+            "highMountain": 0.1
+          }
         },
         "oil": {
           "base": 18,
-          "biomes": { "desert": 1.0, "drylands": 0.65, "tundra": 0.45, "grassland": 0.35, "forest": 0.15, "jungle": 0.15 },
-          "terrain": { "plateau": 0.7, "lowland": 0.6, "hills": 0.6, "valley": 0.5, "plains": 0.5, "mountain": 0.4, "highMountain": 0.2 }
+          "biomes": {
+            "desert": 1.0,
+            "drylands": 0.65,
+            "tundra": 0.45,
+            "grassland": 0.35,
+            "forest": 0.15,
+            "jungle": 0.15
+          },
+          "terrain": {
+            "plateau": 0.7,
+            "lowland": 0.6,
+            "hills": 0.6,
+            "valley": 0.5,
+            "plains": 0.5,
+            "mountain": 0.4,
+            "highMountain": 0.2
+          }
         },
         "iron": {
           "base": 21,
-          "terrain": { "hills": 1.0, "mountain": 0.9, "highMountain": 0.75, "plateau": 0.55, "plains": 0.35, "valley": 0.3, "lowland": 0.25 }
-        },
-        "coal": {
-          "base": 21,
-          "terrain": { "hills": 1.0, "mountain": 0.85, "plateau": 0.75, "highMountain": 0.6, "plains": 0.45, "lowland": 0.35, "valley": 0.35 }
-        },
-        "copper": {
-          "base": 17,
-          "terrain": { "mountain": 1.0, "highMountain": 0.9, "hills": 0.7, "plateau": 0.5, "plains": 0.25, "valley": 0.25, "lowland": 0.2 }
+          "terrain": {
+            "hills": 1.0,
+            "mountain": 0.9,
+            "highMountain": 0.75,
+            "plateau": 0.55,
+            "plains": 0.35,
+            "valley": 0.3,
+            "lowland": 0.25
+          }
         }
       }
-    },
-    "resources": [
-      { "id": "oil", "name": "نفت", "price": 0.9 },
-      { "id": "iron", "name": "آهن", "price": 0.35 },
-      { "id": "coal", "name": "زغال‌سنگ", "price": 0.2 },
-      { "id": "copper", "name": "مس", "price": 0.5 },
-      { "id": "food", "name": "غذا", "price": 0.12 },
-      { "id": "wood", "name": "چوب", "price": 0.15 }
-    ],
-    "consumption": {
-      "food": { "perMillionPopulation": 17.5 },
-      "wood": { "perMillionPopulation": 5.5 },
-      "iron": { "perMillionPopulation": 5.5, "perMilitaryUnit": 0.6 },
-      "coal": { "perMillionPopulation": 8.0 },
-      "copper": { "perMillionPopulation": 4.5 },
-      "oil": { "perMillionPopulation": 3.2, "perMilitaryUnit": 0.9 }
-    },
-    "militaryMaterials": {
-      "iron": 4,
-      "oil": 3,
-      "coal": 2,
-      "copper": 1
-    },
-    "productionFactories": [
-      {
-        "id": "iron_works",
-        "name": "کارخانهٔ آهن‌آلات",
-        "boosts": "iron",
-        "output": 120,
-        "cost": { "iron": 1000, "coal": 400 },
-        "upkeep": { "coal": 30 },
-        "buildMonths": 8
-      },
-      {
-        "id": "oil_refinery",
-        "name": "پالایشگاه نفت",
-        "boosts": "oil",
-        "output": 120,
-        "cost": { "iron": 800, "oil": 300 },
-        "upkeep": { "iron": 20 },
-        "buildMonths": 7
-      },
-      {
-        "id": "coal_plant",
-        "name": "کارخانهٔ زغال‌شویی",
-        "boosts": "coal",
-        "output": 120,
-        "cost": { "iron": 700, "wood": 300 },
-        "upkeep": { "wood": 25 },
-        "buildMonths": 6
-      },
-      {
-        "id": "copper_foundry",
-        "name": "کارخانهٔ مس",
-        "boosts": "copper",
-        "output": 100,
-        "cost": { "iron": 900, "coal": 300 },
-        "upkeep": { "coal": 25 },
-        "buildMonths": 8
-      },
-      {
-        "id": "food_plant",
-        "name": "کارخانهٔ غذایی",
-        "boosts": "food",
-        "output": 180,
-        "cost": { "iron": 500, "wood": 400 },
-        "upkeep": { "iron": 15 },
-        "buildMonths": 6
-      },
-      {
-        "id": "lumber_mill",
-        "name": "کارخانهٔ چوب‌بری",
-        "boosts": "wood",
-        "output": 180,
-        "cost": { "iron": 400, "wood": 300 },
-        "upkeep": { "iron": 10 },
-        "buildMonths": 5
-      }
-    ]
+    }
   }
 }

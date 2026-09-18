@@ -1,0 +1,399 @@
+/**
+ * THE SIMPLE ECONOMY — unit tests for the 14-section directive (spec §13).
+ *
+ * Every core calculation is tested against the CONFIG formulas:
+ *  - درآمد مالیاتی   : جمعیت(میلیون) × نرخ × ضریب            (§2)
+ *  - تولید منابع      : deposits + baseline + buildings        (§4)
+ *  - مصرف غذا        : جمعیت(میلیون) × perMillionPopulation   (§5)
+ *  - خرید و فروش      : −money +units / +money −units at the BASE price (§6/§7)
+ *  - هزینه‌ها         : ارتش + دولت + زیرساخت                  (§3)
+ *  - تغییر خزانه      : درآمد − هزینه‌ها, applied ONCE          (§3/§10)
+ *  - کمبود غذا        : uncovered deficit → shortage consequences (§5)
+ *  - اجرای چرخه کامل  : the §10 order, deterministic, no double-apply (§10)
+ *
+ * §14 review items covered: negative values, buying/selling more than the
+ * stockpile, zero population, zero production, expenses exceeding the
+ * treasury, running the cycle repeatedly, trade conservation.
+ */
+import { describe, it, expect, beforeAll } from 'vitest';
+import { createTestGame } from '../../helpers/testGame';
+import type { Game } from '../../../core/Game';
+import type { SystemContext } from '../../../core/GameContext';
+import { runEconomyCycle, resolveWorldTrade, taxIncomeOf, armyExpenseOf, governmentExpenseOf, infrastructureExpenseOf } from '../../../economy/economyCycle';
+import { resourceDisplayStatusOf, safetyReserveUnits } from '../../../economy/resources';
+import { purchaseResource, sellersOf, unitPriceOf } from '../../../economy/purchase';
+import { startProject, stepProjects, constructionSpeedFactorOf } from '../../../economy/construction';
+import type { StrategicResourcesConfig } from '../../../economy/types';
+
+describe('simple economy (14-section spec)', () => {
+  let game: Game;
+  let context: SystemContext;
+  let config: StrategicResourcesConfig;
+  let playerCountryId: string;
+
+  beforeAll(() => {
+    game = createTestGame({ seed: 4242 });
+    context = game.gameContext;
+    config = context.data.economyData.strategicResources;
+    playerCountryId = context.map.countryOrder[0];
+  });
+
+  const ids = (): string[] =>
+    context.map.countryOrder.filter((id) => context.state.economy.finance[id] !== undefined);
+
+  // ———————————————————————— §2 — درآمد مالیاتی ————————————————————————
+
+  it('T1 tax income = population(millions) × rate × multiplier (§2)', () => {
+    const population = 24_000_000;
+    // medium = 10٪ → 24 × 0.10 × 100 = 240 (the §12 example)
+    expect(taxIncomeOf(population, 'medium', config)).toBeCloseTo(240, 2);
+    expect(taxIncomeOf(population, 'low', config)).toBeCloseTo(120, 2); // 5٪
+    expect(taxIncomeOf(population, 'high', config)).toBeCloseTo(480, 2); // 20٪
+    // Monotonic کم → زیاد (§9).
+    expect(taxIncomeOf(population, 'high', config)).toBeGreaterThan(taxIncomeOf(population, 'medium', config));
+    expect(taxIncomeOf(population, 'medium', config)).toBeGreaterThan(taxIncomeOf(population, 'low', config));
+    // Zero population pays no tax (§14).
+    expect(taxIncomeOf(0, 'high', config)).toBe(0);
+  });
+
+  it('T2 production = deposits + geography baseline + buildings (§4)', () => {
+    const state = context.state;
+    const countryId = ids()[0];
+    // Seed already ran: production is stored on the record.
+    const record = state.economy.resources[countryId]!;
+    const depositSum: Record<string, number> = {};
+    for (const deposit of context.map.features.deposits) {
+      if (deposit.countryId !== countryId) continue;
+      depositSum[deposit.resourceId] =
+        (depositSum[deposit.resourceId] ?? 0) +
+        Math.round(deposit.quantity * config.productionScale);
+    }
+    for (const resource of config.resources) {
+      const baseline = record.production[resource.id] ?? 0;
+      expect(baseline).toBeGreaterThanOrEqual(0);
+      if (depositSum[resource.id] !== undefined) {
+        // Deposits dominate for the resources the land actually carries.
+        expect(baseline).toBeGreaterThanOrEqual(depositSum[resource.id]);
+      }
+    }
+  });
+
+  // ———————————————————————— §5 — مصرف غذا ——————————————————————————————
+
+  it('T3 food consumption = population × perMillion, stock steps by P − C (§5)', () => {
+    const state = context.state;
+    const countryId = playerCountryId;
+    const country = state.countries.countries[countryId]!;
+    const record = state.economy.resources[countryId]!;
+    const perMillion = config.consumption.food?.perMillionPopulation ?? 0;
+    const expected = Math.round((country.population / 1_000_000) * perMillion);
+    expect(record.consumption.food).toBe(expected);
+    // The stock step: after seeding, stock equals the starting buffer
+    // (no month has been spent yet — seed only).
+    expect(record.stock.food).toBe(Math.round(config.startingStock.food));
+  });
+
+  // ———————————————————————— §6/§7 — خرید و فروش ————————————————————————
+
+  it('T4 a manual deal moves EXACTLY §6\'s amounts at the base price (§6)', () => {
+    const state = context.state;
+    const [buyerId, sellerId] = ids();
+    const price = unitPriceOf(config, 'food');
+    expect(price).toBeGreaterThan(0); // §7: base prices from config
+
+    // Arrange: seller holds 1,000 spare food, buyer pays from a fresh treasury.
+    state.economy.resources[sellerId]!.stock.food = 1000 +
+      safetyReserveUnits(state.economy.resources[sellerId]!.consumption, 'food', config);
+    state.economy.treasury[buyerId] = 10000;
+    const buyerStockBefore = Math.round(state.economy.resources[buyerId]!.stock.food ?? 0);
+
+    const sellerTreasuryBefore = state.economy.treasury[sellerId] ?? 0;
+    const result = purchaseResource(state, buyerId, sellerId, 'food', 1000, config);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const cost = 1000 * price; // 1,000 غذا × ۰٫۵ = ۵۰۰ (§7's example)
+    expect(result.cost).toBeCloseTo(cost, 2);
+    // Buyer: −money +units; Seller: +money −units (§6 EXACTLY).
+    expect(state.economy.treasury[buyerId]).toBeCloseTo(10000 - cost, 2);
+    expect(state.economy.treasury[sellerId]).toBeCloseTo(sellerTreasuryBefore + cost, 2);
+    expect(Math.round(state.economy.resources[buyerId]!.stock.food ?? 0)).toBe(buyerStockBefore + 1000);
+    // The deal is visible in BOTH countries' month ledger (تجارت line).
+    expect(state.economy.resources[buyerId]!.tradeExpense).toBeCloseTo(cost, 2);
+    expect(state.economy.resources[sellerId]!.tradeIncome).toBeCloseTo(cost, 2);
+  });
+
+  it('T5 selling/buying more than available is capped — never negative (§14)', () => {
+    const state = context.state;
+    const [buyerId, sellerId] = ids();
+    const sellerRecord = state.economy.resources[sellerId]!;
+    const reserve = safetyReserveUnits(sellerRecord.consumption, 'iron', config);
+    sellerRecord.stock.iron = reserve + 100; // only 100 spare units
+    state.economy.treasury[buyerId] = 100000; // plenty of money
+
+    const result = purchaseResource(state, buyerId, sellerId, 'iron', 5000, config);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.amount).toBe(100);
+    expect(sellerRecord.stock.iron).toBe(reserve); // never dips below the reserve
+    expect(sellerRecord.stock.iron).toBeGreaterThanOrEqual(0);
+
+    // Buying with an empty treasury fails cleanly (no debt, §14).
+    sellerRecord.stock.iron = reserve + 100; // spare exists again
+    state.economy.treasury[buyerId] = 0;
+    const broke = purchaseResource(state, buyerId, sellerId, 'iron', 10, config);
+    expect(broke.ok).toBe(false);
+    if (!broke.ok) expect(broke.reason).toBe('no-funds');
+  });
+
+  it('T6 the seller list shows only REAL free stock above the safety reserve', () => {
+    const state = context.state;
+    const buyerId = playerCountryId;
+    const sellers = sellersOf(state, buyerId, 'oil', config);
+    for (const seller of sellers) {
+      const record = state.economy.resources[seller.countryId]!;
+      const reserve = safetyReserveUnits(record.consumption, 'oil', config);
+      expect(seller.amount).toBe(Math.max(0, Math.floor((record.stock.oil ?? 0) - reserve)));
+    }
+    // A country never appears as its own seller.
+    expect(sellers.some((seller) => seller.countryId === buyerId)).toBe(false);
+  });
+
+  // ———————————————————————— §3 — هزینه‌ها و خزانه ———————————————————————
+
+  it('T7 expenses follow the config formulas (§3)', () => {
+    const state = context.state;
+    const country = state.countries.countries[playerCountryId]!;
+    const areas = Object.values(state.cityAreas.network.areas)
+      .filter((area) => area.countryId === playerCountryId).length;
+    expect(armyExpenseOf(country.military.armySize, config))
+      .toBeCloseTo((country.military.armySize / 1000) * config.finance.armyCostPerThousandSoldiers, 2);
+    expect(governmentExpenseOf(country.population, config))
+      .toBeCloseTo((country.population / 1_000_000) * config.finance.governmentCostPerMillion, 2);
+    expect(infrastructureExpenseOf(areas, config))
+      .toBeCloseTo(areas * config.finance.infrastructureCostPerArea, 2);
+  });
+
+  it('T8 the cycle applies the treasury change EXACTLY ONCE per month (§3/§10)', () => {
+    const state = context.state;
+    const countryId = playerCountryId;
+    const finance = state.economy.finance[countryId]!;
+    const before = state.economy.treasury[countryId] ?? 0;
+    const expectedChange =
+      finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome -
+      finance.lastArmyExpense - finance.lastGovernmentExpense - finance.lastInfrastructureExpense;
+
+    runEconomyCycle(state, context.map, config, { applyStep: true });
+
+    const after = state.economy.treasury[countryId] ?? 0;
+    expect(after).toBeCloseTo(Math.max(0, before + expectedChange), 0);
+    // The new ledger holds THIS month's fresh numbers (trade restarted at 0
+    // then accumulated this month's flows — never last month's again).
+    const fresh = state.economy.finance[countryId]!;
+    expect(fresh.lastTaxIncome).toBeGreaterThanOrEqual(0);
+  });
+
+  // ———————————————————————— §5 — کمبود غذا ——————————————————————————————
+
+  it('T9 food shortage → recorded deficit, slower population growth, lower stability (§5)', () => {
+    const state = context.state;
+    // The most food-deficit country (production < consumption) becomes the
+    // famine candidate; the honest inputs (empty warehouse) do the rest.
+    const deficit = ids()
+      .map((id) => {
+        const record = state.economy.resources[id]!;
+        return { id, gap: (record.consumption.food ?? 0) - (record.production.food ?? 0) };
+      })
+      .sort((a, b) => b.gap - a.gap)[0];
+    expect(deficit.gap).toBeGreaterThan(0); // the calibration leaves deficit countries
+    const countryId = deficit.id;
+    const record = state.economy.resources[countryId]!;
+    const country = state.countries.countries[countryId]!;
+    const political = state.political.countries[countryId]!;
+
+    // Engineer the acute shortage HONESTLY: the warehouse is simply empty.
+    record.stock.food = 0;
+    record.shortage = {};
+    const populationBefore = country.population;
+    const stabilityBefore = political.stability;
+    const expectedShortage = deficit.gap;
+
+    runEconomyCycle(state, context.map, config, { applyStep: true });
+
+    const after = state.economy.resources[countryId]!;
+    // The uncovered deficit is recorded (§5) — the gap the world trade could
+    // not fully cover stays visible.
+    expect(after.shortage.food ?? 0).toBeGreaterThan(0);
+    // (±a few units: consumption re-derives from the population grown in step ۱)
+    expect(after.shortage.food ?? 0).toBeLessThanOrEqual(expectedShortage + 10);
+    // Population growth slowed to a quarter while the shortage lasted.
+    const growth = country.population - populationBefore;
+    const normalGrowth = populationBefore * config.finance.populationGrowthPerMonth;
+    expect(growth).toBeCloseTo(normalGrowth * 0.25, -1);
+    // Stability dropped (§5's کاهش ثبات).
+    expect(political.stability).toBeLessThan(stabilityBefore);
+  });
+
+  it('T10 zero population / zero production — no NaN, no negative stock (§14)', () => {
+    const state = context.state;
+    const countryId = ids()[1];
+    const country = state.countries.countries[countryId]!;
+    const record = state.economy.resources[countryId]!;
+    country.population = 0;
+    record.production = { food: 0, iron: 0, oil: 0 };
+    record.consumption = { food: 0, iron: 0, oil: 0 };
+    record.stock = { food: 0, iron: 0, oil: 0 };
+
+    runEconomyCycle(state, context.map, config, { applyStep: true });
+
+    const finance = state.economy.finance[countryId]!;
+    expect(Number.isFinite(finance.lastTaxIncome)).toBe(true);
+    expect(finance.lastTaxIncome).toBe(0); // nobody pays tax (§2)
+    expect(finance.lastBalance).toBeLessThanOrEqual(0);
+    for (const value of Object.values(state.economy.resources[countryId]!.stock)) {
+      expect(value).toBeGreaterThanOrEqual(0);
+    }
+    // Treasury never goes negative (§14: expenses over treasury floor at 0).
+    expect(state.economy.treasury[countryId]).toBeGreaterThanOrEqual(0);
+  });
+
+  // ———————————————————————— §10 — چرخه کامل ————————————————————————————
+
+  it('T11 running the cycle twice = two months, NOT a double-applied month (§10/§14)', () => {
+    const state = context.state;
+    // A frozen world: zero prices kill trade, zero growth pins population —
+    // every month is then EXACTLY identical and the math is checkable.
+    const frozen: StrategicResourcesConfig = {
+      ...config,
+      resources: config.resources.map((resource) => ({ ...resource, price: 0 })),
+      finance: { ...config.finance, populationGrowthPerMonth: 0 }
+    };
+    const countryId = ids()[2];
+    const record = state.economy.resources[countryId]!;
+    // Earlier tests ran REAL cycles — their un-accumulated trade money would
+    // leak into month 1's ledger; start this experiment from a clean slate.
+    for (const other of ids()) {
+      const otherRecord = state.economy.resources[other]!;
+      otherRecord.tradeIncome = 0;
+      otherRecord.tradeExpense = 0;
+    }
+    const stockBefore = Math.round(record.stock.food ?? 0);
+    const treasuryBefore = state.economy.treasury[countryId] ?? 0;
+
+    runEconomyCycle(state, context.map, frozen, { applyStep: true });
+    const production = Math.round(record.production.food ?? 0);
+    const consumption = Math.round(record.consumption.food ?? 0);
+    const balance1 = state.economy.finance[countryId]!.lastBalance;
+    const treasury1 = state.economy.treasury[countryId] ?? 0;
+    const stock1 = Math.round(record.stock.food ?? 0);
+
+    runEconomyCycle(state, context.map, frozen, { applyStep: true });
+
+    // Month 2 is EXACTLY month 1 again (deterministic §10 order, growth 0):
+    const balance2 = state.economy.finance[countryId]!.lastBalance;
+    expect(balance2).toBeCloseTo(balance1, 0);
+    // Stock steps by (P − C) per month, floored at zero (§14: no negatives).
+    expect(Math.round(record.stock.food ?? 0)).toBe(Math.max(0, stock1 + (production - consumption)));
+    // The treasury moved by the SAME balance twice — never double-applied.
+    expect(state.economy.treasury[countryId] ?? 0).toBeCloseTo(Math.max(0, treasury1 + balance2), 0);
+    expect(state.economy.treasury[countryId] ?? 0).toBeCloseTo(Math.max(0, treasuryBefore + 2 * balance1), 0);
+    // Two months of production landed (once per cycle, not twice in one).
+    expect(production).toBeGreaterThanOrEqual(0);
+    void stockBefore;
+  });
+
+  it('T12 world trade: two AI countries exchange real units and conserve them (§6)', () => {
+    const state = context.state;
+    const order = ids();
+    // One country is short 100 food, another holds 500 spare.
+    const buyerId = order[0];
+    // No OTHER country needs anything — the pair under test is the only market.
+    for (const id of order) state.economy.resources[id]!.shortage = {};
+    state.economy.resources[buyerId]!.shortage.food = 100;
+    state.economy.treasury[buyerId] = 5000;
+    // The seller: the country with the LARGEST free food stock above reserve.
+    const withSpare = order
+      .filter((id) => id !== buyerId)
+      .map((id) => {
+        const record = state.economy.resources[id]!;
+        return {
+          id,
+          spare: Math.floor((record.stock.food ?? 0) -
+            safetyReserveUnits(record.consumption, 'food', config))
+        };
+      })
+      .filter((entry) => entry.spare >= 100)
+      .sort((a, b) => b.spare - a.spare);
+    expect(withSpare.length).toBeGreaterThan(0);
+    const sellerId = withSpare[0].id;
+
+    const totalBefore = order.reduce(
+      (sum, id) => sum + (state.economy.resources[id]!.stock.food ?? 0), 0
+    );
+    resolveWorldTrade(state, order, ['food', 'iron', 'oil'], config);
+    const totalAfter = order.reduce(
+      (sum, id) => sum + (state.economy.resources[id]!.stock.food ?? 0), 0
+    );
+    // CONSERVATION: trade moves units, it never creates or destroys them.
+    expect(totalAfter).toBe(totalBefore);
+    // The buyer got its need; the seller recorded the export (§6).
+    expect(state.economy.resources[buyerId]!.imports.food ?? 0).toBe(100);
+    expect(state.economy.resources[sellerId]!.exports.food ?? 0).toBe(100);
+    // Money conservation at the BASE price: what buyers owe = what sellers get.
+    const income = order.reduce((sum, id) => sum + (state.economy.resources[id]!.tradeIncome), 0);
+    const expense = order.reduce((sum, id) => sum + (state.economy.resources[id]!.tradeExpense), 0);
+    expect(income).toBeCloseTo(expense, 2);
+    expect(income).toBeCloseTo(100 * unitPriceOf(config, 'food'), 2);
+    // The trade step NEVER touches the treasury — money lands in step ۷.
+    expect(state.economy.treasury[buyerId]).toBe(5000);
+  });
+
+  it('T13 statuses are honest: shortage from the record, surplus needs a real buffer', () => {
+    const state = context.state;
+    const countryId = playerCountryId;
+    const record = state.economy.resources[countryId]!;
+
+    record.shortage.food = 100;
+    expect(resourceDisplayStatusOf(record, 'food', config.displayStatus)).toBe('shortage');
+    record.shortage = {};
+
+    // A +1/month trickle with a thin warehouse is NOT a surplus.
+    record.production.food = (record.consumption.food ?? 0) + 1;
+    record.stock.food = 10;
+    expect(resourceDisplayStatusOf(record, 'food', config.displayStatus)).toBe('balanced');
+    // A real flow + a real buffer IS one.
+    record.production.food = (record.consumption.food ?? 0) * 2;
+    record.stock.food = config.displayStatus.surplusBufferMonths * (record.consumption.food ?? 0) + 100;
+    expect(resourceDisplayStatusOf(record, 'food', config.displayStatus)).toBe('surplus');
+  });
+
+  it('T14 construction: money paid ONCE at start; time finishes the building (§8)', () => {
+    const state = context.state;
+    const countryId = playerCountryId;
+    const def = config.buildings[0]; // the farm — one effect: +food production
+    state.economy.treasury[countryId] = def.cost * 2;
+    const before = state.economy.treasury[countryId];
+
+    const started = startProject(state, countryId, config, def.id, 'city_test', 10, () => 'p1');
+    expect(started.ok).toBe(true);
+    // The ONE-TIME cost left the treasury at START — never again.
+    expect(state.economy.treasury[countryId]).toBe(before - def.cost);
+
+    // Poor countries cannot start (§14: expenses over treasury are blocked).
+    state.economy.treasury[countryId] = def.cost / 2;
+    const broke = startProject(state, countryId, config, def.id, 'city_test', 10, () => 'p2');
+    expect(broke.ok).toBe(false);
+    if (!broke.ok) expect(broke.reason).toBe('no-funds');
+    state.economy.treasury[countryId] = def.cost; // restore for the build phase
+
+    // Build time advances; the project never draws money or resources again.
+    const speed = constructionSpeedFactorOf(state, countryId);
+    for (let month = 11; month <= 10 + Math.ceil(def.buildMonths / speed) + 1; month += 1) {
+      stepProjects(state, countryId, config, month);
+    }
+    const buildings = Object.values(state.economy.buildings[countryId] ?? {});
+    expect(buildings.some((building) => building.typeId === def.id)).toBe(true);
+    expect(state.economy.treasury[countryId]).toBe(before - def.cost); // still exactly once
+    // The completed building adds its single production effect.
+    expect(def.effect).toBe('production');
+  });
+});

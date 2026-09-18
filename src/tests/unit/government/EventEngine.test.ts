@@ -26,13 +26,13 @@ describe('EventEngine (data-driven events with choices)', () => {
     const state = game.gameState;
     // Fewer than 2 acutely short resources → not eligible.
     const record = state.economy.resources[countryId];
-    record!.unfilledShortage = {};
+    record!.shortage = {};
     for (const resourceId of Object.keys(record!.consumption)) {
       record!.production[resourceId] = (record!.production[resourceId] ?? 0) + (record!.consumption[resourceId] ?? 0) + 10;
     }
     expect(isEventEligible(state, countryId, event, 0)).toBe(false);
-    // Two resources acutely short (unfilled shortage) → eligible.
-    record!.unfilledShortage = { iron: 20, oil: 15 };
+    // Two resources acutely short (stockpile ran dry) → eligible.
+    record!.shortage = { iron: 20, oil: 15 };
     expect(isEventEligible(state, countryId, event, 0)).toBe(true);
     game.dispose();
   });
@@ -41,7 +41,7 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(72);
     const event = game.gameData.event('bank_crisis'); // once: true
     const state = game.gameState;
-    state.economy.finance[countryId]!.lastBalance = -50;
+    state.economy.finance[countryId]!.lastBalance = -100; // beyond the rescaled −50 trigger
     expect(isEventEligible(state, countryId, event, 0)).toBe(true);
     firePendingEvent(state, countryId, event, 0, newEventInstanceId(game.gameIds));
     expect(state.government.countries[countryId].events.fired).toContain('bank_crisis');
@@ -53,7 +53,7 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(73);
     const event = game.gameData.event('worker_strike');
     const state = game.gameState;
-    state.economy.resources[countryId]!.unfilledShortage = { iron: 20, oil: 15 };
+    state.economy.resources[countryId]!.shortage = { iron: 20, oil: 15 };
     firePendingEvent(state, countryId, event, 0, newEventInstanceId(game.gameIds));
     // Cooldown (12 months) blocks even after resolving.
     state.government.countries[countryId].events.pending.length = 0;
@@ -75,8 +75,8 @@ describe('EventEngine (data-driven events with choices)', () => {
     const { game, countryId } = preparedGame(74);
     const events = game.gameData.eventList;
     const state = game.gameState;
-    state.economy.resources[countryId]!.unfilledShortage = { iron: 20, oil: 15 };
-    state.economy.finance[countryId]!.lastBalance = -50;
+    state.economy.resources[countryId]!.shortage = { iron: 20, oil: 15 };
+    state.economy.finance[countryId]!.lastBalance = -100; // beyond the rescaled −50 trigger
     const a = rollEvents(state, countryId, events, 0, new Random(123));
     const b = rollEvents(state, countryId, events, 0, new Random(123));
     expect(a?.id).toBe(b?.id);

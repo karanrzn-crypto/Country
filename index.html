@@ -293,17 +293,17 @@
       .pd-flow.gap { color: #e8b4a0; border-color: #4a3038; }
       /* Resource economy page (Phase 3): stock cards, construction projects,
          explicit purchase rows and the research list. */
-      .pd-construction, .pd-purchases, .pd-research-list {
+      .pd-construction, .pd-market {
         display: flex; flex-direction: column; gap: 4px; margin-top: 4px;
       }
       /* On-demand resource MARKET (spec §18): hidden until opened; the buy
          entries on cards/projects reuse the shared button styling. */
-      .pd-resource-buy, .pd-project-buy {
+      .pd-resource-buy {
         border: 1px solid #4a5f88; background: #243149; color: #e8edf5;
         border-radius: 4px; padding: 3px 10px; cursor: pointer; font-weight: 700;
         align-self: flex-start; font-size: 12px;
       }
-      .pd-resource-buy:hover, .pd-project-buy:hover { background: #2c3c5e; }
+      .pd-resource-buy:hover { background: #2c3c5e; }
       .pd-market-close {
         border: 1px solid #4a3038; background: transparent; color: #e8b4a0;
         border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 700;
@@ -316,26 +316,24 @@
       }
       .pd-resource-chip.st-shortage { color: #ff8f7a; border-color: #6a3226; }
       .pd-resource-chip.st-surplus { color: #9fd89f; border-color: #2f5233; }
-      .pd-project, .pd-buildable, .pd-purchase, .pd-research-row {
+      .pd-project, .pd-buildable, .pd-purchase {
         border: 1px solid #22304a; border-radius: 5px; padding: 6px 9px;
         display: flex; flex-direction: column; gap: 3px;
       }
-      .pd-buildable, .pd-research-row { flex-direction: row; align-items: center; gap: 10px; }
+      .pd-buildable { flex-direction: row; align-items: center; gap: 10px; }
       .pd-project-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
       .pd-project-name { color: #e8edf5; font-weight: 700; }
       .pd-project-progress { color: #a8c4f0; font-weight: 700; }
-      .pd-project-line { color: #cfd8e6; font-size: 12px; }
       .pd-project-status { font-size: 12px; font-weight: 700; }
       .pd-project-status.running { color: #9fd89f; }
-      .pd-project-status.stalled { color: #ff8f7a; }
       .pd-buildable-info { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }
       .pd-buildable-name { color: #e8edf5; font-weight: 700; }
       .pd-buildable-detail { color: #cfd8e6; font-size: 12px; }
-      .pd-build, .pd-buy, .pd-research-btn {
+      .pd-build, .pd-buy {
         border: 1px solid #4a5f88; background: #243149; color: #e8edf5;
         border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 700;
       }
-      .pd-build:hover, .pd-buy:hover, .pd-research-btn:hover { background: #2c3c5e; }
+      .pd-build:hover, .pd-buy:hover { background: #2c3c5e; }
       .pd-buildable .pd-build { flex: 0 0 auto; }
       .pd-purchase-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
       .pd-purchase-name { color: #e8edf5; font-weight: 700; }

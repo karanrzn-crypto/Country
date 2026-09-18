@@ -7,11 +7,10 @@ import { relationBand } from '../state/slices/countrySlice';
 import type { CountryState } from '../state/slices/countrySlice';
 import { flagDataUrl } from './flags';
 import { describeGridCell, describeProvince } from '../world/map/MapGeography';
+import { faNum, faPopulation } from '../utils/format';
 import { selectionSummary } from '../state/slices/mapSlice';
-import { cityResourceProduction, depositMonthlyProduction, mineLevelOf } from '../economy/resources';
+import { cityResourceProduction, depositMonthlyProduction, provinceResourceProduction } from '../economy/resources';
 import type { StrategicResourcesConfig } from '../economy/types';
-import type { GameCommand } from '../core/CommandTypes';
-import { unlockedMineLevelOf } from '../economy/research';
 import { cityConnectionsOf, connectionsOfCity, connectionOtherCity, connectionLengthKm } from '../world/cityareas/CityConnections';
 import type { CityConnection } from '../world/cityareas/CityConnections';
 import {
@@ -351,8 +350,7 @@ export class MapUI {
           ? model.features.deposits.find((candidate) => candidate.siteId === site.id)
           : undefined;
         if (deposit === undefined) return String(map.selectedGridKey ?? '');
-        const state = context.state;
-        return `${mineLevelOf(state, deposit.id)}:${unlockedMineLevelOf(state, state.player.countryId, deposit.resourceId)}`;
+        return `${deposit.id}:${Math.round(depositMonthlyProduction(deposit, context.data.economyData.strategicResources))}`;
       })()}`;
     if (signature === this.featureSignature) return;
     this.featureSignature = signature;
@@ -412,10 +410,19 @@ export class MapUI {
           'شهرها',
           info.cityIds.map((cityId) => model.cities[cityId]?.name ?? cityId)
         );
-        addRow('جمعیت', formatCompact(info.population));
+        addRow('جمعیت', faPopulation(info.population));
         addRow('زمین', TERRAIN_LABELS[info.terrainType] ?? info.terrainType);
         addRow('مساحت', `${info.areaCells} سلول`);
         addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(context.data.economyData.strategicResources, id)));
+        // Per-resource provincial production (spec §4): تولید غذا / آهن / نفت.
+        {
+          const config = context.data.economyData.strategicResources;
+          const production = provinceResourceProduction(model, info.provinceId, config);
+          for (const resource of config.resources) {
+            const amount = Math.round(production[resource.id] ?? 0);
+            addRow(`تولید ${resource.name}`, `${faNum(amount)} / ماه`);
+          }
+        }
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');
         addRow(
           'زیرساخت',
@@ -453,12 +460,11 @@ export class MapUI {
           .map((depositId) => model.features.deposits.find((candidate) => candidate.id === depositId))
           .filter((deposit) => deposit !== undefined);
         for (const deposit of mines) {
-          const level = mineLevelOf(context.state, deposit.id);
-          const production = depositMonthlyProduction(deposit, config, level);
+          const production = depositMonthlyProduction(deposit, config);
           const owner = model.countries[deposit.countryId]?.name ?? deposit.countryId;
           addRow(
             'معدن',
-            `${resourceLabel(config, deposit.resourceId)} — سطح ${level} · ${production.toLocaleString('en-US')} / ماه · ${owner}`
+            `${resourceLabel(config, deposit.resourceId)} — ${faNum(production)} / ماه · ${owner}`
           );
         }
         addChips('منابع', [...info.resourceIds].map((id) => resourceLabel(config, id)));
@@ -603,17 +609,13 @@ export class MapUI {
         const deposit = model.features.deposits.find((candidate) => candidate.siteId === site.id);
         const config = context.data.economyData.strategicResources;
         if (deposit !== undefined) {
-          // The REAL mine record (spec §14/§15/§16): resource, type, level,
-          // monthly production, owner — all read from the live Game State.
-          const level = mineLevelOf(context.state, deposit.id);
-          const production = depositMonthlyProduction(deposit, config, level);
+          // The REAL mine record (spec §4/§20): resource, monthly production,
+          // owner — read from the live map model, no levels, no research.
+          const production = depositMonthlyProduction(deposit, config);
           if (site.resourceId !== null) addRow('منبع', resourceLabel(config, site.resourceId));
-          addRow('سطح', String(level));
-          addRow('تولید', `${production.toLocaleString('en-US')} / ماه`);
+          addRow('تولید', `${faNum(production)} / ماه`);
           addRow('کشور', model.countries[deposit.countryId]?.name ?? deposit.countryId);
-          addRow('مقدار', String(deposit.quantity));
-          // Upgrade status (spec §15): research-gated, executed per mine.
-          this.appendMineUpgradeBlock(deposit.id, deposit.countryId, deposit.resourceId, level, config);
+          addRow('مقدار', faNum(deposit.quantity));
         } else {
           if (site.resourceId !== null) addRow('منبع', site.resourceId);
           addRow('کشور', model.countries[site.countryId]?.name ?? site.countryId);
@@ -640,52 +642,6 @@ export class MapUI {
     this.featureContainer.setVisible(featureVisible);
   }
 
-  /**
-   * The mine UPGRADE block (spec 15): an actionable upgrade button when the
-   * owner is the player and the research level is unlocked, otherwise the
-   * research requirement line. The command path is the standard one - the
-   * UI never mutates state.
-   */
-  private appendMineUpgradeBlock(
-    depositId: string,
-    countryId: string,
-    resourceId: string,
-    level: number,
-    config: StrategicResourcesConfig
-  ): void {
-    if (this.featureContainer === null) return;
-    const state = this.context?.state;
-    if (state === undefined) return;
-    const isPlayerCountry = state.player.countryConfirmed && state.player.countryId === countryId;
-    const unlocked = unlockedMineLevelOf(state, countryId, resourceId);
-    const maxLevel = Math.max(
-      ...Object.keys(config.mineLevels.multipliers).map((key) => Number.parseInt(key, 10))
-    );
-    if (level >= maxLevel) return; // nothing beyond the config's top level
-    const resName = resourceLabel(config, resourceId);
-    if (isPlayerCountry && level < unlocked) {
-      const row = this.create('div', 'map-info-row');
-      const button = this.create('button', 'map-mine-upgrade');
-      button.setText('ارتقای معدن → سطح ' + (level + 1));
-      button.onClick(() =>
-        this.commands.send({ type: 'economy.upgradeMine', countryId, depositId } as GameCommand)
-      );
-      row.appendChild(button);
-      this.featureContainer.appendChild(row);
-      this.featureRows.push(row);
-    } else {
-      const row = this.create('div', 'map-info-row');
-      const keyEl = this.create('span', 'map-info-key');
-      keyEl.setText('ارتقا');
-      const valueEl = this.create('span', 'map-info-value');
-      valueEl.setText('نیازمند تحقیق: معدن ' + resName + ' سطح ' + (level + 1));
-      row.appendChild(keyEl);
-      row.appendChild(valueEl);
-      this.featureContainer.appendChild(row);
-      this.featureRows.push(row);
-    }
-  }
-
   /** One-line stockpile summary of a country (the country panel's resources row). */
   private resourceSummaryLine(context: SystemContext, countryId: string): string {
     const record = context.state.economy.resources[countryId];
@@ -695,7 +651,7 @@ export class MapUI {
     for (const resource of config.resources) {
       const stock = Math.round(record.stock[resource.id] ?? 0);
       if (stock <= 0 && (record.production[resource.id] ?? 0) <= 0) continue;
-      parts.push(resource.name + ' ' + stock.toLocaleString('en-US'));
+      parts.push(resource.name + ' ' + faNum(stock));
     }
     return parts.length > 0 ? parts.join(' · ') : '—';
   }
@@ -806,8 +762,8 @@ export class MapUI {
       const capital =
         countryState.capitalId !== null ? model.cities[countryState.capitalId] : undefined;
       fill('پایتخت', capital !== undefined ? capital.name : '—');
-      fill('جمعیت', formatCompact(countryState.population));
-      fill('خزانه', `${Math.round(context.state.economy.treasury[countryState.id] ?? countryState.economy.treasury)} میلیون دلار`);
+      fill('جمعیت', faPopulation(countryState.population));
+      fill('خزانه', faNum(Math.round(context.state.economy.treasury[countryState.id] ?? 0)));
       fill('منابع', this.resourceSummaryLine(context, countryState.id));
       fill('نیروی انسانی', formatCompact(countryState.military.manpower));
       fill('ارتش', formatCompact(countryState.military.armySize));

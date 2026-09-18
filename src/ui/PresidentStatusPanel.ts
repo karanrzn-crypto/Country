@@ -103,9 +103,10 @@ export class PresidentStatusPanel {
     this.root.appendChild(this.identity);
 
     // —— fixed sections (top → bottom) ——
-    // Light money (spec §10): treasury + the THREE revenue lines + the
-    // budget spending + the resource summary. No GDP/inflation/unemployment.
-    this.addSection('economy', 'اقتصاد', ['خزانه', 'مالیات', 'گمرک', 'صادرات', 'هزینه‌های دولت', 'تراز ماهانه', 'منابع']);
+    // The SIMPLE money (spec §3/§12): treasury + the income lines (tax /
+    // trade) + the THREE expense lines + the balance + the resource summary.
+    // No GDP/inflation/unemployment, no customs, no budget pot.
+    this.addSection('economy', 'اقتصاد', ['خزانه', 'مالیات', 'تجارت', 'ارتش', 'دولت', 'زیرساخت', 'تراز ماهانه', 'منابع']);
     this.addSection('military', 'نظامی', ['قدرت', 'یگان‌های فعال', 'سربازان', 'در نبرد', 'در حال حرکت', 'جنگ‌ها']);
     this.addSection('politics', 'سیاست', [
       'محبوبیت',
@@ -254,19 +255,18 @@ export class PresidentStatusPanel {
     if (economy === null) return;
     const finance = context.state.economy.finance[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
-    economy.rows.get('خزانه')?.setText(moneyM(treasury));
+    economy.rows.get('خزانه')?.setText(faNum(Math.round(treasury)));
     if (finance !== undefined) {
-      economy.rows.get('مالیات')?.setText(moneyM(finance.lastTax));
-      economy.rows.get('گمرک')?.setText(moneyM(finance.lastCustoms));
-      economy.rows.get('صادرات')?.setText(moneyM(finance.lastExports));
-      economy.rows.get('هزینه‌های دولت')?.setText(moneyM(finance.lastSpending));
-      economy.rows.get('تراز ماهانه')?.setText(`${signed(moneyM(Math.abs(finance.lastBalance)), finance.lastBalance >= 0)} ماهانه`);
+      economy.rows.get('مالیات')?.setText(faSigned(Math.round(finance.lastTaxIncome)));
+      economy.rows.get('تجارت')?.setText(faSigned(Math.round(finance.lastTradeIncome)));
+      economy.rows.get('ارتش')?.setText(faSigned(-Math.round(finance.lastArmyExpense)));
+      economy.rows.get('دولت')?.setText(faSigned(-Math.round(finance.lastGovernmentExpense)));
+      economy.rows.get('زیرساخت')?.setText(faSigned(-Math.round(finance.lastInfrastructureExpense)));
+      economy.rows.get('تراز ماهانه')?.setText(`${faSigned(Math.round(finance.lastBalance))} ماهانه`);
     } else {
-      economy.rows.get('مالیات')?.setText('—');
-      economy.rows.get('گمرک')?.setText('—');
-      economy.rows.get('صادرات')?.setText('—');
-      economy.rows.get('هزینه‌های دولت')?.setText('—');
-      economy.rows.get('تراز ماهانه')?.setText('—');
+      for (const row of ['مالیات', 'تجارت', 'ارتش', 'دولت', 'زیرساخت', 'تراز ماهانه']) {
+        economy.rows.get(row)?.setText('—');
+      }
     }
     economy.rows.get('منابع')?.setText(this.resourceSummary(context, countryId));
   }
@@ -281,7 +281,7 @@ export class PresidentStatusPanel {
     for (const resource of config.resources) {
       const status = resourceStatusOf(record, resource.id);
       if (status === 'shortage') shortages.push(resource.name);
-      else if (status === 'surplus' || status === 'exported') surpluses.push(resource.name);
+      else if (status === 'surplus') surpluses.push(resource.name);
     }
     const parts: string[] = [];
     if (shortages.length > 0) parts.push(`کمبود: ${shortages.join('، ')}`);
@@ -472,19 +472,10 @@ export class PresidentStatusPanel {
 
 // ————————————————————————————————————————————————————————————— formatting ——
 
-/** Money in $M (the state unit): `$24,520M`. */
-function moneyM(value: number): string {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? '−' : ''}$${Math.abs(rounded).toLocaleString('en-US')}M`;
-}
-
-/** Prefixes a magnitude with +/− (positive strips the minus moneyM may add). */
-function signed(text: string, positive: boolean): string {
-  return `${positive ? '+' : '−'}${text.replace('−', '')}`;
-}
+import { faNum, faSigned, toFaDigits } from '../utils/format';
 
 function percent(value: number): string {
-  return `${Math.round(value * 100)}٪`;
+  return toFaDigits(`${Math.round(value * 100)}٪`);
 }
 
 function protestLabel(level: GovernmentCountryState['politics']['protests']): string {

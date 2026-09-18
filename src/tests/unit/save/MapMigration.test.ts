@@ -26,10 +26,12 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  *   research/construction/plants appear, resources gain stock/emergencyImports,
  *   legacy taxRates stripped, shares derived from the saved spending mix
  * - v14 → v15: construction escrow — `paid` becomes `secured`, projects gain
+ * - v15 → v16: the SIMPLE economy — 3 resources, money construction, the
+ *   transparent cycle; mines/research/plants die, the money scale converts
  *   the waiting/building states (one-time costs, spec §5/§6)
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v15)', () => {
+describe('save migrations (v1 → … → v16)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -213,8 +215,8 @@ describe('save migrations (v1 → … → v15)', () => {
       state: { economy: { resources: { country_0: { production: { oil: 4 } } } } },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v10, 10, 15);
+    expect(version).toBe(15);
     const economy = (data as typeof v10).state.economy as Record<string, unknown>;
     expect(economy.resources).toEqual({
       country_0: {
@@ -242,8 +244,8 @@ describe('save migrations (v1 → … → v15)', () => {
       },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v10, 10, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v10, 10, 15);
+    expect(version).toBe(15);
     const migrated = data as typeof v10;
     // Visibility: the merged toggle carries the AND of the two old flags
     // (an explicit hide wins); the old keys are gone.
@@ -282,8 +284,8 @@ describe('save migrations (v1 → … → v15)', () => {
       },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v11, 11, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v11, 11, 15);
+    expect(version).toBe(15);
     const record = (data as typeof v11).state.economy!.resources!.country_0 as Record<string, unknown>;
     // The policy system is GONE (the world market decides for everyone).
     expect('importPolicy' in record).toBe(false);
@@ -324,8 +326,8 @@ describe('save migrations (v1 → … → v15)', () => {
       },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v12, 12, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v12, 12, 15);
+    expect(version).toBe(15);
     const record = (data as typeof v12).state.government!.countries!.country_0 as Record<string, unknown>;
     const budget = record.budget as Record<string, unknown>;
     // The legacy rate record is GONE; the pool split + level are present.
@@ -375,8 +377,8 @@ describe('save migrations (v1 → … → v15)', () => {
       },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v13, 13, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v13, 13, 15);
+    expect(version).toBe(15);
     const economy = (data as typeof v13).state.economy as Record<string, unknown>;
     // The GDP/debt/inflation engine is GONE.
     expect(economy.macro).toBeUndefined();
@@ -434,8 +436,8 @@ describe('save migrations (v1 → … → v15)', () => {
       },
       runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
     };
-    const { data, version } = applyMigrations(v14, 14, SAVE_VERSION);
-    expect(version).toBe(SAVE_VERSION);
+    const { data, version } = applyMigrations(v14, 14, 15);
+    expect(version).toBe(15);
     const economy = (data as { state: { economy: Record<string, Record<string, { projects: Record<string, unknown>[] }>> } }).state.economy;
     const projects = economy.construction.country_0!.projects;
     // The fully-paid project becomes BUILDING with a full escrow (its build
@@ -450,6 +452,86 @@ describe('save migrations (v1 → … → v15)', () => {
     expect(partial['secured']).toEqual({ iron: 280, oil: 0 });
     expect(partial['status']).toBe('waiting');
     expect(partial['paid']).toBeUndefined();
+  });
+
+  it('v15→v16: the SIMPLE economy — money ×6, stock kept, escrow refunded, mines/research/plants die, max→high', () => {
+    const v15 = {
+      state: {
+        economy: {
+          treasury: { country_0: 2000 },
+          resources: {
+            country_0: {
+              stock: { food: 800, iron: 900 },
+              production: { food: 300 },
+              consumption: { food: 200 },
+              imports: { food: 10 },
+              exports: {},
+              suppliers: { food: { country_1: 10 } },
+              unfilledShortage: {},
+              emergencyImports: { food: 5 },
+              importCost: 3,
+              exportIncome: 4
+            }
+          },
+          finance: { country_0: { lastTax: 90, lastCustoms: 5, lastExports: 10, lastRevenue: 105, lastSpending: 80, lastBalance: 25, outputGrowth: 1.05 } },
+          mines: { dep_0: 2 },
+          research: { country_0: { mineLevels: { iron: 2 } } },
+          construction: {
+            country_0: {
+              projects: [
+                { id: 'p1', typeId: 'iron_works', cityId: 'city_0', startedMonth: 3, status: 'building', progress: 0.5, secured: { iron: 400 } },
+                { id: 'p2', typeId: 'coal_plant', cityId: 'city_0', startedMonth: 5, status: 'waiting', progress: 0.2, secured: { iron: 120, wood: 0 } }
+              ]
+            }
+          },
+          plants: { country_0: { plant_1: { id: 'plant_1', typeId: 'iron_works', cityId: 'city_0' } } }
+        },
+        government: {
+          countries: {
+            country_0: { budget: { tax: 'max' } },
+            country_1: { budget: { tax: 'high' } }
+          }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v15, 15, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, unknown> } }).state.economy as Record<string, any>;
+
+    // Money scale: 2,000 M$ → 12,000 units (×6).
+    expect(economy.treasury.country_0).toBe(12000);
+    // Resources: the REAL stock survives; every tier-priced field is gone.
+    const record = economy.resources.country_0;
+    expect(record.stock).toEqual({ food: 800, iron: 1020, wood: 0 }); // +120 refunded escrow, wood:0 refunded
+    expect(record).not.toHaveProperty('suppliers');
+    expect(record).not.toHaveProperty('unfilledShortage');
+    expect(record).not.toHaveProperty('emergencyImports');
+    expect(record).not.toHaveProperty('importCost');
+    expect(record).not.toHaveProperty('exportIncome');
+    expect(record.shortage).toEqual({});
+    expect(record.tradeIncome).toBe(0);
+    // Finance: the new three-against-three ledger; the old balance converts.
+    expect(economy.finance.country_0.lastBalance).toBe(150);
+    expect(economy.finance.country_0).not.toHaveProperty('lastTax');
+    // Mines/research/plants are REMOVED; the empty buildings record exists.
+    expect(economy).not.toHaveProperty('mines');
+    expect(economy).not.toHaveProperty('research');
+    expect(economy).not.toHaveProperty('plants');
+    expect(economy.buildings).toEqual({});
+    // Construction: the building project keeps its progress; the waiting
+    // project refunds its escrow into the stockpile and disappears.
+    const projects = economy.construction.country_0.projects;
+    expect(projects.length).toBe(1);
+    expect(projects[0].id).toBe('p1');
+    expect(projects[0].progress).toBe(0.5);
+    expect(projects[0]).not.toHaveProperty('status');
+    expect(projects[0]).not.toHaveProperty('secured');
+    expect(record.stock.iron).toBe(1020); // the refunded escrow
+    // FOUR tax levels → THREE: max becomes high, high stays high.
+    const government = (data as { state: { government: { countries: Record<string, { budget: { tax: string } }> } } }).state.government.countries;
+    expect(government.country_0.budget.tax).toBe('high');
+    expect(government.country_1.budget.tax).toBe('high');
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

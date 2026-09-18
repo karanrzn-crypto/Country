@@ -124,9 +124,9 @@ describe('MapUI country info panel (Part 2)', () => {
 
     // Economy / military values are rendered from the live state (light
     // money: the treasury row; the resources row from the real stockpile).
-    expect(detailText).toContain('میلیون دلار');
+    expect(detailText).toContain('۱۲٬۰۰۰'); // Persian treasury format (spec §1)
     expect(detailText).toContain('منابع');
-    expect(detailText).toContain(formatCompact(state.population));
+    expect(detailText).toContain('میلیون نفر'); // population in Persian words (spec §1)
     expect(detailText).toContain(`${state.military.aircraft}`);
 
     // Relations rows exist for countries with relations.

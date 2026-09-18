@@ -29,11 +29,11 @@ describe('DecisionEngine (data-driven presidential decisions)', () => {
     const state = game.gameState;
     const treasuryBefore = state.economy.treasury[countryId];
     const approvalBefore = state.government.countries[countryId].president.approval;
-    expect(decisionTreasuryPreview(state, countryId, decision)).toBe(-120);
+    expect(decisionTreasuryPreview(state, countryId, decision)).toBe(-720);
 
     enactDecision(state, countryId, decision, 5);
 
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 4);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 720, 4);
     expect(state.government.countries[countryId].president.approval).toBeCloseTo(approvalBefore + 0.03, 6);
     // The 'add' effects applied instantly (protest relief) — no modifier.
     const active = state.government.countries[countryId].decisions.active;
@@ -101,7 +101,7 @@ describe('DecisionEngine (data-driven presidential decisions)', () => {
     const state = game.gameState;
     const foodBefore = state.economy.resources[countryId]?.stock.food ?? 0;
     enactDecision(state, countryId, decision, 0);
-    expect(state.economy.resources[countryId]!.stock.food).toBe(foodBefore + 400);
+    expect(state.economy.resources[countryId]!.stock.food).toBe(foodBefore + 2000);
     game.dispose();
   });
 });

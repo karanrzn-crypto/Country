@@ -5,13 +5,13 @@
     "description": "کمک مالی به کارخانه‌های ملی برای خرید مواد اولیه. مردم راضی می‌شوند؛ خزانه سبک‌تر.",
     "category": "economic",
     "cost": {
-      "treasury": 120
+      "treasury": 720
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 120
+        "value": 720
       }
     ],
     "effects": [
@@ -35,13 +35,13 @@
     "description": "خریدهای اضطراری و رزمایش‌ها. ستاد کل شاد می‌شود؛ صلح‌طلبان نه.",
     "category": "military",
     "cost": {
-      "treasury": 300
+      "treasury": 1800
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 300
+        "value": 1800
       }
     ],
     "effects": [
@@ -65,7 +65,7 @@
     "description": "حسابرسان مستقل، حمایت از افشاگران و تعقیب قانونی. نهادها پاک‌تر می‌شوند؛ رجال قدیمی نگران.",
     "category": "political",
     "cost": {
-      "treasury": 80
+      "treasury": 480
     },
     "preconditions": [
       {
@@ -100,13 +100,13 @@
     "description": "یارانهٔ یک‌بارهٔ خانوارها از خزانهٔ کشور. محبوب اما پرهزینه.",
     "category": "economic",
     "cost": {
-      "treasury": 200
+      "treasury": 1200
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 200
+        "value": 1200
       }
     ],
     "effects": [
@@ -130,13 +130,13 @@
     "description": "جاده‌ها، پل‌ها و شبکهٔ برق. ساخت‌وساز شتاب می‌گیرد اما صندوق کشور خالی‌تر می‌شود.",
     "category": "economic",
     "cost": {
-      "treasury": 250
+      "treasury": 1500
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 250
+        "value": 1500
       }
     ],
     "effects": [
@@ -160,20 +160,20 @@
     "description": "تجهیزات مدرن، بذرهای بهتر و آبیاری کارآمد — انبار غذا کشور را پُر می‌کند.",
     "category": "economic",
     "cost": {
-      "treasury": 100
+      "treasury": 600
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 100
+        "value": 600
       }
     ],
     "effects": [
       {
         "target": "foodStock",
         "mode": "add",
-        "value": 400
+        "value": 2000
       },
       {
         "target": "approval",
@@ -190,13 +190,13 @@
     "description": "سرمایه‌گذاری در پژوهش و نوآوری؛ اعتماد عمومی و آبروی کشور بالا می‌رود.",
     "category": "economic",
     "cost": {
-      "treasury": 150
+      "treasury": 900
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 150
+        "value": 900
       }
     ],
     "effects": [
@@ -220,13 +220,13 @@
     "description": "نیروگاه‌ها و خطوط انتقال تازه؛ ستون فقرات معادن و کارخانه‌ها.",
     "category": "economic",
     "cost": {
-      "treasury": 180
+      "treasury": 1080
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 180
+        "value": 1080
       }
     ],
     "effects": [
@@ -293,13 +293,13 @@
     "description": "مدارس و دانشگاه‌های بهتر؛ سرمایهٔ انسانی بلندمدت کشور.",
     "category": "social",
     "cost": {
-      "treasury": 120
+      "treasury": 720
     },
     "preconditions": [
       {
         "metric": "treasury",
         "op": "gte",
-        "value": 120
+        "value": 720
       }
     ],
     "effects": [

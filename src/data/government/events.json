@@ -23,7 +23,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -150
+            "value": -900
           },
           {
             "target": "approval",
@@ -74,7 +74,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -60
+            "value": -360
           },
           {
             "target": "strikePressure",
@@ -129,7 +129,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -60
+            "value": -360
           }
         ]
       },
@@ -140,7 +140,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -40
+            "value": -240
           },
           {
             "target": "approval",
@@ -217,7 +217,7 @@
       {
         "metric": "monthlyBalance",
         "op": "gt",
-        "value": 40
+        "value": 50
       }
     ],
     "cooldownMonths": 24,
@@ -231,7 +231,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": 80
+            "value": 480
           },
           {
             "target": "approval",
@@ -247,7 +247,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": 40
+            "value": 240
           },
           {
             "target": "publicTrust",
@@ -268,7 +268,7 @@
       {
         "metric": "monthlyBalance",
         "op": "lt",
-        "value": -30
+        "value": -50
       }
     ],
     "cooldownMonths": 30,
@@ -282,7 +282,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -200
+            "value": -1200
           },
           {
             "target": "stability",
@@ -324,7 +324,7 @@
       {
         "metric": "foodStock",
         "op": "lt",
-        "value": 100
+        "value": 600
       }
     ],
     "cooldownMonths": 18,
@@ -338,7 +338,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -80
+            "value": -500
           },
           {
             "target": "approval",
@@ -405,7 +405,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -150
+            "value": -900
           },
           {
             "target": "approval",
@@ -491,7 +491,7 @@
           {
             "target": "treasury",
             "mode": "add",
-            "value": -70
+            "value": -400
           },
           {
             "target": "approval",

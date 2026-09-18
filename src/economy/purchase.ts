@@ -1,42 +1,29 @@
 /**
- * Resource purchase (spec §5/§6) — ONE explicit deal between the player and
+ * Resource purchase (spec §6) — ONE explicit deal between the player and
  * a chosen seller. There is no "Buy Cheapest" system: the player sees the
- * available sellers (and their stock), picks one, and the deal executes —
- * real units leave the seller's stockpile and enter the buyer's, real money
- * moves (the price follows the global market tier; it may be shown when
- * selecting a seller, nothing more).
+ * available sellers (and their real free stock), picks one, and the deal
+ * executes at the resource's BASE price (spec §7 — one price for buys and
+ * sells, from the config, no supply/demand machinery):
+ *
+ *   buyer  : −(amount × price) money   +(amount) units
+ *   seller : +(amount × price) money   −(amount) units
+ *
+ * The deal caps at the seller's FREE stock (above its safety reserve — a
+ * country never sells the units its own consumption needs) and at the
+ * buyer's money (nothing ever goes negative — spec §14).
  *
  * Pure function over GameState — the command facade calls `purchaseResource`.
- * Leaf module: state types + config + market pricing only.
+ * Leaf module: state types + config only.
  */
 
 import type { GameState } from '../state/GameState';
 import type { StrategicResourcesConfig } from './types';
-import { marketPriceTierOf } from './market';
 import { safetyReserveUnits } from './resources';
 import { roundTo } from '../utils/math';
 
-/** The per-unit prices of ONE deal (what the UI may show on selection). */
-export interface DealPrice {
-  /** M$ per unit the buyer pays (base price × markup × tier factor). */
-  readonly buyPerUnit: number;
-  /** M$ per unit the seller receives (base price × tier factor). */
-  readonly sellPerUnit: number;
-}
-
-/** The unit price of buying ONE resource from the world market right now. */
-export function dealPriceOf(
-  state: GameState,
-  _buyerId: string,
-  resourceId: string,
-  config: StrategicResourcesConfig
-): DealPrice {
-  const price = config.resources.find((resource) => resource.id === resourceId)?.price ?? 0;
-  const tier = marketPriceTierOf(state.economy.resources, Object.keys(state.economy.resources), resourceId);
-  return {
-    buyPerUnit: roundTo(price * config.importMarkup * config.priceTiers.supply[tier], 4),
-    sellPerUnit: roundTo(price * config.priceTiers.demand[tier], 4)
-  };
+/** The BASE unit price of ONE resource (spec §7 — config, no tiers). */
+export function unitPriceOf(config: StrategicResourcesConfig, resourceId: string): number {
+  return config.resources.find((resource) => resource.id === resourceId)?.price ?? 0;
 }
 
 export type PurchaseResult =
@@ -55,8 +42,9 @@ export type PurchaseResult =
 /**
  * Executes ONE purchase: the buyer's own country buys `amount` units of a
  * resource FROM a specific seller country. Caps the deal by the seller's
- * stock and the buyer's money (never negative anywhere). Stock and treasury
- * move immediately; the next world pass sees the new stockpiles.
+ * free stock and the buyer's money (never negative anywhere). Stock and
+ * treasury move immediately; the deal's units and money also land on the
+ * two countries' trade records, so the month's ledger shows the deal.
  */
 export function purchaseResource(
   state: GameState,
@@ -75,27 +63,35 @@ export function purchaseResource(
   if (sellerRecord === undefined || buyerRecord === undefined) {
     return { ok: false, reason: 'unknown-seller' };
   }
-  const available = Math.floor(sellerRecord.stock[resourceId] ?? 0);
+  const price = unitPriceOf(config, resourceId);
+  const available = Math.floor(
+    (sellerRecord.stock[resourceId] ?? 0) -
+      safetyReserveUnits(sellerRecord.consumption, resourceId, config)
+  );
   if (available <= 0) return { ok: false, reason: 'no-stock' };
 
-  const price = dealPriceOf(state, buyerId, resourceId, config);
   const money = state.economy.treasury[buyerId] ?? 0;
-  const affordable = price.buyPerUnit > 0 ? Math.floor(money / price.buyPerUnit) : available;
+  const affordable = price > 0 ? Math.floor(money / price) : available;
   if (affordable <= 0) return { ok: false, reason: 'no-funds' };
 
   const amount = Math.max(0, Math.min(Math.floor(requestedAmount), available, affordable));
   if (amount <= 0) return { ok: false, reason: 'no-stock' };
 
-  const cost = roundTo(amount * price.buyPerUnit, 2);
-  const received = roundTo(amount * price.sellPerUnit, 2);
+  const cost = roundTo(amount * price, 2);
 
-  // REAL stock moves: seller −, buyer + (the §17 cycle's "buy" step).
-  sellerRecord.stock[resourceId] = available - amount;
+  // REAL units move: seller −, buyer + (the §10 cycle's trade step).
+  sellerRecord.stock[resourceId] = Math.round((sellerRecord.stock[resourceId] ?? 0) - amount);
   buyerRecord.stock[resourceId] = Math.round((buyerRecord.stock[resourceId] ?? 0) + amount);
 
-  // REAL money moves: the buyer pays, the seller receives.
+  // REAL money moves: the buyer pays, the seller receives (§6 exactly).
   state.economy.treasury[buyerId] = roundTo((state.economy.treasury[buyerId] ?? 0) - cost, 4);
-  state.economy.treasury[sellerId] = roundTo((state.economy.treasury[sellerId] ?? 0) + received, 4);
+  state.economy.treasury[sellerId] = roundTo((state.economy.treasury[sellerId] ?? 0) + cost, 4);
+
+  // The deal shows up in BOTH countries' month ledger (تجارت line).
+  buyerRecord.imports[resourceId] = Math.round((buyerRecord.imports[resourceId] ?? 0) + amount);
+  sellerRecord.exports[resourceId] = Math.round((sellerRecord.exports[resourceId] ?? 0) + amount);
+  buyerRecord.tradeExpense = roundTo(buyerRecord.tradeExpense + cost, 2);
+  sellerRecord.tradeIncome = roundTo(sellerRecord.tradeIncome + cost, 2);
 
   return { ok: true, amount, cost, sellerId, resourceId };
 }
@@ -103,9 +99,9 @@ export function purchaseResource(
 /**
  * The sellers of ONE resource for the purchase panel: every country that
  * can actually spare units, largest first. The AVAILABLE amount is the
- * seller's FREE stockpile above its safety reserve (spec §11 — a country
- * never sells the units its own consumption needs; construction escrow is
- * already out of its stock). These are the real, buyable units.
+ * seller's stockpile above its safety reserve (spec §5 — a country never
+ * sells the units its own consumption needs). These are the real,
+ * buyable units.
  */
 export function sellersOf(
   state: GameState,
@@ -116,7 +112,8 @@ export function sellersOf(
   const sellers: { countryId: string; amount: number }[] = [];
   for (const [countryId, record] of Object.entries(state.economy.resources)) {
     if (countryId === buyerId) continue;
-    const free = Math.floor(record.stock[resourceId] ?? 0) - safetyReserveUnits(record, resourceId, config);
+    const free = Math.floor(record.stock[resourceId] ?? 0) -
+      safetyReserveUnits(record.consumption, resourceId, config);
     const amount = Math.max(0, free);
     if (amount > 0) sellers.push({ countryId, amount });
   }

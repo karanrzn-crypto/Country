@@ -551,13 +551,11 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       let resourceId: string | null = null;
       if (terrainClass === 'mountain') {
         kind = 'mine';
-        // Mountain ores: iron dominates, copper and coal are rarer
-        // (deterministic pick — the six-resource economy has no gold).
-        const pick = rng.next();
-        resourceId = pick < 0.55 ? 'iron' : pick < 0.8 ? 'copper' : 'coal';
+        // The SIMPLE economy (spec §1): three resources — mountains carry iron.
+        resourceId = 'iron';
       } else if (terrainClass === 'hills') {
         kind = 'mine';
-        resourceId = 'coal';
+        resourceId = 'iron';
       } else if (biomeClass === 'desert' || biomeClass === 'drylands') {
         kind = 'oil';
         resourceId = 'oil';
@@ -596,17 +594,6 @@ export function buildMapFeatures(input: MapFeaturesInput): MapFeatures {
       const position = centroids[cellIndex];
       if (!pointInRing(position, country.ring.points)) continue;
       pushSite('farm', country.id, position, cellIndex, null, null);
-    }
-
-    // Lumber camps: forest cells → wood production sites (same pattern as farms).
-    const forestCells = country.cellIds.filter(
-      (cellIndex) => biomes[cellIndex] === 'forest' && !lakeCellSetForSites.has(cellIndex)
-    );
-    const lumberCount = Math.max(0, Math.min(3, Math.ceil(forestCells.length / 10)));
-    for (const cellIndex of spreadCells(forestCells, lumberCount, centroids)) {
-      const position = centroids[cellIndex];
-      if (!pointInRing(position, country.ring.points)) continue;
-      pushSite('lumber', country.id, position, cellIndex, 'wood', null);
     }
 
     // Factories: the largest non-capital cities.

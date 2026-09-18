@@ -1,6 +1,7 @@
 /**
- * Economy domain model — definitions (data-driven) and runtime records.
- * Leaf module.
+ * Economy domain model — the SIMPLE economy (spec §1-§8): three resources
+ * (غذا / آهن / نفت), one stockpile per country, one transparent monthly
+ * cycle, base prices, money-paid construction. Leaf module.
  */
 
 /** Data-driven resource definition (src/data/economy.json). */
@@ -10,30 +11,9 @@ export interface ResourceDef {
   readonly weight: number;
 }
 
-// ———————————————— resource-economy production factories (new model) ————————
+// —————————————————————— legacy demo-world shapes (untouched) ——————————————————
 
-/**
- * A BUILDABLE production factory (spec §4): costs resources to construct
- * (a ONE-TIME cost, secured into the project's escrow — spec §5/§6), then
- * boosts ONE resource's monthly production forever and consumes a small
- * upkeep amount of another resource (living demand → trade).
- */
-export interface ProductionFactoryDef {
-  readonly id: string;
-  readonly name: string;
-  /** The resource whose monthly production this factory boosts. */
-  readonly boosts: string;
-  /** Monthly units added to the boosted resource while active. */
-  readonly output: number;
-  /** Construction cost in resources (secured ONCE, never re-drawn). */
-  readonly cost: Readonly<Record<string, number>>;
-  /** Monthly upkeep in resources (consumption while active). */
-  readonly upkeep: Readonly<Record<string, number>>;
-  /** Base build time in months once fully secured (economic budget scales it). */
-  readonly buildMonths: number;
-}
-
-/** Data-driven factory archetype (src/data/economy.json). */
+/** Data-driven factory archetype (economy.json → factoryTypes). */
 export interface FactoryTypeDef {
   readonly id: string;
   readonly name: string;
@@ -43,7 +23,7 @@ export interface FactoryTypeDef {
   readonly workforce: number;
 }
 
-/** Runtime factory instance — persisted in the economy state slice. */
+/** Runtime factory instance — persisted in the economy state slice (LEGACY). */
 export interface FactoryRecord {
   readonly id: string;
   readonly typeId: string;
@@ -53,36 +33,23 @@ export interface FactoryRecord {
   lastOutputAmount: number;
 }
 
-// ———————————————— strategic resource economy (HoI4-inspired, simple) ————————————————
+// ————————————————————————— the SIMPLE strategic economy ————————————————————————
 
-/** One strategic resource of the country economy (data-driven, Persian name). */
+/** One strategic resource: Persian display name + the BASE price (spec §7). */
 export interface StrategicResourceDef {
   readonly id: string;
   /** Persian display name (UI renders it verbatim). */
   readonly name: string;
-  /** Money (M$) per unit for the monthly import cost / export income. */
+  /** Base money price per unit — buys AND sells bill at this price (§6/§7). */
   readonly price: number;
 }
 
-/** Consumption drivers of ONE resource (data-driven calibration). */
+/** Consumption drivers of ONE resource (data-driven calibration, §4/§5). */
 export interface ResourceConsumptionDef {
-  /** Monthly units per 1M population (food, housing wood …). */
+  /** Monthly units per 1M population (food). */
   readonly perMillionPopulation?: number;
   /** Monthly units per operational military unit (fuel, equipment wear). */
   readonly perMilitaryUnit?: number;
-}
-
-// ———————————————— market pricing + domestic baseline (data-driven) ————————————————
-
-/** Price multiplier of ONE trade tier (spec §7 — simple, controllable). */
-export type TradeTierFactors = Readonly<Record<'low' | 'medium' | 'high', number>>;
-
-/** Data-driven tier pricing (economy.json → strategicResources.priceTiers). */
-export interface PriceTiersConfig {
-  /** Seller-side: how much of the base price a tier charges (low < 1 < high). */
-  readonly supply: TradeTierFactors;
-  /** Buyer-side: how eager demand raises the received price (high > 1 > low). */
-  readonly demand: TradeTierFactors;
 }
 
 /** Geography weights of ONE resource for the domestic baseline. */
@@ -97,7 +64,7 @@ export interface DomesticBaselineResourceDef {
   readonly terrain?: Readonly<Record<string, number>>;
   /** Neutral weight when `terrain` is omitted (default 0.5). */
   readonly terrainNeutral?: number;
-  /** City-term multiplier (0 = cities never unlock this resource — gold). */
+  /** City-term multiplier. */
   readonly cityFactor?: number;
 }
 
@@ -115,43 +82,70 @@ export interface DomesticBaselineConfig {
   readonly resources: Readonly<Record<string, DomesticBaselineResourceDef>>;
 }
 
-/** Data-driven tuning of the strategic resource economy (economy.json). */
+/**
+ * One BUILDABLE building (spec §8) — exactly ONE main economic effect:
+ *  - production: adds `output` monthly units of `resource` when complete;
+ *  - income: adds `income` money to the monthly treasury balance.
+ * The cost is ONE-TIME money, paid fully at start (never re-drawn).
+ */
+export interface BuildingDef {
+  readonly id: string;
+  readonly name: string;
+  readonly effect: 'production' | 'income';
+  /** Production buildings only: which resource this building produces. */
+  readonly resource?: string;
+  /** Production buildings only: monthly units added while active. */
+  readonly output?: number;
+  /** Income buildings only: monthly money added while active. */
+  readonly income?: number;
+  /** ONE-TIME money cost, deducted from the treasury at start. */
+  readonly cost: number;
+  /** Base build time in months (the economic budget scales the speed). */
+  readonly buildMonths: number;
+}
+
+/** The money side of the simple economy (spec §2/§3) — all data-driven. */
+export interface EconomyFinanceConfig {
+  /** The treasury every country starts the campaign with. */
+  readonly startingTreasury: number;
+  /** Monthly population growth rate (0.001 = +0.1 %/month). */
+  readonly populationGrowthPerMonth: number;
+  /** درآمد مالیاتی = جمعیت(میلیون) × نرخ × THIS (spec §2). */
+  readonly taxIncomePerMillionPerRate: number;
+  /** هزینه دولت = جمعیت(میلیون) × THIS (spec §3). */
+  readonly governmentCostPerMillion: number;
+  /** هزینه ارتش = سرباز(هزار نفر) × THIS (spec §3). */
+  readonly armyCostPerThousandSoldiers: number;
+  /** هزینه زیرساخت = تعداد نواحی شهری × THIS (spec §3). */
+  readonly infrastructureCostPerArea: number;
+}
+
+/** Data-driven tuning of the simple economy (economy.json). */
 export interface StrategicResourcesConfig {
   /** Deposit quantity (1..100) → monthly production multiplier. */
   readonly productionScale: number;
-  /** Import price multiplier over the base price (transport premium). */
-  readonly importMarkup: number;
-  /** Customs (border trade) revenue as a fraction of the month's trade value. */
-  readonly customsRate: number;
-  /** Tier pricing factors (supply side + demand side). */
-  readonly priceTiers: PriceTiersConfig;
-  /** Mine level → production multiplier (1: 1.0, 2: 1.5, 3: 2.0 …). */
-  readonly mineLevels: { readonly multipliers: Readonly<Record<string, number>> };
-  /** Research: target mine level → unlock cost (M$). */
-  readonly research: { readonly levels: Readonly<Record<string, number>> };
-  /** Construction pacing: concurrent-project cap (costs are one-time now). */
-  readonly construction: { readonly maxProjects: number };
-  /** Anti-famine safety buffer (spec §8/§11): months of consumption kept
-   *  out of exports — food uses its own (larger) reserve, every other
-   *  resource keeps at least `reserveMonths` months for domestic use. */
+  /** The stockpile every country starts the campaign with (units). */
+  readonly startingStock: Readonly<Record<string, number>>;
+  /** Anti-famine safety buffer (§5): months of consumption kept out of
+   *  exports — food its own (larger) reserve, others `reserveMonths`. */
   readonly safetyBuffer: { readonly foodMonths: number; readonly reserveMonths: number };
-  /** Display-status thresholds (spec §2/§10 — a +1/month is NOT a surplus). */
+  /** Display-status thresholds: a +1/month trickle is NOT a surplus. */
   readonly displayStatus: {
-    /** A surplus needs at least this many months of consumption in stock. */
     readonly surplusBufferMonths: number;
-    /** …and a net flow of at least this share of consumption (and ≥ 1). */
     readonly minSurplusShare: number;
   };
-  /** The stockpile every country starts the campaign with (units per resource). */
-  readonly startingStock: Readonly<Record<string, number>>;
-  /** Geography-driven minimum domestic production (spec §3). */
+  /** Concurrent construction cap. */
+  readonly construction: { readonly maxProjects: number };
+  /** The buildable buildings (spec §8 — one effect each). */
+  readonly buildings: readonly BuildingDef[];
+  /** The money side (tax formula, expenses, starting treasury). */
+  readonly finance: EconomyFinanceConfig;
+  /** Geography-driven minimum domestic production (§4). */
   readonly domesticBaseline: DomesticBaselineConfig;
-  /** The strategic resources themselves (id, Persian name, price). */
+  /** The strategic resources themselves (id, Persian name, base price). */
   readonly resources: readonly StrategicResourceDef[];
   /** Per-resource consumption drivers. */
   readonly consumption: Readonly<Record<string, ResourceConsumptionDef>>;
-  /** Materials drawn from the stockpile per unit of equipment produced (§9). */
+  /** Materials drawn from the stockpile per unit of equipment produced. */
   readonly militaryMaterials: Readonly<Record<string, number>>;
-  /** The buildable production factories (spec §4). */
-  readonly productionFactories: readonly ProductionFactoryDef[];
 }

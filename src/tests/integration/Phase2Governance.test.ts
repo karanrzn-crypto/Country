@@ -49,14 +49,17 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
     game.setTimeMode('month');
     game.runTicks(150); // ≈ 10 months
     const government = game.gameState.government.countries[countryId];
-    // The LIGHT finance ledger (spec §10): three revenue lines, no GDP.
+    // The SIMPLE ledger (spec §3): tax + trade + factories vs the expenses.
     const finance = game.gameState.economy.finance[countryId]!;
     expect(government.lastSimMonth).toBeGreaterThanOrEqual(9);
-    expect(finance.lastTax).toBeGreaterThan(0);
-    expect(finance.lastCustoms).toBeGreaterThanOrEqual(0);
-    expect(finance.lastExports).toBeGreaterThanOrEqual(0);
-    expect(finance.lastSpending).toBeGreaterThan(0);
-    expect(finance.lastBalance).toBeCloseTo(finance.lastRevenue - finance.lastSpending, 3);
+    expect(finance.lastTaxIncome).toBeGreaterThan(0);
+    expect(finance.lastTradeIncome).toBeLessThanOrEqual(Math.max(0, finance.lastTradeIncome));
+    expect(finance.lastArmyExpense).toBeGreaterThanOrEqual(0);
+    expect(finance.lastGovernmentExpense).toBeGreaterThan(0);
+    expect(finance.lastInfrastructureExpense).toBeGreaterThan(0);
+    const income = finance.lastTaxIncome + finance.lastTradeIncome + finance.lastFactoryIncome;
+    const expenses = finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense;
+    expect(finance.lastBalance).toBeCloseTo(income - expenses, 3);
     // The resource economy produced real stockpiles the whole time.
     const record = game.gameState.economy.resources[countryId]!;
     expect(record.stock.food).toBeGreaterThanOrEqual(0);
@@ -84,12 +87,12 @@ describe('Phase 2 — governance integration (headless, renderer-free)', () => {
 
     game.commandBus.send({ type: 'government.enactDecision', countryId, decisionId: 'industrial_subsidy' });
     game.commandBus.flush();
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 3);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 720, 3);
     expect(state.government.countries[countryId].decisions.history[0]?.decisionId).toBe('industrial_subsidy');
     // Cooldown blocks the second attempt in the same month.
     game.commandBus.send({ type: 'government.enactDecision', countryId, decisionId: 'industrial_subsidy' });
     game.commandBus.flush();
-    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 120, 3);
+    expect(state.economy.treasury[countryId]).toBeCloseTo(treasuryBefore - 720, 3);
     expect(state.government.countries[countryId].decisions.history.length).toBe(1);
     // Unknown decision is a no-op.
     expect(game.governmentEnactDecision(countryId, 'not_a_decision')).toBe(false);

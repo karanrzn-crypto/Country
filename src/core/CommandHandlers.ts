@@ -38,14 +38,12 @@ export interface CoreGameApi {
   mapFocusCountry(countryId: string): void;
   mapSetViewport(width: number, height: number): void;
   governmentSetBudgetShare(countryId: string, pool: 'economic' | 'military', value: number): void;
-  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high' | 'max'): void;
+  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high'): void;
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void;
   governmentEnactDecision(countryId: string, decisionId: string): boolean;
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
   economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean;
   economyStartConstruction(countryId: string, typeId: string): boolean;
-  economyResearchMine(countryId: string, resourceId: string): boolean;
-  economyUpgradeMine(countryId: string, depositId: string): boolean;
   readonly ui: UIManager | null;
   readonly bus: EventBus;
   readonly log: Logger;
@@ -101,6 +99,4 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   );
   bus.register('economy.buyResource', (cmd) => game.economyBuyResource(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amount));
   bus.register('economy.startConstruction', (cmd) => game.economyStartConstruction(cmd.countryId, cmd.typeId));
-  bus.register('economy.researchMine', (cmd) => game.economyResearchMine(cmd.countryId, cmd.resourceId));
-  bus.register('economy.upgradeMine', (cmd) => game.economyUpgradeMine(cmd.countryId, cmd.depositId));
 }

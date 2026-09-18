@@ -64,16 +64,16 @@ export type GameCommand =
       readonly pool: 'economic' | 'military';
       readonly value: number;
     }
-  /** The ONE tax level (spec §4): LOW / MEDIUM / HIGH / MAX. */
+  /** The ONE tax level (spec §9): کم / متوسط / زیاد. */
   | {
       readonly type: 'government.setTaxLevel';
       readonly countryId: string;
-      readonly level: 'low' | 'medium' | 'high' | 'max';
+      readonly level: 'low' | 'medium' | 'high';
     }
   | { readonly type: 'government.setMinistryFunding'; readonly countryId: string; readonly ministryId: string; readonly value: number }
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
   | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }
-  // —— Phase 3 — the resource economy (spec §5/§11/§12/§15) ——
+  // —— Phase 3 — the simple economy (spec §6/§8) ——
   /** ONE explicit deal: buy units of a resource from a chosen seller country. */
   | {
       readonly type: 'economy.buyResource';
@@ -82,9 +82,5 @@ export type GameCommand =
       readonly resourceId: string;
       readonly amount: number;
     }
-  /** Start a production-factory construction project (resource-costed). */
-  | { readonly type: 'economy.startConstruction'; readonly countryId: string; readonly typeId: string }
-  /** Unlock the next mine research level of ONE resource branch. */
-  | { readonly type: 'economy.researchMine'; readonly countryId: string; readonly resourceId: string }
-  /** Upgrade ONE mine (deposit) to the next unlocked research level. */
-  | { readonly type: 'economy.upgradeMine'; readonly countryId: string; readonly depositId: string };
+  /** Start ONE building construction project (money cost paid once). */
+  | { readonly type: 'economy.startConstruction'; readonly countryId: string; readonly typeId: string };

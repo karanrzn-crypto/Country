@@ -5,8 +5,7 @@ import { MemorySaveStorage } from '../../../save/SaveStorage';
 import { validateGameState } from '../../../state/validate';
 import { updateOpinionTopics, driftApproval, approvalTargetOf } from '../../../government/PublicOpinion';
 import { produceMilitary } from '../../../government/budgetEffects';
-import { processMonthFinance } from '../../../economy/EconomySimulation';
-import { TAX_LEVEL_SPECS, TAX_LEVEL_IDS } from '../../../government/types';
+import { taxIncomeOf } from '../../../economy/economyCycle';
 import type { TaxLevel } from '../../../government/types';
 import type { InMemoryUIElement } from '../../helpers/InMemoryDomAdapter';
 import { InMemoryDomAdapter } from '../../helpers/InMemoryDomAdapter';
@@ -148,7 +147,7 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     expect(wellFunded.equipment).toBeGreaterThan(starved.equipment * 3);
   });
 
-  it('7·8·9·10. LOW positive buff, MEDIUM neutral, HIGH negative, MAX strongly negative', () => {
+  it('7·8·9. کم positive buff, متوسط neutral, زیاد negative (spec §9)', () => {
     const game = createTestGame({ seed: 305 });
     const countryId = game.strategicMap.countryOrder[0];
     const state = game.gameState;
@@ -162,46 +161,31 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     const low = sentimentAt('low');
     const medium = sentimentAt('medium');
     const high = sentimentAt('high');
-    const max = sentimentAt('max');
 
-    // LOW carries a POSITIVE buff; MEDIUM is exactly neutral.
+    // کم carries a POSITIVE buff; متوسط is exactly neutral; زیاد is negative.
     expect(low).toBeGreaterThan(0);
     expect(medium).toBe(0);
-    // HIGH is negative; MAX is strictly WORSE than HIGH (stronger penalty).
     expect(high).toBeLessThan(0);
-    expect(max).toBeLessThan(high);
-    // MEDIUM keeps the approval target at the calm baseline.
+    // متوسط keeps the approval target at the calm baseline; کم raises it and
+    // زیاد lowers it (the §9 stability side through the REAL opinion topics).
     government.budget.tax = 'medium';
     updateOpinionTopics(state, countryId);
     const mediumTarget = approvalTargetOf(government.opinion.topics);
     government.budget.tax = 'low';
     updateOpinionTopics(state, countryId);
     expect(approvalTargetOf(government.opinion.topics)).toBeGreaterThan(mediumTarget);
-    government.budget.tax = 'max';
+    government.budget.tax = 'high';
     updateOpinionTopics(state, countryId);
     expect(approvalTargetOf(government.opinion.topics)).toBeLessThan(mediumTarget);
     game.dispose();
 
-    // The economic-pressure side is ordered too (LOW > MEDIUM > HIGH > MAX),
-    // and it lands in the REAL ledger: compounding productivity + revenue.
-    const ordering = TAX_LEVEL_IDS.map((level) => TAX_LEVEL_SPECS[level].economyGrowth);
-    for (let index = 1; index < ordering.length; index += 1) {
-      expect(ordering[index - 1]).toBeGreaterThan(ordering[index]);
-    }
-    const ledger = (level: TaxLevel): { revenue: number; growth: number } => {
-      const taxGame = createTestGame({ seed: 306 });
-      const taxId = taxGame.strategicMap.countryOrder[0];
-      taxGame.gameState.government.countries[taxId].budget.tax = level;
-      const config = taxGame.gameContext.data.economyData.strategicResources;
-      const ledgerA = processMonthFinance(taxGame.gameState, taxId, config);
-      const growth = taxGame.gameState.economy.finance[taxId]!.outputGrowth - 1;
-      taxGame.dispose();
-      return { revenue: ledgerA.revenue, growth };
-    };
-    const lowLedger = ledger('low');
-    const maxLedger = ledger('max');
-    expect(maxLedger.revenue).toBeGreaterThan(lowLedger.revenue); // MAX collects more
-    expect(lowLedger.growth).toBeGreaterThan(maxLedger.growth); // LOW grows the economy
+    // The MONEY side is ordered too (§2): زیاد collects more than کم —
+    // the simple formula through the REAL config.
+    const config = game.gameContext.data.economyData.strategicResources;
+    const population = 24_000_000;
+    const lowRevenue = taxIncomeOf(population, 'low', config);
+    const highRevenue = taxIncomeOf(population, 'high', config);
+    expect(highRevenue).toBeGreaterThan(lowRevenue);
   });
 
   it('11. changing the tax level REALLY changes GameState through the live month cadence (revenue + opinion)', () => {
@@ -214,16 +198,16 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
       game.setTimeMode('month');
       game.runTicks(30); // 2 months through the REAL GovernmentSystem
       const result = {
-        revenue: game.gameState.economy.finance[countryId]!.lastRevenue,
+        revenue: game.gameState.economy.finance[countryId]!.lastTaxIncome,
         taxes: game.gameState.government.countries[countryId].opinion.topics.taxes
       };
       game.dispose();
       return result;
     };
     const lowRun = run('low');
-    const maxRun = run('max');
-    expect(maxRun.revenue).toBeGreaterThan(lowRun.revenue);
-    expect(maxRun.taxes).toBeLessThan(lowRun.taxes);
+    const highRun = run('high');
+    expect(highRun.revenue).toBeGreaterThan(lowRun.revenue);
+    expect(highRun.taxes).toBeLessThan(lowRun.taxes);
   });
 
   it('12. NO legacy tax category survives in state or schema', () => {
@@ -278,12 +262,13 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     expect(text).not.toContain('آموزش');
     expect(text).not.toContain('رفاه');
 
-    // The NEW structure is present: the two pool rows + the four levels.
+    // The NEW structure is present: the two pool rows + the three levels.
     expect(text).toContain('بودجهٔ اقتصادی');
     expect(text).toContain('بودجهٔ نظامی');
-    for (const label of ['کم', 'متوسط', 'زیاد', 'حداکثر']) {
+    for (const label of ['کم', 'متوسط', 'زیاد']) {
       expect(text).toContain(label);
     }
+    expect(text).not.toContain('حداکثر');
 
     // Exactly ONE level is marked selected, and it matches the state (default MEDIUM).
     const collect = (): InMemoryUIElement[] => {
@@ -297,18 +282,18 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
       return levels;
     };
     const levelsBefore = collect();
-    expect(levelsBefore.length).toBe(4);
+    expect(levelsBefore.length).toBe(3);
     const selectedBefore = levelsBefore.filter((level) => level.className.includes('on'));
     expect(selectedBefore.length).toBe(1);
     expect(textOf(selectedBefore[0])).toContain('متوسط');
 
-    // Selecting MAX through the command moves the mark (state-driven UI).
-    game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'max' });
+    // Selecting زیاد through the command moves the mark (state-driven UI).
+    game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'high' });
     game.commandBus.flush();
     dashboard.refresh();
     const selectedAfter = collect().filter((level) => level.className.includes('on'));
     expect(selectedAfter.length).toBe(1);
-    expect(textOf(selectedAfter[0])).toContain('حداکثر');
+    expect(textOf(selectedAfter[0])).toContain('زیاد');
     screens.close('president');
     game.dispose();
   });
@@ -321,7 +306,7 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     const countryId = game.strategicMap.countryOrder[0];
     game.commandBus.send({ type: 'player.confirmCountry', countryId });
     game.commandBus.send({ type: 'government.setBudgetShare', countryId, pool: 'economic', value: 0.65 });
-    game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'max' });
+    game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'high' });
     game.commandBus.flush();
     game.saveToSlot('budget-slot');
 
@@ -331,7 +316,7 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     const loaded = game2.gameState.government.countries[countryId].budget;
     expect(loaded.shares.economic).toBeCloseTo(0.65, 9);
     expect(loaded.shares.military).toBeCloseTo(0.35, 9);
-    expect(loaded.tax).toBe('max');
+    expect(loaded.tax).toBe('high');
     expect(validateGameState(game2.gameState).valid).toBe(true);
     game.dispose();
     game2.dispose();

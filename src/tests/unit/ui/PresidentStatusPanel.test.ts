@@ -1,3 +1,4 @@
+import { faNum, toFaDigits } from '../../../utils/format';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { InMemoryDomAdapter, InMemoryUIElement } from '../../helpers/InMemoryDomAdapter';
 import type { UIElement } from '../../../ui/adapter/UIDomAdapter';
@@ -101,11 +102,13 @@ describe('PresidentStatusPanel (quick overview)', () => {
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     const economyText = sectionText('اقتصاد');
     expect(economyText).toContain('خزانه');
-    expect(economyText).toContain(Math.round(treasury).toLocaleString('en-US'));
+    expect(economyText).toContain(faNum(Math.round(treasury)));
     expect(finance).toBeDefined();
     expect(economyText).toContain('مالیات');
-    expect(economyText).toContain('گمرک');
-    expect(economyText).toContain('صادرات');
+    expect(economyText).toContain('تجارت');
+    expect(economyText).toContain('ارتش');
+    expect(economyText).toContain('دولت');
+    expect(economyText).toContain('زیرساخت');
 
     // Military: strength cache + war count (0 in a fresh world).
     const militaryText = sectionText('نظامی');
@@ -125,7 +128,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
       delta: 5_000
     });
     panel.refresh();
-    expect(sectionText('اقتصاد')).toContain(Math.round(before + 5_000).toLocaleString('en-US'));
+    expect(sectionText('اقتصاد')).toContain(faNum(Math.round(before + 5_000)));
     context.state.economy.treasury[countryId] = before;
     panel.refresh();
   });
@@ -145,7 +148,7 @@ describe('PresidentStatusPanel (quick overview)', () => {
       .map((party) => party.support)
       .sort((a, b) => b - a);
     const firstRowText = textOf(partyRows[0]);
-    expect(firstRowText).toContain(`${Math.round(supports[0] * 100)}٪`);
+    expect(firstRowText).toContain(toFaDigits(`${Math.round(supports[0] * 100)}٪`));
     // The governing party (★ marker) is somewhere in the list.
     const allText = partyRows.map((row) => textOf(row)).join('\n');
     for (const party of Object.values(government.politics.parties)) {

@@ -46,15 +46,6 @@ export const EQUIPMENT_SCHEMA: FieldSchema = {
 };
 
 /** { low, medium, high } price multipliers — all positive. */
-const tierFactorsSchema: FieldSchema = {
-  type: 'object',
-  allowUnknown: false,
-  fields: {
-    low: positiveNumber,
-    medium: positiveNumber,
-    high: positiveNumber
-  }
-};
 
 export const ECONOMY_SCHEMA: FieldSchema = {
   type: 'object',
@@ -73,20 +64,34 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       allowUnknown: false,
       fields: {
         productionScale: positiveNumber,
-        importMarkup: positiveNumber,
-        customsRate: { type: 'number', min: 0, max: 1 },
-        mineLevels: {
+        finance: {
           type: 'object',
           allowUnknown: false,
           fields: {
-            multipliers: { type: 'record', values: { type: 'number', min: 0.1, max: 100 } }
+            startingTreasury: { type: 'number', min: 0 },
+            populationGrowthPerMonth: { type: 'number', min: 0, max: 0.1 },
+            taxIncomePerMillionPerRate: positiveNumber,
+            governmentCostPerMillion: { type: 'number', min: 0 },
+            armyCostPerThousandSoldiers: { type: 'number', min: 0 },
+            infrastructureCostPerArea: { type: 'number', min: 0 }
           }
         },
-        research: {
-          type: 'object',
-          allowUnknown: false,
-          fields: {
-            levels: { type: 'record', values: { type: 'number', min: 0 } }
+        buildings: {
+          type: 'array',
+          minLength: 1,
+          items: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              id: idField,
+              name: nameField,
+              effect: { type: 'enum', values: ['production', 'income'] },
+              resource: { type: 'optional', inner: idField },
+              output: { type: 'optional', inner: { type: 'number', min: 0 } },
+              income: { type: 'optional', inner: { type: 'number', min: 0 } },
+              cost: { type: 'number', min: 0 },
+              buildMonths: { type: 'number', min: 1, max: 60, integer: true }
+            }
           }
         },
         construction: {
@@ -114,31 +119,6 @@ export const ECONOMY_SCHEMA: FieldSchema = {
         },
         startingStock: { type: 'record', values: { type: 'number', min: 0 } },
         militaryMaterials: { type: 'record', values: { type: 'number', min: 0 } },
-        productionFactories: {
-          type: 'array',
-          minLength: 1,
-          items: {
-            type: 'object',
-            allowUnknown: false,
-            fields: {
-              id: idField,
-              name: nameField,
-              boosts: idField,
-              output: { type: 'number', min: 0 },
-              cost: { type: 'record', values: { type: 'number', min: 0 } },
-              upkeep: { type: 'record', values: { type: 'number', min: 0 } },
-              buildMonths: { type: 'number', min: 1, max: 60, integer: true }
-            }
-          }
-        },
-        priceTiers: {
-          type: 'object',
-          allowUnknown: false,
-          fields: {
-            supply: tierFactorsSchema,
-            demand: tierFactorsSchema
-          }
-        },
         domesticBaseline: {
           type: 'object',
           allowUnknown: false,

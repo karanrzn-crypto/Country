@@ -1,8 +1,8 @@
 /**
  * Budget & Tax effects (Phase 2) — the REAL state consequences of the 100%
- * budget pool and the 4-level tax (spec §2/§3/§4/§5). Pure functions over
- * GameState, invoked once per campaign month per country by the
- * GovernmentSystem (after the economy ledger, before public opinion).
+ * budget pool and the 3-level tax (spec §2/§3/§9 of the simple economy).
+ * Pure functions over GameState, invoked once per campaign month per country
+ * by the GovernmentSystem (after the economy cycle, before public opinion).
  *
  *   Economic Budget ↑  → construction/development speed ↑ (city-area
  *                        development grows faster toward a higher target)
@@ -10,12 +10,10 @@
  *   Military Budget ↑  → weapon/equipment production ↑ + army expansion ↑
  *                        (and Economic ↓ — the pool is 100%, so the economic
  *                        effects above weaken by the same amount)
- *   Tax level          → revenue rate + 'taxes' sentiment + productivity
- *                        growth buff/penalty (LOW +, MEDIUM 0, HIGH −,
- *                        MAX strong −)
+ *   Food shortage      → development target/speed halved (spec §5)
  *
  * Every effect writes REAL state fields (cityAreas development, country
- * military equipment/army, opinion topics) — nothing here is UI decoration.
+ * military equipment/army) — nothing here is UI decoration.
  *
  * Leaf module: imports only types + the level spec table.
  */
@@ -35,14 +33,19 @@ const DEVELOPMENT_SPEED_SPAN = 0.024;
 /**
  * Grows every city area the country controls toward a budget-dependent
  * development target at a budget-dependent speed (spec §2: buildings rise
- * faster, infrastructure develops faster). Deterministic; clamped to 0..1.
+ * faster, infrastructure develops faster). A FOOD SHORTAGE cuts both target
+ * and speed to half (spec §5: کمبود غذا → کاهش توسعه). Deterministic;
+ * clamped to 0..1.
  */
 export function growUrbanDevelopment(state: GameState, countryId: string): void {
   const government = state.government.countries[countryId];
   if (government === undefined) return;
   const economic = government.budget.shares.economic;
-  const target = DEVELOPMENT_BASE_TARGET + DEVELOPMENT_TARGET_SPAN * economic;
-  const speed = DEVELOPMENT_BASE_SPEED + DEVELOPMENT_SPEED_SPAN * economic;
+  const record = state.economy.resources[countryId];
+  const hungry = record !== undefined && (record.shortage.food ?? 0) > 0;
+  const hungerPenalty = hungry ? 0.5 : 1;
+  const target = (DEVELOPMENT_BASE_TARGET + DEVELOPMENT_TARGET_SPAN * economic) * hungerPenalty;
+  const speed = (DEVELOPMENT_BASE_SPEED + DEVELOPMENT_SPEED_SPAN * economic) * hungerPenalty;
   for (const area of Object.values(state.cityAreas.network.areas)) {
     if (area.countryId !== countryId) continue;
     const next = area.development + (target - area.development) * speed;
@@ -113,7 +116,7 @@ export function produceMilitary(state: GameState, countryId: string, militaryMat
 }
 
 /**
- * The budget file no longer exports a tax productivity helper — the tax
- * level's economic side is the compounding `outputGrowth` multiplier that
- * EconomySimulation maintains and the resource recompute applies.
+ * The tax level's stability side runs through the opinion system
+ * (PublicOpinion reads the level's satisfaction) — the money side is the
+ * simple tax formula inside the economy cycle (economyCycle.taxIncomeOf).
  */

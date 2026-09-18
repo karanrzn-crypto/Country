@@ -68,12 +68,12 @@ if (government !== undefined && finance !== undefined && resourceRecord !== unde
     .map(([resourceId, amount]) => `${resourceId}=${Math.round(amount)}`)
     .join(' ');
   console.log(
-    `[headless] resources: stock {${stockSummary}} treasury=${(game.gameState.economy.treasury[playerId] ?? 0).toFixed(0)}M$`
+    `[headless] resources: stock {${stockSummary}} treasury=${(game.gameState.economy.treasury[playerId] ?? 0).toFixed(0)}`
   );
   console.log(
-    `[headless] finance: tax=${finance.lastTax.toFixed(1)} customs=${finance.lastCustoms.toFixed(1)} exports=${finance.lastExports.toFixed(1)} ` +
-      `revenue=${finance.lastRevenue.toFixed(1)}M$/mo spending=${finance.lastSpending.toFixed(1)}M$/mo ` +
-      `nextElection=month ${government.elections.nextElectionMonth} cityAreas=${countryAreas.length} links=${countryLinks.length} ` +
+    `[headless] finance: tax=${finance.lastTaxIncome.toFixed(1)} trade=${finance.lastTradeIncome.toFixed(1)} factories=${finance.lastFactoryIncome.toFixed(1)} ` +
+      `army=${finance.lastArmyExpense.toFixed(1)} government=${finance.lastGovernmentExpense.toFixed(1)} infra=${finance.lastInfrastructureExpense.toFixed(1)} ` +
+      `balance=${finance.lastBalance.toFixed(1)}/mo nextElection=month ${government.elections.nextElectionMonth} cityAreas=${countryAreas.length} links=${countryLinks.length} ` +
       `pendingEvents=${government.events.pending.length}`
   );
 }

@@ -2,61 +2,57 @@
  * Strategic resource record TYPES — pure leaf module.
  *
  * Lives apart from economy/resources.ts so the state layer can reference the
- * JSON-safe record WITHOUT reaching the recompute logic (which reads live
+ * JSON-safe records WITHOUT reaching the recompute logic (which reads live
  * GameState + military slices). This keeps the dependency graph acyclic:
  *
  *   GameState → economySlice → resourceTypes (leaf)
- *   resources.ts → GameState (one-way, no path back into resources.ts)
+ *   economyCycle.ts → GameState (one-way, no path back)
  *
  * Fully JSON-safe (save-friendly).
  */
 
 /** Clear visual status of ONE resource (derived, never stored by hand). */
-export type ResourceStatus = 'surplus' | 'balanced' | 'shortage' | 'imported' | 'exported';
+export type ResourceStatus = 'surplus' | 'balanced' | 'shortage';
 
-/** Per-country resource economy record — fully JSON-safe (save-friendly). */
+/** The THREE user-facing display statuses (کمبود / متعادل / مازاد). */
+export type ResourceDisplayStatus = 'surplus' | 'balanced' | 'shortage';
+
+/**
+ * Per-country resource economy record — fully JSON-safe (save-friendly).
+ *
+ * Exactly ONE record per country holds the resource truth (spec §13 — one
+ * source of truth): every draw, purchase, trade and consumption moves THESE
+ * numbers and nothing else.
+ */
 export interface CountryResourceState {
   /**
-   * The REAL stockpile (spec §2): units physically stored right now. Grows
-   * with production + imports, drains with consumption, exports, military
-   * production and construction. NOT a display number — every draw and
-   * purchase moves it.
+   * The REAL stockpile (spec §1/§3): units physically stored right now.
+   * Grows with production + purchases, drains with consumption + sales.
+   * Never negative.
    */
   stock: Record<string, number>;
-  /** Monthly production per resource id (mines + baseline + factories). */
+  /** Monthly production per resource id (deposits + baseline + buildings). */
   production: Record<string, number>;
-  /** Monthly consumption per resource id (population/military/factory upkeep). */
+  /** Monthly consumption per resource id (population food, military wear). */
   consumption: Record<string, number>;
-  /** Monthly imports per resource id (ACTUALLY bought on the world market). */
+  /** Units ACTUALLY bought this month (world trade + manual deals). */
   imports: Record<string, number>;
-  /** Monthly exports per resource id (ACTUALLY sold to buyers). */
+  /** Units ACTUALLY sold this month (world trade + manual deals). */
   exports: Record<string, number>;
   /**
-   * The REAL trade partners of the world market: resourceId → sellerId →
-   * monthly units bought from that seller. Empty inner records = no active
-   * import flow. The same flows, read from the sellers' side, reconstruct
-   * the exports (every unit sold appears on exactly one buyer's record).
+   * The uncovered deficit of THIS month (spec §5): consumption the
+   * production AND the warehouse could not cover. Non-zero only when the
+   * stockpile ran dry — the number the shortage status, opinion and the
+   * population-growth penalty all read.
    */
-  suppliers: Record<string, Record<string, number>>;
-  /**
-   * resourceId → units still missing after the world market cleared (the
-   * GLOBAL supply could not cover the GLOBAL demand — spec §7's Unfilled
-   * Shortage). Zero/absent = the market (or domestic production) covered it.
-   */
-  unfilledShortage: Record<string, number>;
-  /**
-   * resourceId → units bought in the MONTHLY EMERGENCY PASS from other
-   * countries' stockpiles (the food safety buffer, spec §8) — stock and
-   * money moved immediately, so these units are NOT part of `imports` again.
-   */
-  emergencyImports: Record<string, number>;
-  /** Last computed monthly import cost (M$) — enters the ledger as spending. */
-  importCost: number;
-  /** Last computed monthly export income (M$) — enters the ledger as revenue. */
-  exportIncome: number;
+  shortage: Record<string, number>;
+  /** Money RECEIVED this month from selling resources (spec §3 تجارت). */
+  tradeIncome: number;
+  /** Money PAID this month for buying resources (spec §3 تجارت). */
+  tradeExpense: number;
 }
 
-/** Empty record (trade is resolved by the world market, not by policies). */
+/** Empty record (trade is resolved by the monthly cycle, not by policies). */
 export function emptyCountryResourceState(): CountryResourceState {
   return {
     stock: {},
@@ -64,113 +60,82 @@ export function emptyCountryResourceState(): CountryResourceState {
     consumption: {},
     imports: {},
     exports: {},
-    suppliers: {},
-    unfilledShortage: {},
-    emergencyImports: {},
-    importCost: 0,
-    exportIncome: 0
+    shortage: {},
+    tradeIncome: 0,
+    tradeExpense: 0
   };
 }
 
-// ———————————————————————————— finance (money, light) ————————————————————————
+// ————————————————————————————— finance (money) ——————————————————————————————
 
 /**
- * The MONTHLY government ledger (spec §10 — deliberately light): exactly
- * THREE revenue lines (Tax + Customs + Exports) against the derived budget
- * spending. No GDP, no debt, no interest, no inflation — money exists to
- * back deals and government costs, nothing more.
+ * The MONTHLY government ledger (spec §3/§12 — deliberately simple):
+ *
+ *   درآمد   : مالیات (جمعیت × نرخ) + تجارت (خالص فروش‌ها) + کارخانه‌ها
+ *   هزینه‌ها : ارتش + دولت + زیرساخت
+ *   تغییر خزانه = درآمد − هزینه‌ها
+ *
+ * No GDP, no customs, no debt, no interest, no inflation, no budget pot.
  */
 export interface CountryFinanceState {
-  /** Last month's tax revenue (M$) — the tax level's rate on domestic output. */
-  lastTax: number;
-  /** Last month's customs revenue (M$) — a fraction of the trade value. */
-  lastCustoms: number;
-  /** Last month's export income (M$) — resource sales receipts. */
-  lastExports: number;
-  /** Last month's total revenue (tax + customs + exports). */
-  lastRevenue: number;
-  /** Last month's government spending (M$) — the derived budget pot. */
-  lastSpending: number;
-  /** Last month's balance (revenue − spending) — applied to the treasury. */
+  /** Last month's tax income (جمعیت × نرخ × ضریب — spec §2). */
+  lastTaxIncome: number;
+  /** Last month's NET trade money (sales receipts − purchase bills). */
+  lastTradeIncome: number;
+  /** Last month's factory income (completed income buildings). */
+  lastFactoryIncome: number;
+  /** Last month's army expense. */
+  lastArmyExpense: number;
+  /** Last month's government expense. */
+  lastGovernmentExpense: number;
+  /** Last month's infrastructure expense. */
+  lastInfrastructureExpense: number;
+  /** Last month's balance (income − expenses) — applied to the treasury. */
   lastBalance: number;
-  /**
-   * Compounding production-growth multiplier from the tax level (LOW buffs,
-   * MAX penalizes — spec §4's real economic side). Applied by the recompute
-   * pass to the baseline + factory output; starts at 1.
-   */
-  outputGrowth: number;
 }
 
 export function emptyCountryFinanceState(): CountryFinanceState {
-  return { lastTax: 0, lastCustoms: 0, lastExports: 0, lastRevenue: 0, lastSpending: 0, lastBalance: 0, outputGrowth: 1 };
-}
-
-// ————————————————————————————— research (mines) ——————————————————————————————
-
-/**
- * Resource research state (spec §11/§12): per country, the highest UNLOCKED
- * mine level per resource branch. Absent resource = level 1 (the base).
- * Unlocking level N lets the country upgrade ITS mines of that resource to N.
- */
-export interface ResourceResearchState {
-  /** resourceId → highest unlocked mine level (absent = 1). */
-  mineLevels: Record<string, number>;
-}
-
-export function emptyResourceResearchState(): ResourceResearchState {
-  return { mineLevels: {} };
+  return {
+    lastTaxIncome: 0,
+    lastTradeIncome: 0,
+    lastFactoryIncome: 0,
+    lastArmyExpense: 0,
+    lastGovernmentExpense: 0,
+    lastInfrastructureExpense: 0,
+    lastBalance: 0
+  };
 }
 
 // ——————————————————————————————— construction ————————————————————————————————
 
 /**
- * The TWO construction states (spec §6): a project waits until its FULL
- * resource cost is SECURED, then builds by TIME alone.
+ * One construction project (spec §8): the ONE-TIME money cost is paid IN
+ * FULL at start (a project that cannot be paid cannot be started), so a
+ * project is always BUILDING — only its build time remains. No escrow, no
+ * waiting-for-resources state, no monthly draws.
  */
-export type ConstructionStatus = 'waiting' | 'building';
-
-/**
- * One construction project (spec §4/§5/§6):
- *
- *  - STARTING is free; the project begins in `waiting`.
- *  - The cost is SECURED ONCE: units physically move out of the country's
- *    FREE stockpile into this project's `secured` escrow (spec §5 — the
- *    reservation another project can never spend). One source of truth:
- *    stock = free units, secured = reserved units.
- *  - When every cost line is fully secured the project flips to `building`
- *    and ONLY construction time (scaled by the economic budget) finishes
- *    it — resources are never consumed again month by month (spec §6:
- *    the cost is a ONE-TIME cost).
- */
-export interface ConstructionProject {
+export interface BuildingProject {
   readonly id: string;
-  /** ProductionFactoryDef id. */
+  /** BuildingDef id. */
   readonly typeId: string;
   /** Host city (the country's capital at start time). */
   readonly cityId: string;
   /** Absolute month the project started. */
   readonly startedMonth: number;
-  status: ConstructionStatus;
-  /**
-   * 0..1 — for `building` projects the elapsed build time (time-based,
-   * budget-scaled); for `waiting` projects the secured fraction of the
-   * cost (informational).
-   */
+  /** 0..1 elapsed build time (economic budget scales the speed). */
   progress: number;
-  /** resourceId → units already SECURED (reserved escrow) for this project. */
-  secured: Record<string, number>;
 }
 
 export interface CountryConstructionState {
-  projects: ConstructionProject[];
+  projects: BuildingProject[];
 }
 
 export function emptyCountryConstructionState(): CountryConstructionState {
   return { projects: [] };
 }
 
-/** A COMPLETED production factory (the built thing that boosts production). */
-export interface CountryPlant {
+/** A COMPLETED building (the built thing that boosts production / income). */
+export interface BuildingRecord {
   readonly id: string;
   readonly typeId: string;
   readonly cityId: string;

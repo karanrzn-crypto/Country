@@ -2,7 +2,7 @@ import type { IdGeneratorState } from '../core/IdGenerator';
 import type { GameState } from '../state/GameState';
 
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = 15;
+export const SAVE_VERSION = 16;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */
@@ -28,8 +28,12 @@ export const SAVE_VERSION_URBAN_ROADS_MERGE = 11;
  *  economy: stockpiles, mines, research, construction, finance. */
 export const SAVE_VERSION_RESOURCE_REDESIGN = 14;
 /** Version that made construction costs ONE-TIME with RESERVED (secured)
- *  resources and the waiting/building states (spec §5/§6). */
+ *  resources and the waiting/building states (superseded by v16). */
 export const SAVE_VERSION_CONSTRUCTION_ESCROW = 15;
+/** Version that introduced the SIMPLE economy (spec §1-§14): three
+ *  resources, the transparent cycle, base prices, money-paid construction,
+ *  the 3-level tax; mines/research/escrow removed. */
+export const SAVE_VERSION_SIMPLE_ECONOMY = 16;
 
 export interface SaveMeta {
   readonly version: number;

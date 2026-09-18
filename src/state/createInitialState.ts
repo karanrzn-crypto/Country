@@ -16,9 +16,10 @@ import { buildCountrySlice } from './slices/countrySlice';
 import { buildGovernmentSlice } from './slices/governmentSlice';
 import { repairBudgetRecord } from './slices/governmentSlice';
 import { createCityAreasSlice, syncCityAreas as syncCityAreasSlice } from './slices/cityAreasSlice';
-import { recomputeResourceEconomies } from '../economy/resources';
-import { emptyCountryResourceState, emptyCountryFinanceState, emptyResourceResearchState, emptyCountryConstructionState } from '../economy/resourceTypes';
+import { seedResourceEconomies } from '../economy/resources';
+import { emptyCountryResourceState, emptyCountryFinanceState, emptyCountryConstructionState } from '../economy/resourceTypes';
 import type { StrategicMapModel } from '../world/map/MapTypes';
+import { DEFAULT_CONFIG } from '../config/configTypes';
 import type { GameState } from './GameState';
 import type { EconomySlice } from './slices/economySlice';
 import { validateGameStateOrThrow } from './validate';
@@ -65,10 +66,8 @@ export function createInitialState(
     supply: Object.fromEntries(Object.keys(world.regions).map((regionId) => [regionId, 1])),
     resources: {} as EconomySlice['resources'],
     finance: {} as EconomySlice['finance'],
-    mines: {} as EconomySlice['mines'],
-    research: {} as EconomySlice['research'],
     construction: {} as EconomySlice['construction'],
-    plants: {} as EconomySlice['plants']
+    buildings: {} as EconomySlice['buildings']
   };
 
   // —— military ——
@@ -163,13 +162,12 @@ export function createInitialState(
     const countryNames: Record<string, string> = {};
     for (const countryId of mapModel.countryOrder) {
       countryNames[countryId] = mapModel.countries[countryId].name;
-      // Treasury: prefer the declared profile value (data-driven start).
-      const profile = state.countries.countries[countryId];
-      economy.treasury[countryId] = profile?.economy.treasury ?? config.economy.startingTreasury;
+      // Treasury: ONE data-driven starting value (spec §1 — the simple
+      // economy's money scale; the profile seeds are legacy-only now).
+      economy.treasury[countryId] = config.economy.startingTreasury;
       economy.finance[countryId] = emptyCountryFinanceState();
-      economy.research[countryId] = emptyResourceResearchState();
       economy.construction[countryId] = emptyCountryConstructionState();
-      economy.plants[countryId] = {};
+      economy.buildings[countryId] = {};
     }
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
@@ -179,10 +177,10 @@ export function createInitialState(
       rng
     );
     state.cityAreas = createCityAreasSlice(mapModel, config.map.columns);
-    // Strategic resource economy: computed from the live map + state
-    // (deposit attribution, consumption drivers, world market). The pass
-    // SEEDS every country's stockpile from the config buffer (no step).
-    recomputeResourceEconomies(state, mapModel, data.economyData.strategicResources);
+    // The simple resource economy: SEEDS every country's records from the
+    // live map + state (production/consumption + the starting stockpile —
+    // no month is spent here; the cycle owns the monthly step).
+    seedResourceEconomies(state, mapModel, data.economyData.strategicResources);
   }
 
   validateGameStateOrThrow(state);
@@ -219,17 +217,14 @@ export function healPhase2State(
     if (state.economy.finance[countryId] === undefined) {
       state.economy.finance[countryId] = emptyCountryFinanceState();
     }
-    if (state.economy.research[countryId] === undefined) {
-      state.economy.research[countryId] = emptyResourceResearchState();
-    }
     if (state.economy.construction[countryId] === undefined) {
       state.economy.construction[countryId] = emptyCountryConstructionState();
     }
-    if (state.economy.plants[countryId] === undefined) {
-      state.economy.plants[countryId] = {};
+    if (state.economy.buildings[countryId] === undefined) {
+      state.economy.buildings[countryId] = {};
     }
     if (state.economy.treasury[countryId] === undefined) {
-      state.economy.treasury[countryId] = state.countries.countries[countryId]?.economy.treasury ?? 500;
+      state.economy.treasury[countryId] = DEFAULT_CONFIG.economy.startingTreasury;
     }
     if (state.political.countries[countryId] === undefined) {
       state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
@@ -245,19 +240,16 @@ export function healPhase2State(
   for (const countryId of Object.keys(state.economy.finance)) {
     if (!liveIds.has(countryId)) delete state.economy.finance[countryId];
   }
-  for (const countryId of Object.keys(state.economy.research)) {
-    if (!liveIds.has(countryId)) delete state.economy.research[countryId];
-  }
   for (const countryId of Object.keys(state.economy.construction)) {
     if (!liveIds.has(countryId)) delete state.economy.construction[countryId];
   }
-  for (const countryId of Object.keys(state.economy.plants)) {
-    if (!liveIds.has(countryId)) delete state.economy.plants[countryId];
+  for (const countryId of Object.keys(state.economy.buildings)) {
+    if (!liveIds.has(countryId)) delete state.economy.buildings[countryId];
   }
 
   syncCityAreasSlice(state.cityAreas, mapModel, columns);
 
-  // Resource economy: recomputed from the LIVE map + state on every load —
+  // Resource economy: reseeded from the LIVE map + state on every load —
   // old saves (missing or stale records) and changed maps self-heal here.
   if (state.economy.resources === undefined) state.economy.resources = {};
   for (const countryId of mapModel.countryOrder) {
@@ -268,5 +260,5 @@ export function healPhase2State(
   for (const countryId of Object.keys(state.economy.resources)) {
     if (!liveIds.has(countryId)) delete state.economy.resources[countryId];
   }
-  recomputeResourceEconomies(state, mapModel, data.economyData.strategicResources);
+  seedResourceEconomies(state, mapModel, data.economyData.strategicResources);
 }

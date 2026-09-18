@@ -108,33 +108,28 @@ export interface MinistryState {
 export const BUDGET_POOLS = ['economic', 'military'] as const;
 export type BudgetPool = (typeof BUDGET_POOLS)[number];
 
-/** The FOUR tax levels (spec §4/§5) — one selected level, no rate sliders. */
-export const TAX_LEVEL_IDS = ['low', 'medium', 'high', 'max'] as const;
+/** The THREE tax levels (spec §9) — one selected level, no rate sliders. */
+export const TAX_LEVEL_IDS = ['low', 'medium', 'high'] as const;
 export type TaxLevel = (typeof TAX_LEVEL_IDS)[number];
 
 /**
- * What ONE tax level DOES (spec §4/§5) — data-driven, read by the systems:
- *  - rate          : the single effective tax rate on the composite base
- *                    (revenue rises monotonically LOW → MAX).
+ * What ONE tax level DOES (spec §9) — data-driven, read by the systems:
+ *  - rate          : the single effective rate (درآمد = جمعیت × نرخ, spec §2);
+ *                    revenue rises monotonically کم → زیاد.
  *  - satisfaction  : the 'taxes' public-opinion sentiment (positive buff for
- *                    LOW, none for MEDIUM, negative for HIGH, strongly
- *                    negative for MAX).
- *  - economyGrowth : monthly sector-productivity growth bonus/penalty (the
- *                    economic-pressure side of the buff).
- * Tuned playable: LOW never starves the treasury alone, MAX hurts opinion
- * and growth without hard-locking the country.
+ *                    کم, none for متوسط, negative for زیاد — stability side).
+ * Tuned playable: کم never starves the treasury alone, زیاد hurts opinion
+ * without hard-locking the country.
  */
 export interface TaxLevelSpec {
   readonly rate: number;
   readonly satisfaction: number;
-  readonly economyGrowth: number;
 }
 
 export const TAX_LEVEL_SPECS: Readonly<Record<TaxLevel, TaxLevelSpec>> = {
-  low: { rate: 0.12, satisfaction: 0.45, economyGrowth: 0.0012 },
-  medium: { rate: 0.22, satisfaction: 0, economyGrowth: 0 },
-  high: { rate: 0.32, satisfaction: -0.35, economyGrowth: -0.001 },
-  max: { rate: 0.45, satisfaction: -0.65, economyGrowth: -0.0022 }
+  low: { rate: 0.05, satisfaction: 0.45 },
+  medium: { rate: 0.1, satisfaction: 0 },
+  high: { rate: 0.2, satisfaction: -0.45 }
 };
 
 export const SPENDING_CATEGORIES = [

@@ -4,8 +4,13 @@
  *
  * TWO economies share this slice:
  *  - the LEGACY demo world (stockpiles/factories with the old faction ids);
- *  - the strategic resource economy (resources/finance/mines/research/
- *    construction/plants, keyed by strategic country ids).
+ *  - the SIMPLE strategic economy (resources/finance/construction/buildings,
+ *    keyed by strategic country ids — spec §1-§8).
+ *
+ * ONE writer per record family (spec §13 — no parallel systems):
+ *  - resources  : runEconomyCycle (the monthly pass) + purchase/construction
+ *  - finance    : runEconomyCycle (the money step applies to the treasury)
+ *  - construction/buildings : the construction commands + the monthly step
  */
 
 import type { FactoryRecord } from '../../economy/types';
@@ -15,9 +20,8 @@ import type { FactoryRecord } from '../../economy/types';
 import type {
   CountryResourceState,
   CountryFinanceState,
-  ResourceResearchState,
   CountryConstructionState,
-  CountryPlant
+  BuildingRecord
 } from '../../economy/resourceTypes';
 
 export interface EconomySlice {
@@ -30,38 +34,27 @@ export interface EconomySlice {
   /** region id → supply satisfaction ratio 0..1 (SupplySystem writes). */
   supply: Record<string, number>;
   /**
-   * Strategic resource economy per strategic country id — REAL stockpiles,
-   * production from mines/baseline/factories, consumption, world-market
-   * imports/exports. Written ONLY by recomputeResourceEconomies (never
-   * hand-edited); `stock` is stepped by the same world pass.
+   * The SIMPLE economy per strategic country id — the ONE resource truth:
+   * stock / production / consumption / this month's trade / shortage.
    */
   resources: Record<string, CountryResourceState>;
   /**
-   * The light monthly money ledger per strategic country id (spec §10):
-   * Tax + Customs + Exports against the derived budget spending. Replaces
-   * the old GDP/debt/inflation macro engine.
+   * The simple monthly money ledger per strategic country id (spec §3/§12):
+   * مالیات + تجارت + کارخانه‌ها against ارتش + دولت + زیرساخت. The balance
+   * lands on the treasury ONCE per month.
    */
   finance: Record<string, CountryFinanceState>;
   /**
-   * Mine levels per deposit id (spec §12): depositId → level. Absent = 1.
-   * Higher levels multiply the deposit's monthly production.
-   */
-  mines: Record<string, number>;
-  /**
-   * Resource research per strategic country id (spec §11): the highest
-   * UNLOCKED mine level per resource branch. Absent resource = level 1.
-   */
-  research: Record<string, ResourceResearchState>;
-  /**
-   * Active construction projects per strategic country id (spec §4) —
-   * resource costs paid month by month from the real stockpile.
+   * Active construction projects per strategic country id (spec §8) — the
+   * ONE-TIME money cost was paid at start; only build time remains.
    */
   construction: Record<string, CountryConstructionState>;
   /**
-   * COMPLETED production factories per strategic country id: plantId →
-   * {typeId, cityId}. Each plant boosts its resource's monthly production.
+   * COMPLETED buildings per strategic country id: buildingId →
+   * {typeId, cityId}. Each building adds its ONE effect (production or
+   * income) to the monthly cycle.
    */
-  plants: Record<string, Record<string, CountryPlant>>;
+  buildings: Record<string, Record<string, BuildingRecord>>;
 }
 
 export function addStockpile(

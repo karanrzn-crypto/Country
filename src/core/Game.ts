@@ -38,10 +38,8 @@ import {
   distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
-import { recomputeResourceEconomies } from '../economy/resources';
 import { purchaseResource } from '../economy/purchase';
-import { startProject, secureWaitingProjects } from '../economy/construction';
-import { upgradeMine, unlockMineLevel } from '../economy/research';
+import { startProject } from '../economy/construction';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
 import { AssetManager } from '../assets/AssetManager';
@@ -1049,8 +1047,8 @@ export class Game {
     this.events.emit('government.budgetChanged', { countryId, kind: 'budget', pool, economic: applied.economic, military: applied.military });
   }
 
-  /** The ONE tax level (spec §4): LOW / MEDIUM / HIGH / MAX. */
-  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high' | 'max'): void {
+  /** The ONE tax level (spec §9): کم / متوسط / زیاد. */
+  governmentSetTaxLevel(countryId: string, level: 'low' | 'medium' | 'high'): void {
     this.assertInitialized();
     const applied = setTaxLevel(this.state.government, countryId, level);
     this.events.emit('government.budgetChanged', { countryId, kind: 'tax', level: applied });
@@ -1097,9 +1095,9 @@ export class Game {
     return resolved;
   }
 
-  // ————————————————— Phase 3 — the resource economy commands —————————————————
+  // ————————————————— Phase 3 — the simple economy commands —————————————————
 
-  /** ONE explicit deal (spec §5): buy units of a resource from ONE seller. */
+  /** ONE explicit deal (spec §6): buy units of a resource from ONE seller. */
   economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean {
     this.assertInitialized();
     const result = purchaseResource(
@@ -1114,22 +1112,17 @@ export class Game {
       this.log.debug(`buyResource blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId})`);
       return false;
     }
-    // The bought units land in the FREE stockpile; the securing pass runs
-    // NOW so waiting construction projects reserve them immediately (spec
-    // §6: buying the missing units lets the project proceed at once).
-    const funded = secureWaitingProjects(this.state, countryId, this.data.economyData.strategicResources);
     this.events.emit('economy.resourceBought', {
       buyerId: countryId,
       sellerId: result.sellerId,
       resourceId: result.resourceId,
       amount: result.amount,
-      cost: result.cost,
-      fundedProjects: funded.length
+      cost: result.cost
     });
     return true;
   }
 
-  /** Starts a production-factory construction project (spec §4). */
+  /** Starts ONE building construction project (spec §8 — money paid once). */
   economyStartConstruction(countryId: string, typeId: string): boolean {
     this.assertInitialized();
     const capital = this.state.countries.countries[countryId]?.capitalId ?? null;
@@ -1144,7 +1137,7 @@ export class Game {
       typeId,
       capital,
       this.currentMonth(),
-      () => this.ids.next('plant')
+      () => this.ids.next('building')
     );
     if (!result.ok) {
       this.log.debug(`startConstruction blocked: ${result.reason} (${typeId})`);
@@ -1155,46 +1148,6 @@ export class Game {
       projectId: result.project.id,
       typeId
     });
-    return true;
-  }
-
-  /** Unlocks the next mine research level of ONE resource branch (spec §11). */
-  economyResearchMine(countryId: string, resourceId: string): boolean {
-    this.assertInitialized();
-    const result = unlockMineLevel(this.state, countryId, this.data.economyData.strategicResources, resourceId);
-    if (!result.ok) {
-      this.log.debug(`researchMine blocked: ${result.reason} (${resourceId})`);
-      return false;
-    }
-    this.events.emit('economy.researchUnlocked', { countryId, resourceId, level: result.level });
-    return true;
-  }
-
-  /** Upgrades ONE mine to the next unlocked level (spec §12/§15) — the
-   *  production effect is applied immediately via a fresh world recompute. */
-  economyUpgradeMine(countryId: string, depositId: string): boolean {
-    this.assertInitialized();
-    const deposit = this.strategicMap.features.deposits.find((candidate) => candidate.id === depositId);
-    if (deposit === undefined) {
-      this.log.debug(`upgradeMine blocked: unknown deposit "${depositId}"`);
-      return false;
-    }
-    const result = upgradeMine(
-      this.state,
-      countryId,
-      this.data.economyData.strategicResources,
-      depositId,
-      deposit.countryId,
-      deposit.resourceId
-    );
-    if (!result.ok) {
-      this.log.debug(`upgradeMine blocked: ${result.reason} (${depositId})`);
-      return false;
-    }
-    // REAL, immediate effect (spec §13): the level multiplier feeds the
-    // production recompute the moment the upgrade happens.
-    recomputeResourceEconomies(this.state, this.strategicMap, this.data.economyData.strategicResources);
-    this.events.emit('economy.mineUpgraded', { countryId, depositId, level: result.level });
     return true;
   }
 

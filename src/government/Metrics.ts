@@ -85,27 +85,18 @@ export function activeMulFactor(state: GameState, countryId: string, metric: str
 }
 
 /**
- * How many resources are ACUTELY short for this country right now: a
- * resource counts when the stockpile is empty while the monthly balance
- * (with imports) is still negative, or when the world market left an
- * unfilled shortage. Drives data-driven conditions and opinion.
+ * How many resources are ACUTELY short for this country right now (spec §5):
+ * a resource counts when the last cycle pass recorded an uncovered deficit
+ * (the stockpile ran dry — record.shortage). ONE number, ONE source: the
+ * same record the economy UI, the development penalty and the purchase
+ * flow all read. Drives data-driven conditions and opinion.
  */
 export function acuteShortageCountOf(state: GameState, countryId: string): number {
   const record = state.economy.resources[countryId];
   if (record === undefined) return 0;
-  const resourceIds = new Set<string>([
-    ...Object.keys(record.consumption),
-    ...Object.keys(record.unfilledShortage),
-    ...Object.keys(record.production)
-  ]);
   let count = 0;
-  for (const resourceId of resourceIds) {
-    const unfilled = record.unfilledShortage[resourceId] ?? 0;
-    const uncovered =
-      (record.consumption[resourceId] ?? 0) -
-      (record.production[resourceId] ?? 0) -
-      (record.imports[resourceId] ?? 0);
-    if (unfilled > 0 || (uncovered > 0 && (record.stock[resourceId] ?? 0) <= 0)) count += 1;
+  for (const value of Object.values(record.shortage)) {
+    if (value > 0) count += 1;
   }
   return count;
 }

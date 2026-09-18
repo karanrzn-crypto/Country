@@ -35,19 +35,19 @@ const pointSchema: FieldSchema = {
 };
 
 /**
- * The light monthly finance ledger (spec §10): Tax + Customs + Exports
- * against the derived budget spending. No GDP/debt/inflation fields.
+ * The SIMPLE monthly ledger (spec §3/§12): tax + trade + factories against
+ * army + government + infrastructure. No GDP/debt/inflation/customs fields.
  */
 export const FINANCE_STATE_SCHEMA: FieldSchema = {
   type: 'object',
   fields: {
-    lastTax: { type: 'number', min: 0 },
-    lastCustoms: { type: 'number', min: 0 },
-    lastExports: { type: 'number', min: 0 },
-    lastRevenue: { type: 'number', min: 0 },
-    lastSpending: { type: 'number', min: 0 },
-    lastBalance: { type: 'number' },
-    outputGrowth: { type: 'number', min: 0.1, max: 4 }
+    lastTaxIncome: { type: 'number', min: 0 },
+    lastTradeIncome: { type: 'number' },
+    lastFactoryIncome: { type: 'number', min: 0 },
+    lastArmyExpense: { type: 'number', min: 0 },
+    lastGovernmentExpense: { type: 'number', min: 0 },
+    lastInfrastructureExpense: { type: 'number', min: 0 },
+    lastBalance: { type: 'number' }
   }
 };
 
@@ -58,9 +58,7 @@ const constructionProjectSchema: FieldSchema = {
     typeId: { type: 'string' },
     cityId: { type: 'string' },
     startedMonth: { type: 'number', min: 0, integer: true },
-    status: { type: 'enum', values: ['waiting', 'building'] },
-    progress: { type: 'number', min: 0, max: 1 },
-    secured: { type: 'record', values: { type: 'number', min: 0 } }
+    progress: { type: 'number', min: 0, max: 1 }
   }
 };
 
@@ -164,7 +162,7 @@ const governmentCountrySchema: FieldSchema = {
             military: { type: 'number', min: 0, max: 1 }
           }
         },
-        tax: { type: 'enum', values: ['low', 'medium', 'high', 'max'] },
+        tax: { type: 'enum', values: ['low', 'medium', 'high'] },
         spendingShares: {
           type: 'object',
           fields: {
@@ -354,25 +352,13 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               consumption: { type: 'record', values: { type: 'number' } },
               imports: { type: 'record', values: { type: 'number', min: 0 } },
               exports: { type: 'record', values: { type: 'number', min: 0 } },
-              suppliers: { type: 'record', values: { type: 'record', values: { type: 'number', min: 0 } } },
-              unfilledShortage: { type: 'record', values: { type: 'number', min: 0 } },
-              emergencyImports: { type: 'record', values: { type: 'number', min: 0 } },
-              importCost: { type: 'number', min: 0 },
-              exportIncome: { type: 'number', min: 0 }
+              shortage: { type: 'record', values: { type: 'number', min: 0 } },
+              tradeIncome: { type: 'number', min: 0 },
+              tradeExpense: { type: 'number', min: 0 }
             }
           }
         },
         finance: { type: 'record', values: FINANCE_STATE_SCHEMA },
-        mines: { type: 'record', values: { type: 'number', min: 1, max: 10, integer: true } },
-        research: {
-          type: 'record',
-          values: {
-            type: 'object',
-            fields: {
-              mineLevels: { type: 'record', values: { type: 'number', min: 1, max: 10, integer: true } }
-            }
-          }
-        },
         construction: {
           type: 'record',
           values: {
@@ -382,7 +368,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
             }
           }
         },
-        plants: {
+        buildings: {
           type: 'record',
           values: {
             type: 'record',

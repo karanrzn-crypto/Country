@@ -555,6 +555,153 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v15 → v16: the SIMPLE economy (spec §1-§14). Per country:
+    //  - resources: keep the real stock; drop the tier-priced trade fields,
+    //    the suppliers map, the unfilled/emergency records — the simple
+    //    record is stock/production/consumption/trade/shortage;
+    //  - finance: the THREE-line ledger (tax/trade/factories vs army/
+    //    government/infrastructure) replaces Tax+Customs+Exports−pot;
+    //    the old lastBalance converts at the money rescale below;
+    //  - construction: escrow projects become money-paid projects —
+    //    waiting projects are dismantled and their secured units refund
+    //    to the stockpile, building projects keep their progress;
+    //  - mines/research/plants are REMOVED (no levels, no research tree —
+    //    pre-simple-economy plants are dismantled: the new building ids
+    //    and effects differ);
+    //  - the money scale converts M$ → units (×6, matching the new 12,000
+    //    starting treasury against the old ~2,000 M$ scale);
+    //  - the FOUR tax levels collapse to THREE (max → high).
+    from: 15,
+    to: 16,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v15\u2192v16: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: {
+          economy?: {
+            treasury?: Record<string, unknown>;
+            resources?: Record<string, Record<string, unknown>>;
+            finance?: Record<string, Record<string, unknown>>;
+            construction?: Record<string, { projects?: unknown[] }>;
+            mines?: unknown;
+            research?: unknown;
+            plants?: unknown;
+            buildings?: Record<string, unknown>;
+          };
+          government?: { countries?: Record<string, { budget?: { tax?: unknown } }> };
+        };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined) {
+        // Money scale: M$ → units (×6).
+        const MONEY_SCALE = 6;
+        const scale = (value: unknown): number =>
+          typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * MONEY_SCALE)) : 0;
+        if (economy.treasury !== undefined && typeof economy.treasury === 'object') {
+          for (const [key, value] of Object.entries(economy.treasury)) {
+            economy.treasury[key] = scale(value);
+          }
+        }
+        // Resources: keep the stock only; the heal reseeds the rest.
+        if (economy.resources !== undefined && typeof economy.resources === 'object') {
+          for (const record of Object.values(economy.resources)) {
+            if (record === null || typeof record !== 'object') continue;
+            const stock = (record['stock'] ?? {}) as Record<string, unknown>;
+            const cleanStock: Record<string, number> = {};
+            for (const [resourceId, amount] of Object.entries(stock)) {
+              const units = typeof amount === 'number' && Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+              if (units > 0) cleanStock[resourceId] = units;
+            }
+            const next = record as Record<string, unknown>;
+            next['stock'] = cleanStock;
+            next['production'] = {};
+            next['consumption'] = {};
+            next['imports'] = {};
+            next['exports'] = {};
+            next['shortage'] = {};
+            next['tradeIncome'] = 0;
+            next['tradeExpense'] = 0;
+            delete next['suppliers'];
+            delete next['unfilledShortage'];
+            delete next['emergencyImports'];
+            delete next['importCost'];
+            delete next['exportIncome'];
+          }
+        }
+        // Finance: the new simple ledger (balance converts at the new scale).
+        if (economy.finance !== undefined && typeof economy.finance === 'object') {
+          for (const record of Object.values(economy.finance)) {
+            if (record === null || typeof record !== 'object') continue;
+            const oldBalance = (record as Record<string, unknown>)['lastBalance'];
+            const next = record as Record<string, unknown>;
+            for (const key of Object.keys(next)) delete next[key];
+            next['lastTaxIncome'] = 0;
+            next['lastTradeIncome'] = 0;
+            next['lastFactoryIncome'] = 0;
+            next['lastArmyExpense'] = 0;
+            next['lastGovernmentExpense'] = 0;
+            next['lastInfrastructureExpense'] = 0;
+            next['lastBalance'] =
+              typeof oldBalance === 'number' && Number.isFinite(oldBalance)
+                ? Math.round(oldBalance * MONEY_SCALE)
+                : 0;
+          }
+        }
+        // Construction: building projects keep progress; waiting projects
+        // refund their secured escrow into the stockpile and disappear.
+        if (economy.construction !== undefined && typeof economy.construction === 'object') {
+          for (const [countryId, record] of Object.entries(economy.construction)) {
+            if (record === null || typeof record !== 'object') continue;
+            const projects = Array.isArray(record['projects']) ? record['projects'] : [];
+            const kept: unknown[] = [];
+            for (const project of projects) {
+              if (project === null || typeof project !== 'object') continue;
+              const entry = project as Record<string, unknown>;
+              const status = entry['status'];
+              const progress = typeof entry['progress'] === 'number' ? entry['progress'] : 0;
+              if (status === 'building') {
+                kept.push({
+                  id: entry['id'],
+                  typeId: entry['typeId'],
+                  cityId: entry['cityId'],
+                  startedMonth: entry['startedMonth'],
+                  progress
+                });
+              } else if (countryId !== '' && entry['secured'] !== null && typeof entry['secured'] === 'object') {
+                const stock = economy.resources?.[countryId]?.['stock'] as Record<string, unknown> | undefined;
+                if (stock !== undefined) {
+                  for (const [resourceId, amount] of Object.entries(entry['secured'] as Record<string, unknown>)) {
+                    const units = typeof amount === 'number' && Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+                    stock[resourceId] = Math.max(0, Math.round((typeof stock[resourceId] === 'number' ? stock[resourceId] : 0) + units));
+                  }
+                }
+              }
+            }
+            record['projects'] = kept;
+          }
+        }
+        // Levels, research and legacy plants are gone (one source of truth
+        // for production: deposits + baseline + the new buildings).
+        delete economy['mines'];
+        delete economy['research'];
+        delete economy['plants'];
+        if (economy['buildings'] === undefined) economy['buildings'] = {};
+      }
+      // FOUR tax levels → THREE (max → high; the others pass through).
+      const countries = clone.state?.government?.countries;
+      if (countries !== undefined && typeof countries === 'object') {
+        for (const government of Object.values(countries)) {
+          const tax = government?.budget?.tax;
+          if (government?.budget !== undefined && tax === 'max') {
+            (government.budget as { tax?: unknown })['tax'] = 'high';
+          }
+        }
+      }
+      return clone;
+    }
   }
 ];
 

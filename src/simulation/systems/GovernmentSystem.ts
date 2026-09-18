@@ -4,14 +4,14 @@
  * ONE system owns the month cadence for every strategic country and
  * sequences the pure domain engines in a fixed, deterministic order:
  *
- *   0. global trade + stock step (ONE world pass per month, BEFORE any
- *      ledger: production/consumption → world market → flows → the monthly
- *      STOCK STEP → the food safety pass)
- *   1. finance     (processMonthFinance — Tax + Customs + Exports, light)
- *   1.5 budget & construction (urban development, military production with
- *      real material draws, construction projects consuming the stockpile)
- *   2. resource AI (non-player countries research mine levels and start
- *      production factories — the whole world builds, spec §7/§8)
+ *   0. THE ECONOMIC CYCLE (one world pass per month, economyCycle.ts —
+ *      spec §10's exact order: جمعیت → مالیات → تولید → مصرف غذا → هزینه‌ها
+ *      → تجارت → پول نهایی → ثبات)
+ *   1. budget & construction (urban development — food-shortage-penalized,
+ *      military production with real material draws, money-paid building
+ *      projects advancing by time)
+ *   2. resource AI (non-player countries occasionally start a building
+ *      they can actually AFFORD — the whole world builds, simply)
  *   3. public opinion (updateOpinionTopics → approval drift)
  *   4. decisions    (modifier expiry / cooldowns age with months)
  *   5. events       (expire overdue → maybe fire a new one)
@@ -32,10 +32,8 @@ import type { TickInfo } from '../../time/TimeSystem';
 import type { SimulationSystemDef } from '../SimulationEngine';
 import { absoluteMonthIndex } from '../../time/Calendar';
 import type { StrategicResourcesConfig } from '../../economy/types';
-import { recomputeResourceEconomies } from '../../economy/resources';
-import { processMonthFinance } from '../../economy/EconomySimulation';
+import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject } from '../../economy/construction';
-import { unlockMineLevel, unlockedMineLevelOf } from '../../economy/research';
 import { growUrbanDevelopment, produceMilitary } from '../../government/budgetEffects';
 import { tickDecisionModifiers } from '../../government/DecisionEngine';
 import { expireOverdueEvents, firePendingEvent, newEventInstanceId, rollEvents } from '../../government/EventEngine';
@@ -49,14 +47,14 @@ const EVENT_FIRE_CHANCE = 0.3;
 /** Strike pressure that triggers a general strike. */
 const GENERAL_STRIKE_THRESHOLD = 0.65;
 const GENERAL_STRIKE_MONTHS = 3;
-/** Monthly chance an AI country starts one production factory (when it can
- *  actually pay the FULL resource cost — construction must never starve the
- *  world's stockpiles, spec §8). */
+/** Monthly chance an AI country starts one building (ONLY when its treasury
+ *  covers the full one-time money cost with a safety margin — construction
+ *  must never bankrupt the world, spec §8/§14). */
 const AI_CONSTRUCTION_CHANCE = 0.08;
 /** Max concurrent AI projects (the player gets the config cap). */
 const AI_PROJECT_CAP = 1;
-/** Staggered research cadence: one attempt every RESEARCH_EVERY months. */
-const AI_RESEARCH_EVERY = 6;
+/** AI pays only when it keeps this multiple of the cost after paying. */
+const AI_TREASURY_MARGIN = 1.5;
 
 export class GovernmentSystem implements SimulationSystemDef {
   readonly id = 'government';
@@ -79,12 +77,11 @@ export class GovernmentSystem implements SimulationSystemDef {
       );
       if (due.length === 0) break;
       if (context.map !== undefined) {
-        recomputeResourceEconomies(
-          state,
-          context.map,
-          context.data.economyData.strategicResources,
-          { applyStockStep: true }
-        );
+        // THE ECONOMIC CYCLE — the whole world advances ONE month per pass
+        // (spec §10's fixed order; the lockstep loop keeps it once/month).
+        runEconomyCycle(state, context.map, context.data.economyData.strategicResources, {
+          applyStep: true
+        });
       }
       for (const countryId of due) {
         const government = state.government.countries[countryId];
@@ -104,15 +101,10 @@ export class GovernmentSystem implements SimulationSystemDef {
     const { state, events, rng, ids, data } = context;
     const config = data.economyData.strategicResources;
 
-    // —— 1. finance (treasury: Tax + Customs + Exports − budget spending) ——
-    // Bills the country's trade flows resolved by THIS month's world pass
-    // (the global pass ran once, above, before any ledger).
-    processMonthFinance(state, countryId, config);
-
-    // —— 1.5 budget & construction (REAL state, spec §2/§3/§4/§9) ——
-    // Economic budget grows urban development (construction speed) and
-    // speeds up building projects; military budget produces equipment by
-    // consuming iron/oil/coal/copper from the REAL stockpile.
+    // —— 1. budget & construction (REAL state, spec §2/§3/§5/§8) ——
+    // Economic budget grows urban development (halved by a food shortage);
+    // military budget produces equipment by consuming iron/oil from the
+    // REAL stockpile; building projects advance by time (paid in full).
     growUrbanDevelopment(state, countryId);
     produceMilitary(state, countryId, config.militaryMaterials);
     const built = stepProjects(state, countryId, config, month);
@@ -120,7 +112,7 @@ export class GovernmentSystem implements SimulationSystemDef {
       events.emit('economy.constructionCompleted', { countryId, projectId: project.id, typeId: project.typeId });
     }
 
-    // —— 2. resource AI: the whole world researches and builds (spec §7) ——
+    // —— 2. resource AI: the whole world builds, simply (spec §8) ——
     if (state.player.countryId !== countryId) {
       this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind));
     }
@@ -177,10 +169,10 @@ export class GovernmentSystem implements SimulationSystemDef {
   }
 
   /**
-   * AI countries keep the WORLD economy alive (spec §7/§8): occasionally a
-   * non-player country starts a production factory (boosting its strongest
-   * resource) and, on a slow staggered cadence, unlocks the next mine
-   * research level it can afford. Deterministic through the campaign rng.
+   * AI countries keep the WORLD economy alive (spec §8): occasionally a
+   * non-player country starts a production building around its strongest
+   * resource — but ONLY when the treasury covers the full one-time money
+   * cost with a margin. Deterministic through the campaign rng.
    */
   private processAiEconomy(
     state: GameState,
@@ -193,8 +185,8 @@ export class GovernmentSystem implements SimulationSystemDef {
     const record = state.economy.resources[countryId];
     if (record === undefined) return;
 
-    // The country's strongest produced resource — the AI builds/researches
-    // around what its land actually gives it (no magic numbers).
+    // The country's strongest produced resource — the AI builds around what
+    // its land actually gives it (no magic numbers).
     let strongest: string | null = null;
     let strongestOutput = 0;
     for (const [resourceId, amount] of Object.entries(record.production)) {
@@ -205,34 +197,22 @@ export class GovernmentSystem implements SimulationSystemDef {
     }
     if (strongest === null) return;
 
-    // —— construction: occasionally start a factory for the strong resource,
-    // but ONLY when the stockpile covers the FULL cost (self-limiting AI
-    // demand keeps the world's resources available — spec §8) ——
+    // —— construction: occasionally start a building, ONLY when affordable
+    //    with a margin (self-limiting AI demand keeps treasuries healthy) ——
     const construction = state.economy.construction[countryId];
     if (
       construction !== undefined &&
       construction.projects.length < AI_PROJECT_CAP &&
       rng.chance(AI_CONSTRUCTION_CHANCE)
     ) {
-      const def = config.productionFactories.find((candidate) => candidate.boosts === strongest);
+      const def = config.buildings.find(
+        (candidate) => candidate.effect === 'production' && candidate.resource === strongest
+      );
       const capital = state.countries.countries[countryId]?.capitalId ?? null;
-      const canPay =
-        def !== undefined &&
-        Object.entries(def.cost).every(
-          ([resourceId, cost]) => (record.stock[resourceId] ?? 0) >= cost
-        );
-      if (def !== undefined && canPay && capital !== null) {
-        startProject(state, countryId, config, def.id, capital, month, () => newId('plant'));
-      }
-    }
-
-    // —— research: a slow, staggered, affordable march up the mine levels ——
-    const stagger = [...countryId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % AI_RESEARCH_EVERY;
-    if ((month + stagger) % AI_RESEARCH_EVERY === 0) {
-      const cost = config.research.levels[String(unlockedMineLevelOf(state, countryId, strongest) + 1)];
       const treasury = state.economy.treasury[countryId] ?? 0;
-      if (cost !== undefined && treasury >= cost * 1.5) {
-        unlockMineLevel(state, countryId, config, strongest);
+      const affordable = def !== undefined && treasury >= def.cost * AI_TREASURY_MARGIN;
+      if (def !== undefined && affordable && capital !== null) {
+        startProject(state, countryId, config, def.id, capital, month, () => newId('building'));
       }
     }
   }
