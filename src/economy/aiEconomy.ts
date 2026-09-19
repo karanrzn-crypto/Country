@@ -48,7 +48,8 @@ import {
   activeContractsOf,
   unitPriceOf,
   playerCountryIdOf,
-  requestExport
+  requestExport,
+  remainingSaleOfferOf
 } from './contracts';
 import type { Random } from '../utils/Random';
 import { roundTo } from '../utils/math';
@@ -264,23 +265,34 @@ export function aiTradeStep(
   }
   if (neededResource === null) return null;
   if (hasActiveImportContract(state, countryId, neededResource)) return null;
+  // THE EXPORT-REQUEST RULE (the export-request directive §3): when the
+  // PLAYER's country has ANY remaining sale offer of the needed good, the
+  // AI seeks to buy from IT — a formal REQUEST the president approves or
+  // rejects (never a silent contract). Waiting for the player to be the
+  // world's LARGEST seller would make requests practically never happen:
+  // countries actively ask the player whenever it can supply them. A
+  // refused filing (duplicate pending / cooldown) consumes the month's
+  // single trade action — no AI-AI fallback on top.
+  const player = playerCountryIdOf(state);
+  if (player !== null && player !== countryId) {
+    const playerOffer = remainingSaleOfferOf(state, player, neededResource, config);
+    if (playerOffer > 0) {
+      const filed = requestExport(
+        state,
+        countryId,
+        player,
+        neededResource,
+        Math.min(worst, playerOffer),
+        month,
+        config,
+        newId
+      );
+      return filed.ok ? filed.request : null;
+    }
+  }
   const offers = marketOffersOf(state, countryId, neededResource, config);
   if (offers.length === 0) return null; // no real seller — the shortage stays (§25)
   const best = offers[0];
-  // The PLAYER's goods need the PRESIDENT'S CONSENT — file a request.
-  if (best.countryId === playerCountryIdOf(state)) {
-    const filed = requestExport(
-      state,
-      countryId,
-      best.countryId,
-      neededResource,
-      Math.min(worst, best.amount),
-      month,
-      config,
-      newId
-    );
-    return filed.ok ? filed.request : null;
-  }
   signContract(
     state,
     countryId,

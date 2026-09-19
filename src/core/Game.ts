@@ -1182,7 +1182,10 @@ export class Game {
       sellerId: request.sellerId,
       resourceId: request.resourceId,
       approved: approve,
-      contractId: result.contract?.id ?? null
+      contractId: result.contract?.id ?? null,
+      // An approval whose capacity evaporated since the filing signs
+      // NOTHING (fail-closed) — the UI must say so, not stay silent.
+      capacityOk: approve ? result.contract !== undefined : true
     });
     return true;
   }

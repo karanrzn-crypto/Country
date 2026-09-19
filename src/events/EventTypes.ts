@@ -243,6 +243,9 @@ export interface GameEventMap {
     readonly resourceId: string;
     readonly approved: boolean;
     readonly contractId: string | null;
+    /** FALSE when an approval signed nothing (the seller's remaining
+     *  offer shrank below the requested amount since the filing). */
+    readonly capacityOk: boolean;
   };
 }
 

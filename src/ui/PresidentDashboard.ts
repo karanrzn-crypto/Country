@@ -19,7 +19,8 @@ import {
 import {
   marketOffersOf,
   unitPriceOf,
-  activeContractsOf
+  activeContractsOf,
+  remainingSaleOfferOf
 } from '../economy/contracts';
 import type { TradeContract } from '../economy/resourceTypes';
 import type { StrategicResourcesConfig } from '../economy/types';
@@ -556,6 +557,12 @@ export class PresidentDashboard {
       const pending = requests.filter((entry) => entry.status === 'pending');
       const decided = requests.filter((entry) => entry.status !== 'pending');
       for (const request of pending) {
+        // The request is sized against the seller's offer AT FILING TIME —
+        // the CURRENT remaining offer decides whether approving can sign
+        // (the same function the core re-checks on approval; shown honestly).
+        const satisfiable =
+          remainingSaleOfferOf(state, countryId, request.resourceId, config) >=
+          request.amountPerMonth;
         const card = this.create('div', 'pd-request pending');
         const head = this.create('div', 'pd-request-head');
         const buyer = this.create('span', 'pd-request-name');
@@ -577,10 +584,17 @@ export class PresidentDashboard {
         card.appendChild(price);
         const actions = this.create('div', 'pd-request-actions');
         const approve = this.create('button', 'pd-request-approve');
-        approve.setText('موافقت');
-        approve.onClick(() =>
-          this.send({ type: 'economy.approveExportRequest', requestId: request.id })
-        );
+        if (!satisfiable) {
+          // The offer shrank since the filing — approving would sign
+          // nothing; say so INSTEAD of a silent dead button.
+          approve.setText('عرضهٔ کافی نیست');
+          approve.setAttribute('disabled', 'true');
+        } else {
+          approve.setText('موافقت');
+          approve.onClick(() =>
+            this.send({ type: 'economy.approveExportRequest', requestId: request.id })
+          );
+        }
         actions.appendChild(approve);
         const reject = this.create('button', 'pd-request-reject');
         reject.setText('مخالفت');

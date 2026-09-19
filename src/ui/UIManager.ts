@@ -181,15 +181,17 @@ export class UIManager implements PhaseSystem {
           this.dashboard.refresh();
         }
       }),
-      this.events.on('economy.exportRequestDecided', ({ sellerId, buyerId, approved }) => {
+      this.events.on('economy.exportRequestDecided', ({ sellerId, buyerId, approved, capacityOk }) => {
         if (sellerId === context.state.player.countryId && buyerId !== sellerId) {
           const buyer = context.state.countries.countries[buyerId]?.name ?? buyerId;
           this.notify(
-            approved ? 'info' : 'warn',
+            approved && capacityOk ? 'info' : 'warn',
             'درخواست صادرات',
-            approved
-              ? `درخواست ${buyer} موافقت شد — قرارداد صادراتی ماهانه شکل گرفت.`
-              : `درخواست ${buyer} مخالفت شد — هیچ قراردادی ساخته نشد.`
+            !approved
+              ? `درخواست ${buyer} مخالفت شد — هیچ قراردادی ساخته نشد.`
+              : capacityOk
+                ? `درخواست ${buyer} موافقت شد — قرارداد صادراتی ماهانه شکل گرفت.`
+                : `عرضهٔ فروش شما از زمان درخواست کم شده — موافقت با درخواست ${buyer} ممکن نشد.`
           );
           this.dashboard.refresh();
         }
