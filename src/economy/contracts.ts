@@ -70,16 +70,15 @@ export function committedExportUnitsOf(
 
 /**
  * The REAL AVAILABLE SURPLUS of ONE country for ONE good (spec §2/§3/§24)
- * — the ONLY number that may appear as a market offer or back a new
- * contract:
+ * — the physical spare stock above the safety reserve, with the capacity
+ * already signed away in active export contracts subtracted:
  *
  *     stock − safety reserve − already committed export contracts
  *
  * The stock already nets this month's production and consumption (the
  * cycle lands them before trade), the SAFETY RESERVE keeps the domestic
  * buffer out of export reach (spec §5 — a country never sells the units
- * its own consumption needs), and the committed exports subtract the
- * capacity signed away in active contracts (§16). Whole units.
+ * its own consumption needs). Whole units.
  */
 export function availableSurplusOf(
   state: GameState,
@@ -97,12 +96,74 @@ export function availableSurplusOf(
 }
 
 /**
- * The MARKET OFFERS of ONE good (spec §3/§18/§24): every OTHER country
- * with a REAL available surplus, largest offer first (tie → country id,
- * deterministic). A country that is itself short, holds no stock above its
- * safety reserve, or has already committed its surplus NEVER appears —
- * the market cannot invent sellers (§3) and the offers never depend on
- * the buyer's shortage (§1).
+ * The EXPORT CAPACITY of ONE country for ONE good — the physical spare
+ * stock above the safety reserve (commitments NOT yet subtracted). The
+ * raw material the sale quota is cut from. Whole units.
+ */
+export function exportCapacityOf(
+  state: GameState,
+  sellerId: string,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  const record = state.economy.resources[sellerId];
+  if (record === undefined) return 0;
+  return Math.max(
+    0,
+    Math.floor(record.stock[resourceId] ?? 0) -
+      safetyReserveUnits(record.consumption, resourceId, config)
+  );
+}
+
+/**
+ * THE SALE QUOTA of ONE country for ONE good (the sale-quantity
+ * directive §1/§2/§7) — the FIXED, LIMITED monthly amount the country
+ * puts up for sale:
+ *
+ *     sale quota = floor(export capacity × market.saleQuotaShare)
+ *
+ * The number is computed from the SELLER'S OWN STATE alone (its stock,
+ * its safety reserve, the config share) — a buyer's shortage or need can
+ * never move it (§1: the seller decides what it sells, the buyer only
+ * decides what it buys). What the country keeps back stays with the
+ * country (§6 — the remainder is preserved for the seller and later
+ * deals, it does not grow with demand).
+ */
+export function saleQuotaOf(
+  state: GameState,
+  sellerId: string,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  const share = Math.min(1, Math.max(0, config.market.saleQuotaShare));
+  return Math.floor(exportCapacityOf(state, sellerId, resourceId, config) * share);
+}
+
+/**
+ * The REMAINING sale offer of ONE seller for ONE good — the sale quota
+ * minus the monthly amounts already committed in active contracts. THE
+ * number the market shows and the ONLY capacity a new contract may claim
+ * (§7 — no path may bypass the quota: Σ active commitments ≤ sale quota,
+ * and the quota ≤ the real physical spare, so no delivery can exceed it).
+ */
+export function remainingSaleOfferOf(
+  state: GameState,
+  sellerId: string,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  return Math.max(0, saleQuotaOf(state, sellerId, resourceId, config) -
+    committedExportUnitsOf(state, sellerId, resourceId));
+}
+
+/**
+ * The MARKET OFFERS of ONE good (the sale-quantity directive + spec
+ * §3/§18/§24): every OTHER country with a REMAINING sale offer, largest
+ * first (tie → country id, deterministic). A country that is itself short,
+ * holds no stock above its safety reserve, has already sold its quota, or
+ * has already committed its surplus NEVER appears — the market cannot
+ * invent sellers (§3) and the offers never depend on the buyer's shortage
+ * (§1). Each offer is the seller's OWN fixed sale quantity.
  */
 export function marketOffersOf(
   state: GameState,
@@ -113,7 +174,7 @@ export function marketOffersOf(
   const offers: { countryId: string; amount: number }[] = [];
   for (const countryId of Object.keys(state.economy.resources)) {
     if (countryId === buyerId) continue;
-    const amount = availableSurplusOf(state, countryId, resourceId, config);
+    const amount = remainingSaleOfferOf(state, countryId, resourceId, config);
     if (amount > 0) offers.push({ countryId, amount });
   }
   return offers.sort((a, b) => b.amount - a.amount || (a.countryId < b.countryId ? -1 : 1));
@@ -152,14 +213,16 @@ export type SignContractResult =
     };
 
 /**
- * Signs ONE monthly trade contract (spec §6/§16): `buyerId` commits to
- * buying `amountPerMonth` units of the good from `sellerId` EVERY month at
- * the BASE price, until cancelled. Guards (§16 — capacity is checked AT
- * SIGNING):
+ * Signs ONE monthly trade contract (the sale-quantity directive + spec
+ * §6/§16): `buyerId` commits to buying `amountPerMonth` units of the good
+ * from `sellerId` EVERY month at the BASE price, until cancelled. Guards
+ * (the seller's limit is checked AT SIGNING, and no other path can bypass
+ * it):
  *  - the good and both countries exist; a country never contracts itself;
  *  - the amount is a positive whole number;
- *  - the seller's REAL available surplus covers the new commitment
- *    (stock − reserve − already committed exports ≥ amount, §16/§17);
+ *  - the seller's REMAINING SALE OFFER covers the new commitment (its
+ *    fixed quota minus what active contracts already claim — a buyer's
+ *    need never inflates it, and Σ commitments can never exceed the quota);
  *  - the buyer can pay the FIRST month's bill (money is checked again at
  *    every execution — a broke buyer simply receives less, §9).
  *
@@ -191,7 +254,7 @@ export function signContract(
   }
   const amount = Math.floor(amountPerMonth);
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, reason: 'bad-amount' };
-  if (availableSurplusOf(state, sellerId, resourceId, config) < amount) {
+  if (remainingSaleOfferOf(state, sellerId, resourceId, config) < amount) {
     return { ok: false, reason: 'no-capacity' };
   }
   const price = unitPriceOf(config, resourceId);

@@ -224,6 +224,35 @@ export function economyLevelBuildingFactor(
 }
 
 /**
+ * THE ECONOMIC-BUDGET PRODUCTION MODIFIER of ONE country (the budget
+ * directive §2) — the ONE shared production factor every path reads:
+ *
+ *     factor = 1 + (budgetPct − 50) × economicBudget.productionPerPoint
+ *
+ * The economic budget (the 0..100 percentage of the 100% pool, stored as
+ * the 0..1 `shares.economic` in TEN-point steps) is NEUTRAL at exactly 50:
+ * above 50 the factor lifts ALL domestic production, below 50 it cuts it
+ * (60 → ×1.06, 40 → ×0.94, 100 → ×1.30, 0 → ×0.70 with 0.006/point).
+ * Deliberately moderate: a one-step change (10 points = ±6%) is felt over
+ * the following months without exploding the economy. A country with no
+ * government record (fresh/hand-made saves before the heal) reads the
+ * neutral 50.
+ */
+export function economicBudgetProductionFactor(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig
+): number {
+  const share = state.government.countries[countryId]?.budget.shares.economic;
+  const budgetPct =
+    typeof share === 'number' && Number.isFinite(share)
+      ? Math.min(100, Math.max(0, share * 100))
+      : 50;
+  const perPoint = config.economicBudget?.productionPerPoint ?? 0;
+  return roundTo(1 + (budgetPct - 50) * perPoint, 6);
+}
+
+/**
  * The BUILDING production breakdown of ONE country (spec §1/§3/§7/§8/§15):
  * every completed building's output scales by its CELL QUALITY, the
  * country's resource POTENTIAL, the economy level (deliberately weak, §14)
@@ -273,8 +302,9 @@ export function buildingProductionOf(
 }
 
 /** The monthly output of ONE building — its cell's quality × the country's
- *  potential × the economy level × diminishing returns, capped by the
- *  remaining extraction reserve (spec §3/§7/§8/§15). */
+ *  potential × the economy level × THE ECONOMIC BUDGET × diminishing
+ *  returns, capped by the remaining extraction reserve (the budget
+ *  directive §2 + spec §3/§7/§8/§15). */
 export interface SingleBuildingOutput {
   readonly resource: string;
   readonly amount: number;
@@ -312,8 +342,16 @@ export function singleBuildingOutput(
   const quality = cellQualityOf(model, cellIndex, def.resource, config);
   const potential = countryPotentialFactor(model, countryId, def.resource, config);
   const levelFactor = economyLevelBuildingFactor(state, countryId, config);
+  // THE ECONOMIC BUDGET (the budget directive §2): the ONE shared factor
+  // applies to buildings exactly as it applies to deposits and the
+  // baseline — before the reserve cap, so the extraction (the units the
+  // reserve really loses) matches the budget-scaled output.
+  const budgetFactor = economicBudgetProductionFactor(state, countryId, config);
   const diminish = diminishingFactorOf(index, config);
-  let amount = Math.max(0, Math.round(def.output * quality * potential * levelFactor * diminish));
+  let amount = Math.max(
+    0,
+    Math.round(def.output * quality * potential * levelFactor * budgetFactor * diminish)
+  );
   let extraction = 0;
   // Finite reserve (spec §8): extraction is capped by what is LEFT.
   if (def.reserveUnits > 0) {
@@ -380,7 +418,13 @@ export function buildPreviewInfoOf(
   const gridId = model.features.gridIds[cellIndex] ?? '';
   const quality = cellQualityOf(model, cellIndex, def.resource, config);
   const potential = countryPotentialFactor(model, countryId, def.resource, config);
-  const levelFactor = economyLevelBuildingFactor(state, countryId, config);
+  // The preview shows the REAL monthly output under the CURRENT budget
+  // (the budget directive §2) — the same combined factor the cycle's
+  // buildings use (level × budget), so what the player sees is what the
+  // completed building will actually produce.
+  const combinedFactor =
+    economyLevelBuildingFactor(state, countryId, config) *
+    economicBudgetProductionFactor(state, countryId, config);
   const existing = Object.values(state.economy.buildings[countryId] ?? {}).filter(
     (building) => building.typeId === typeId
   ).length;
@@ -388,7 +432,7 @@ export function buildPreviewInfoOf(
     def,
     quality,
     potential,
-    levelFactor,
+    combinedFactor,
     existing,
     config
   );
@@ -706,10 +750,17 @@ export function seedResourceEconomies(
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
     const buildings = buildingProductionOf(state, mapModel, countryId, config);
-    const production: Record<string, number> = { ...deposits };
+    // The seed reads the SAME economic-budget factor the monthly cycle
+    // applies (the budget directive §2) — the records are consistent from
+    // the first day (the government slice already exists at seed time).
+    const budgetFactor = economicBudgetProductionFactor(state, countryId, config);
+    const production: Record<string, number> = {};
+    for (const [resourceId, amount] of Object.entries(deposits)) {
+      production[resourceId] = Math.round(amount * budgetFactor);
+    }
     for (const source of [baseline, buildings.totals]) {
       for (const [resourceId, amount] of Object.entries(source)) {
-        production[resourceId] = Math.round((production[resourceId] ?? 0) + amount);
+        production[resourceId] = Math.round((production[resourceId] ?? 0) + amount * budgetFactor);
       }
     }
     const consumption = countryResourceConsumption(state, countryId, config);

@@ -305,7 +305,7 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     game.init();
     const countryId = game.strategicMap.countryOrder[0];
     game.commandBus.send({ type: 'player.confirmCountry', countryId });
-    game.commandBus.send({ type: 'government.setBudgetShare', countryId, pool: 'economic', value: 0.65 });
+    game.commandBus.send({ type: 'government.setBudgetShare', countryId, pool: 'economic', value: 0.7 });
     game.commandBus.send({ type: 'government.setTaxLevel', countryId, level: 'high' });
     game.commandBus.flush();
     game.saveToSlot('budget-slot');
@@ -314,8 +314,8 @@ describe('Budget & Tax redesign — the required contract (spec §11)', () => {
     game2.init();
     game2.loadFromSlot('budget-slot');
     const loaded = game2.gameState.government.countries[countryId].budget;
-    expect(loaded.shares.economic).toBeCloseTo(0.65, 9);
-    expect(loaded.shares.military).toBeCloseTo(0.35, 9);
+    expect(loaded.shares.economic).toBeCloseTo(0.7, 9);
+    expect(loaded.shares.military).toBeCloseTo(0.3, 9);
     expect(loaded.tax).toBe('high');
     expect(validateGameState(game2.gameState).valid).toBe(true);
     game.dispose();

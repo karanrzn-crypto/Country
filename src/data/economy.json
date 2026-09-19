@@ -108,7 +108,13 @@
         "price": 3
       }
     ],
-    "productionScale": 2.4,
+    "productionScale": 1.92,
+    "market": {
+      "saleQuotaShare": 0.5
+    },
+    "economicBudget": {
+      "productionPerPoint": 0.006
+    },
     "startingStock": {
       "months": {
         "food": 3,
@@ -213,7 +219,7 @@
         "id": "farm",
         "name": "مزرعه",
         "resource": "food",
-        "output": 150,
+        "output": 120,
         "cost": 800,
         "materials": 100,
         "workforce": 150,
@@ -224,7 +230,7 @@
         "id": "iron_mine",
         "name": "معدن آهن",
         "resource": "iron",
-        "output": 100,
+        "output": 80,
         "cost": 1500,
         "materials": 250,
         "workforce": 220,
@@ -235,7 +241,7 @@
         "id": "oil_field",
         "name": "میدان نفتی",
         "resource": "oil",
-        "output": 80,
+        "output": 64,
         "cost": 1800,
         "materials": 300,
         "workforce": 250,
@@ -246,7 +252,7 @@
         "id": "factory",
         "name": "کارخانه",
         "resource": "industrial",
-        "output": 60,
+        "output": 48,
         "cost": 2500,
         "materials": 500,
         "workforce": 400,
@@ -263,13 +269,13 @@
       "infrastructureCostPerArea": 1
     },
     "domesticBaseline": {
-      "cityTermScale": 0.25,
+      "cityTermScale": 0.225,
       "cityTermMaxCities": 6,
       "biomeWeight": 0.8,
       "terrainWeight": 0.2,
       "resources": {
         "food": {
-          "base": 130,
+          "base": 117,
           "biomes": {
             "grassland": 1.0,
             "jungle": 0.7,
@@ -289,7 +295,7 @@
           }
         },
         "oil": {
-          "base": 18,
+          "base": 16.2,
           "biomes": {
             "desert": 1.0,
             "drylands": 0.65,
@@ -309,7 +315,7 @@
           }
         },
         "iron": {
-          "base": 21,
+          "base": 18.9,
           "terrain": {
             "hills": 1.0,
             "mountain": 0.9,
@@ -321,7 +327,7 @@
           }
         },
         "industrial": {
-          "base": 34,
+          "base": 30.6,
           "cityFactor": 2.0,
           "terrain": {
             "lowland": 0.9,

@@ -257,9 +257,24 @@ export function normalizeBudgetShares(shares: Record<BudgetPool, number>): void 
 }
 
 /**
- * THE budget mutator (spec §1/§10): sets ONE pool's share of the 100% pool
- * and distributes the remainder over the OTHER pools proportionally (with
- * two pools that means military = 1 − economic exactly, in BOTH directions).
+ * THE TEN-POINT BUDGET GRID (the budget directive §1): the economic budget
+ * changes only in steps of 10 — 0, 10, 20 … 100 (stored as 0..0.1..1). A
+ * requested value is clamped into [0, 1] and snapped to the NEAREST grid
+ * point, so no caller (UI stepper, command, event, test) can ever write an
+ * off-grid share into the state. The other pool mirrors exactly (1 − x),
+ * which keeps both on the grid by construction.
+ */
+export function snapBudgetShare(value: number): number {
+  const clamped = Number.isFinite(value) ? clamp01(value) : 0;
+  return Math.round(clamped * 10) / 10;
+}
+
+/**
+ * THE budget mutator (spec §1/§10 + the budget directive §1): sets ONE
+ * pool's share of the 100% pool — snapped onto the TEN-POINT grid (0, 0.1,
+ * …, 1; the budget changes only in steps of 10) — and distributes the
+ * remainder over the OTHER pools proportionally (with two pools that means
+ * military = 1 − economic exactly, in BOTH directions — also on-grid).
  * Re-derives the internal spending money so the whole simulation follows.
  * Returns the applied split.
  */
@@ -271,7 +286,7 @@ export function setBudgetShare(
 ): Record<BudgetPool, number> {
   const government = slice.countries[countryId];
   if (government === undefined) return { ...DEFAULT_BUDGET_SHARES };
-  const target = Number.isFinite(value) ? clamp01(value) : 0;
+  const target = snapBudgetShare(value);
   const shares = government.budget.shares;
   const others = BUDGET_POOLS.filter((candidate) => candidate !== pool);
   const otherSum = others.reduce((sum, candidate) => sum + Math.max(0, shares[candidate]), 0);
@@ -296,16 +311,18 @@ export function setTaxLevel(slice: GovernmentSlice, countryId: string, level: Ta
 }
 
 /**
- * Repairs a loaded/migrated budget record into a valid pool state: clamps
- * and normalizes the shares, re-derives the money plumbing, and coerces an
- * unknown tax level back to MEDIUM. Idempotent; used by the load heal.
+ * Repairs a loaded/migrated budget record into a valid pool state: clamps,
+ * SNAPS onto the ten-point grid (saves from before the budget-directive
+ * carried arbitrary shares — they normalize to the nearest legal step),
+ * re-derives the money plumbing, and coerces an unknown tax level back to
+ * MEDIUM. Idempotent; used by the load heal.
  */
 export function repairBudgetRecord(record: GovernmentCountryState): void {
   const shares = record.budget.shares;
   if (shares !== undefined && typeof shares === 'object') {
     for (const pool of BUDGET_POOLS) {
       const value = shares[pool];
-      shares[pool] = typeof value === 'number' && Number.isFinite(value) ? clamp01(value) : 0;
+      shares[pool] = typeof value === 'number' && Number.isFinite(value) ? snapBudgetShare(value) : 0;
     }
     normalizeBudgetShares(shares);
   } else {

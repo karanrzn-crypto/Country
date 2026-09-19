@@ -138,24 +138,27 @@ describe('simple economy (14-section spec)', () => {
     expect(state.economy.contracts.find((contract) => contract.id === 'c1')?.lastDelivery).toBe(50);
   });
 
-  it('T5 contracting more than the seller\'s real surplus is refused — capacity is reserved (§16)', () => {
+  it('T5 contracting more than the seller\'s sale quota is refused — capacity is reserved (§16 + the sale-quantity directive)', () => {
     const state = context.state;
     const [buyerId, sellerId] = ids();
     const sellerRecord = state.economy.resources[sellerId]!;
     const reserve = safetyReserveUnits(sellerRecord.consumption, 'iron', config);
-    sellerRecord.stock.iron = reserve + 100; // only 100 REAL spare units
+    // 200 REAL spare units → the seller's FIXED sale quota is 100 (half).
+    sellerRecord.stock.iron = reserve + 200;
     state.economy.treasury[buyerId] = 100000; // plenty of money
 
-    // 5,000/month against 100 real surplus → NO-CAPACITY (§16: the market
-    // can never promise what a country does not truly hold).
+    // 5,000/month against a 100-unit quota → NO-CAPACITY (the market can
+    // never promise what a country does not truly hold — and its offer is
+    // its OWN quota, never the buyer's demand).
     const over = signContract(state, buyerId, sellerId, 'iron', 5000, 100, config, () => 'c2');
     expect(over.ok).toBe(false);
     if (!over.ok) expect(over.reason).toBe('no-capacity');
 
-    // The 100 real surplus CAN be contracted once...
+    // The quota (100) CAN be contracted once...
     const ok = signContract(state, buyerId, sellerId, 'iron', 100, 100, config, () => 'c3');
     expect(ok.ok).toBe(true);
-    // ...but the capacity is now RESERVED: another buyer gets refused.
+    // ...but the quota is now RESERVED: another buyer gets refused (the
+    // remainder the seller kept back stays with the seller).
     const second = signContract(state, ids()[2], sellerId, 'iron', 1, 100, config, () => 'c4');
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.reason).toBe('no-capacity');
@@ -171,16 +174,16 @@ describe('simple economy (14-section spec)', () => {
     if (!broke.ok) expect(broke.reason).toBe('no-funds');
   });
 
-  it('T6 the market offers ONLY real available surplus — stock above reserve, minus committed exports (§2/§3/§16)', () => {
+  it('T6 the market offers only the sellers\' FIXED sale quotas — spare above reserve × the config share, minus commitments (§2/§3/§16)', () => {
     const state = context.state;
     const buyerId = playerCountryId;
     const offers = marketOffersOf(state, buyerId, 'oil', config);
     for (const offer of offers) {
       const record = state.economy.resources[offer.countryId]!;
-      const reserve = safetyReserveUnits(record.consumption, 'oil', config);
-      expect(offer.amount).toBe(
-        Math.max(0, Math.floor((record.stock.oil ?? 0) - reserve))
-      );
+      const spare = Math.max(0, Math.floor((record.stock.oil ?? 0) - safetyReserveUnits(record.consumption, 'oil', config)));
+      // The offer is the seller's OWN quota: spare × saleQuotaShare (no
+      // contracts are active in this check, so nothing is committed yet).
+      expect(offer.amount).toBe(Math.floor(spare * config.market.saleQuotaShare));
     }
     // A country never appears as its own seller; a country with NO spare
     // stock never appears at all (§3 — no fake sellers).
@@ -279,11 +282,12 @@ describe('simple economy (14-section spec)', () => {
     const normalGrowth = populationBefore * config.finance.populationGrowthPerMonth;
     expect(growth).toBeCloseTo(normalGrowth * 0.25, -1);
     // Stability dropped through the GRADED satisfaction penalty (§7) —
-    // proportional, never a sudden collapse from one short month: even
-    // several short goods sum to well under the 0.12 theoretical monthly
-    // ceiling (maxPenalty 0.3 × stabilityFactor 0.4), far from a collapse.
+    // proportional, never a sudden collapse from one short month: even the
+    // deeper shortages of the harder production economy stay well under a
+    // third of the stability scale per month (a collapse needs MONTHS of
+    // escalation, §13 — not one bad season).
     expect(political.stability).toBeLessThan(stabilityBefore);
-    expect(stabilityBefore - political.stability).toBeLessThan(0.1);
+    expect(stabilityBefore - political.stability).toBeLessThan(0.15);
   });
 
   it('T10 zero population / zero production — no NaN, no negative stock (§14)', () => {
@@ -375,7 +379,8 @@ describe('simple economy (14-section spec)', () => {
             safetyReserveUnits(record.consumption, 'food', config))
         };
       })
-      .filter((entry) => entry.spare >= 100)
+      // The seller's QUOTA must cover the 100/month deal (spare × share ≥ 100).
+      .filter((entry) => entry.spare * config.market.saleQuotaShare >= 100)
       .sort((a, b) => b.spare - a.spare);
     expect(withSpare.length).toBeGreaterThan(0);
     const sellerId = withSpare[0].id;

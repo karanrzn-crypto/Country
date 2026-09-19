@@ -526,8 +526,8 @@ export class PresidentDashboard {
     row.appendChild(plus);
     this.rows.set(`budget.${pool}`, value);
     const countryId = this.context?.state.player.countryId ?? '';
-    minus.onClick(() => this.stepBudgetShare(countryId, pool, -0.05));
-    plus.onClick(() => this.stepBudgetShare(countryId, pool, +0.05));
+    minus.onClick(() => this.stepBudgetShare(countryId, pool, -0.1));
+    plus.onClick(() => this.stepBudgetShare(countryId, pool, +0.1));
     return row;
   }
 
@@ -842,48 +842,52 @@ export class PresidentDashboard {
       return;
     }
     const countryName = (id: string): string => state.countries.countries[id]?.name ?? id;
-    // The NEEDS the market can serve: the country's REAL recorded
-    // shortages (the honest monthly deficit — contract deliveries already
-    // counted as supply, §15) — plus the focused resource when the player
-    // asked for it directly.
-    const needs: { resourceId: string; amount: number }[] = [];
-    for (const resource of config.resources) {
-      const shortage = Math.round(record.shortage[resource.id] ?? 0);
-      if (shortage > 0) needs.push({ resourceId: resource.id, amount: shortage });
-    }
-    if (this.marketFocus !== null) {
-      const focused = Math.round(record.shortage[this.marketFocus] ?? 0);
-      const existing = needs.find((need) => need.resourceId === this.marketFocus);
-      if (existing === undefined) needs.push({ resourceId: this.marketFocus, amount: focused });
-    }
-    needs.sort((a, b) => a.resourceId < b.resourceId ? -1 : 1);
+    // THE MARKET SHOWS THE SELLERS' FIXED SALE QUANTITIES (the sale-quantity
+    // directive): EVERY tradable good is listed — each seller row carries
+    // the amount THAT country has put up for sale (its real quota, derived
+    // only from its own stock/reserve/commitments) — visible and computable
+    // with NO reference to this country's needs. The buyer's recorded
+    // shortage is shown as the BUYER's want («نیاز شما»), and the buy
+    // button signs min(want, the seller's remaining offer) — demand above
+    // the offer cannot inflate it; the remainder stays with the seller for
+    // later deals.
+    const entries = config.resources.map((resource) => ({
+      resourceId: resource.id,
+      need: Math.max(0, Math.round(record.shortage[resource.id] ?? 0))
+    }));
+    // The focused resource first, then the hungriest needs; Array.sort is
+    // stable, so equal keys keep the config order (deterministic).
+    entries.sort((a, b) => {
+      const focusedA = a.resourceId === this.marketFocus ? 0 : 1;
+      const focusedB = b.resourceId === this.marketFocus ? 0 : 1;
+      return focusedA - focusedB || b.need - a.need;
+    });
 
-    const signature = `${this.marketFocus ?? 'all'}|${needs.map((need) => {
-      const offers = marketOffersOf(state, countryId, need.resourceId, config);
-      return `${need.resourceId}:${Math.round(need.amount)}:[${offers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
+    const signature = `${this.marketFocus ?? 'all'}|${entries.map((entry) => {
+      const offers = marketOffersOf(state, countryId, entry.resourceId, config);
+      return `${entry.resourceId}:${Math.round(entry.need)}:[${offers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
     }).join('|')}#${countryId}`;
     if (signature === this.dynamicSignatures.get('market')) return;
     this.dynamicSignatures.set('market', signature);
     this.rebuild('market', this.parents.get('market'), () => {
       const rows: UIElement[] = [];
-      if (needs.length === 0) {
-        const empty = this.create('div', 'pd-trade-empty');
-        empty.setText('نیازی برای خرید نیست.');
-        rows.push(empty);
-      }
-      for (const need of needs) {
-        const resource = config.resources.find((candidate) => candidate.id === need.resourceId);
+      const note = this.create('div', 'pd-purchase-hint');
+      note.setText('مقدار فروش هر کشور ثابت و محدود است — مستقل از نیاز شما؛ خرید فقط تا همان سهمیه انجام می‌شود.');
+      rows.push(note);
+      for (const entry of entries) {
+        const resource = config.resources.find((candidate) => candidate.id === entry.resourceId);
         if (resource === undefined) continue;
-        // REAL market offers only (§3/§24): each seller's available
-        // surplus, largest first — never shaped by this country's need.
-        const offers = marketOffersOf(state, countryId, need.resourceId, config);
-        const price = unitPriceOf(config, need.resourceId);
+        // REAL market offers only (the sale-quantity directive + §3/§24):
+        // each seller's REMAINING sale quota, largest first — never shaped
+        // by this country's need.
+        const offers = marketOffersOf(state, countryId, entry.resourceId, config);
+        const price = unitPriceOf(config, entry.resourceId);
         const block = this.create('div', 'pd-purchase');
         const head = this.create('div', 'pd-purchase-head');
         const name = this.create('span', 'pd-purchase-name');
         name.setText(
-          need.amount > 0
-            ? `${resource.name} — نیاز ${faNum(need.amount)}`
+          entry.need > 0
+            ? `${resource.name} — نیاز شما ${faNum(entry.need)}`
             : `${resource.name}`
         );
         head.appendChild(name);
@@ -893,27 +897,29 @@ export class PresidentDashboard {
         block.appendChild(head);
         if (offers.length === 0) {
           const empty = this.create('div', 'pd-purchase-row');
-          empty.setText('هیچ کشور مازاد واقعی برای فروش ندارد');
+          empty.setText('هیچ کشوری سهمیهٔ فروش آزاد ندارد');
           block.appendChild(empty);
         }
         for (const seller of offers) {
           const row = this.create('div', 'pd-purchase-row');
           const label = this.create('span', 'pd-purchase-seller');
-          // THE SELLER'S OWN REAL SURPLUS (§2/§3) — not this country's need.
-          label.setText(`${countryName(seller.countryId)} — ${faNum(seller.amount)} مازاد واقعی`);
+          // THE SELLER'S OWN FIXED SALE QUANTITY (the sale-quantity
+          // directive §2/§5/§8) — not this country's need.
+          label.setText(`${countryName(seller.countryId)} — عرضه فروش: ${faNum(seller.amount)} واحد در ماه`);
           row.appendChild(label);
           const sign = this.create('button', 'pd-buy');
-          // A MONTHLY CONTRACT (§6): min(need, offer) units EVERY month
-          // until cancelled — the market never sells more than the seller
-          // truly holds (§16 reserves it at signing).
-          const amount = Math.min(seller.amount, Math.max(1, Math.ceil(need.amount)));
+          // A MONTHLY CONTRACT (§6): the buyer's want capped by the
+          // seller's remaining offer — demand beyond the quota buys
+          // nothing extra, and the rest of the quota stays for later deals
+          // (signing reserves it, §16).
+          const amount = Math.min(seller.amount, Math.max(1, Math.ceil(entry.need)));
           sign.setText(`قرارداد ماهانه ${faNum(amount)}`);
           sign.onClick(() =>
             this.send({
               type: 'economy.signContract',
               countryId,
               sellerId: seller.countryId,
-              resourceId: need.resourceId,
+              resourceId: entry.resourceId,
               amountPerMonth: amount
             })
           );
@@ -933,8 +939,22 @@ export class PresidentDashboard {
   private refreshBudget(countryId: string): void {
     const government = this.context?.state.government.countries[countryId];
     if (government === undefined) return;
-    // The TWO halves of the ONE 100% pool (spec §6) — live from state.
-    this.rows.get('budget.economic')?.setText(percent(government.budget.shares.economic));
+    const config = this.economyConfig();
+    // The TWO halves of the ONE 100% pool (spec §6) — live from state, in
+    // TEN-point steps (the budget directive §1). The economic row carries
+    // the REAL production effect (the budget directive §2): the same
+    // modifier the monthly cycle applies to every production path, so the
+    // president sees exactly what the budget does before/after changing it.
+    const economic = government.budget.shares.economic;
+    let economicText = percent(economic);
+    if (config !== null) {
+      const perPoint = config.economicBudget.productionPerPoint;
+      const deltaPct = Math.round((economic * 100 - 50) * perPoint * 100);
+      const effect =
+        deltaPct === 0 ? 'بی‌اثر بر تولید' : deltaPct > 0 ? `تولید +${faNum(deltaPct)}٪` : `تولید −${faNum(-deltaPct)}٪`;
+      economicText = `${percent(economic)} · ${effect}`;
+    }
+    this.rows.get('budget.economic')?.setText(economicText);
     this.rows.get('budget.military')?.setText(percent(government.budget.shares.military));
     // The FOUR tax levels with the selected one marked (spec §7).
     this.rebuildTaxLevels(countryId, government.budget.tax);
@@ -1199,7 +1219,9 @@ export class PresidentDashboard {
     this.commands.send(command);
   }
 
-  /** Budget-pool stepper (spec §6) — ±5 percentage points of the 100% pool.
+  /** Budget-pool stepper (the budget directive §1) — ±10 percentage points
+   *  of the 100% pool: the budget ONLY ever sits on the 0/10/…/100 grid
+   *  (the core's mutator snaps any requested value to the nearest step).
    *  The core moves the OTHER pool by the same amount (zero-sum). */
   private stepBudgetShare(countryId: string, pool: BudgetPool, delta: number): void {
     const government = this.context?.state.government.countries[countryId];

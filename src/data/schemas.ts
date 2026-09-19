@@ -64,6 +64,23 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       allowUnknown: false,
       fields: {
         productionScale: positiveNumber,
+        // The market sale-quota rule (sellers' fixed, buyer-independent
+        // offers — the sale-quantity directive).
+        market: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            saleQuotaShare: { type: 'number', min: 0, max: 1 }
+          }
+        },
+        // The economic-budget production modifier (50 = neutral, §budget).
+        economicBudget: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            productionPerPoint: { type: 'number', min: 0, max: 0.05 }
+          }
+        },
         specialization: {
           type: 'object',
           allowUnknown: false,

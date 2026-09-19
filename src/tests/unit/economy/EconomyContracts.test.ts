@@ -30,6 +30,9 @@ import { shortageOf, safetyReserveUnits, strategicResourceIds, resourceDisplaySt
 import {
   marketOffersOf,
   availableSurplusOf,
+  exportCapacityOf,
+  saleQuotaOf,
+  remainingSaleOfferOf,
   signContract,
   cancelContract,
   executeMonthlyContracts,
@@ -37,6 +40,7 @@ import {
   unitPriceOf
 } from '../../../economy/contracts';
 import { stepProjects, startProject, workforceCapacityOf, workforceUsedBy } from '../../../economy/construction';
+import { committedExportUnitsOf } from '../../../economy/contracts';
 import { aiBuildingTypeId, aiSecureConstructionMaterials, aiTradeStep } from '../../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../../economy/resources';
 import { cellQualityOf } from '../../../economy/quality';
@@ -68,10 +72,18 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     return ranked[0];
   };
 
-  /** Fills ONE country's stock of ONE good to exactly `spare` units above its reserve. */
+  /** Fills ONE country's stock of ONE good so its REAL spare above the
+   *  reserve is exactly `spare` (the sale quota is then spare × share). */
   const giveSpare = (countryId: string, resourceId: string, spare: number): void => {
     const record = context.state.economy.resources[countryId]!;
     record.stock[resourceId] = spare + safetyReserveUnits(record.consumption, resourceId, config());
+  };
+
+  /** Fills ONE country's stock so its SALE QUOTA (the market offer) is
+   *  exactly `offer` units — capacity = offer ÷ saleQuotaShare. */
+  const giveQuota = (countryId: string, resourceId: string, offer: number): void => {
+    const share = config().market.saleQuotaShare;
+    giveSpare(countryId, resourceId, Math.ceil(offer / share));
   };
 
   // ————————— T1/T2: کمبود واقعی — صفر بودن انبار به معنی صفر بودن کمبود نیست ————————
@@ -127,7 +139,7 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     buyer.stock = { food: 0, iron: 0, oil: 0, industrial: 0 };
     state.economy.treasury[buyerId] = 100_000;
 
-    // Three sellers with REAL spare: the need's 30% + 40% + 17.5% — in
+    // Three sellers with REAL quotas: the need's 30% + 40% + 17.5% — in
     // total 87.5% of the gap, so 12.5% of it CANNOT be covered by the
     // market (the spec's 200 → 175 → 25 shape, scaled to the real gap).
     const sellers = ids().filter((id) => id !== buyerId).slice(0, 3);
@@ -135,7 +147,8 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     let planned = 0;
     for (const [index, sellerId] of sellers.entries()) {
       const amount = Math.max(1, Math.floor(gap * shares[index]));
-      giveSpare(sellerId, 'food', amount);
+      giveQuota(sellerId, 'food', amount);
+      expect(remainingSaleOfferOf(state, sellerId, 'food', config())).toBe(amount);
       const signed = signContract(state, buyerId, sellerId, 'food', amount, 50, config(), () => `t3-${index}`);
       expect(signed.ok).toBe(true);
       planned += amount;
@@ -169,6 +182,8 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     const poorRecord = state.economy.resources[poorSeller]!;
     poorRecord.stock.food = 0;
     poorRecord.shortage.food = 50; // it is itself short
+    expect(exportCapacityOf(state, poorSeller, 'food', config())).toBe(0);
+    expect(saleQuotaOf(state, poorSeller, 'food', config())).toBe(0);
     expect(availableSurplusOf(state, poorSeller, 'food', config())).toBe(0);
     expect(marketOffersOf(state, buyerId, 'food', config()).some((o) => o.countryId === poorSeller)).toBe(false);
 
@@ -238,11 +253,14 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     state.economy.contracts = [];
     const buyerId = ids()[0];
     const sellerId = ids()[1];
-    giveSpare(sellerId, 'iron', 30); // the seller holds only 30 spare units
+    // A sale quota of exactly 30 (capacity 60 ÷ share 2) — the seller can
+    // sign 30/month, but never more, whatever the buyer demands.
+    giveQuota(sellerId, 'iron', 30); // the seller offers only 30 spare units
+    expect(remainingSaleOfferOf(state, sellerId, 'iron', config())).toBe(30);
     state.economy.treasury[buyerId] = 100_000;
 
-    // A 100/month commitment against 30 real spare is REFUSED at signing
-    // (§16 — capacity is checked before the contract exists at all).
+    // A 100/month commitment against a 30-unit sale quota is REFUSED at
+    // signing (the buyer's demand cannot inflate the seller's offer).
     const over = signContract(state, buyerId, sellerId, 'iron', 100, 100, config(), () => 't7a');
     expect(over.ok).toBe(false);
     if (!over.ok) expect(over.reason).toBe('no-capacity');
@@ -386,10 +404,13 @@ describe('the contract trade (26-section spec: the market never invents goods)',
         }
         expect(roundTo(income, 2)).toBeCloseTo(roundTo(expense, 2), 2);
         expect(imports).toBe(exports); // trade moves units, never creates them
-        // (b) every recorded offer is the seller's REAL available surplus.
+        // (b) every recorded offer is the seller's REMAINING SALE QUOTA —
+        // the fixed, buyer-independent sale quantity (never the buyer's
+        // need, never the raw whole warehouse).
         for (const resourceId of strategicResourceIds(cfg)) {
           for (const offer of marketOffersOf(state, 'probe-buyer', resourceId, cfg)) {
-            expect(offer.amount).toBe(availableSurplusOf(state, offer.countryId, resourceId, cfg));
+            expect(offer.amount).toBe(remainingSaleOfferOf(state, offer.countryId, resourceId, cfg));
+            expect(offer.amount).toBeLessThanOrEqual(availableSurplusOf(state, offer.countryId, resourceId, cfg));
           }
         }
         // (c) no negative stock, no NaN anywhere.
@@ -407,7 +428,7 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     }
 
     // (d) the market's shape is REAL, never uniform: for every good the
-    //     offered amounts differ wildly across sellers (§3's «A → 100,
+    //     sale quotas differ wildly across sellers (§3's «A → 100,
     //     C → 50, F → 150, H → nothing»), at least one good keeps at least
     //     two countries WITHOUT any real surplus (the oil-poor stay
     //     oil-importers, §17), and no good turned the whole world into
@@ -415,7 +436,7 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     let goodsWithNonSellers = 0;
     for (const resourceId of strategicResourceIds(cfg)) {
       const offers = worldIds
-        .map((id) => availableSurplusOf(state, id, resourceId, cfg))
+        .map((id) => remainingSaleOfferOf(state, id, resourceId, cfg))
         .filter((amount) => amount > 0);
       if (offers.length < worldIds.length) goodsWithNonSellers += 1;
       if (offers.length >= 3) {
@@ -424,9 +445,18 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     }
     expect(goodsWithNonSellers).toBeGreaterThanOrEqual(1);
 
-    // (e) no duplicate-contract explosion: the active book is bounded by
-    //     the world's size (one import per country-good, rate-limited AI).
-    expect(activeContracts(state).length).toBeLessThanOrEqual(worldIds.length * 2);
+    // (e) no duplicate-contract explosion: the §23 invariant holds EXACTLY —
+    //     at most ONE ACTIVE import contract per (country, good) pair — and
+    //     the book stays within the theoretical fence (world × goods).
+    const seenPairs = new Set<string>();
+    for (const contract of activeContracts(state)) {
+      const key = `${contract.buyerId}#${contract.resourceId}`;
+      expect(seenPairs.has(key)).toBe(false);
+      seenPairs.add(key);
+    }
+    expect(activeContracts(state).length).toBeLessThanOrEqual(
+      worldIds.length * strategicResourceIds(cfg).length
+    );
 
     // (f) contracts CONTINUED: the surviving active contracts delivered
     //     recently (their lastDelivery is set by the last execution).
@@ -468,5 +498,95 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     }
     void resourceRank;
     fresh.dispose();
+  });
+
+  // ————————— T-Q: سهمیهٔ فروش — مقدار فروش محدود و مستقل از خریدار ————————
+
+  it('Q1 the sale offer is the seller\'s OWN fixed quota — floor(capacity × share), never the buyer\'s demand', () => {
+    const state = context.state;
+    state.economy.contracts = [];
+    const buyerId = ids()[0];
+    const sellerId = ids()[1];
+    giveSpare(sellerId, 'oil', 1000);
+    const share = config().market.saleQuotaShare;
+    const quota = Math.floor(1000 * share);
+    expect(saleQuotaOf(state, sellerId, 'oil', config())).toBe(quota);
+    expect(remainingSaleOfferOf(state, sellerId, 'oil', config())).toBe(quota);
+    // The buyer's recorded need NEVER moves the seller's quota (§1/§8) —
+    // the sale quantity is computable from the seller alone.
+    state.economy.resources[buyerId]!.shortage.oil = 10;
+    expect(remainingSaleOfferOf(state, sellerId, 'oil', config())).toBe(quota);
+    state.economy.resources[buyerId]!.shortage.oil = 99_999;
+    expect(remainingSaleOfferOf(state, sellerId, 'oil', config())).toBe(quota);
+    delete state.economy.resources[buyerId]!.shortage.oil;
+  });
+
+  it('Q2 demand above the offer cannot exceed it — the quota is a hard cap and the remainder stays with the seller (§5/§6)', () => {
+    const state = context.state;
+    state.economy.contracts = [];
+    const order = ids();
+    const sellerId = order[0];
+    giveQuota(sellerId, 'oil', 500); // the seller puts up exactly 500/month
+    state.economy.treasury[order[1]] = 1_000_000;
+    state.economy.treasury[order[2]] = 1_000_000;
+    const buyerA = order[1];
+    // An 800/month DEMAND is refused outright — nothing may exceed the
+    // seller's fixed sale quantity (fail-closed; the UI caps the button at
+    // min(want, offer) before this line is ever reached).
+    expect(signContract(state, buyerA, sellerId, 'oil', 800, 50, config(), () => 'q2x').ok).toBe(false);
+    // Signing the offered 500 (the capped amount) succeeds...
+    expect(signContract(state, buyerA, sellerId, 'oil', 500, 50, config(), () => 'q2a').ok).toBe(true);
+    // ...the quota is now fully reserved: the next buyer finds nothing.
+    expect(remainingSaleOfferOf(state, sellerId, 'oil', config())).toBe(0);
+    expect(signContract(state, order[2], sellerId, 'oil', 1, 50, config(), () => 'q2b').ok).toBe(false);
+    // Cancelling releases exactly the remainder for later deals (§6).
+    expect(cancelContract(state, 'q2a', buyerA, 50)).toBe('ok');
+    expect(remainingSaleOfferOf(state, sellerId, 'oil', config())).toBe(500);
+  });
+
+  it('Q3 several buyers share ONE seller strictly within its quota (§7/§17)', () => {
+    const state = context.state;
+    state.economy.contracts = [];
+    const order = ids();
+    expect(order.length).toBeGreaterThanOrEqual(4);
+    const sellerId = order[0];
+    giveQuota(sellerId, 'food', 300);
+    for (const id of order) state.economy.treasury[id] = 1_000_000;
+    // Two buyers split the 300 quota: 200 + 100 — both signed...
+    const buyers = order.slice(1, 3);
+    expect(signContract(state, buyers[0], sellerId, 'food', 200, 50, config(), () => 'q3a').ok).toBe(true);
+    expect(signContract(state, buyers[1], sellerId, 'food', 100, 50, config(), () => 'q3b').ok).toBe(true);
+    expect(committedExportUnitsOf(state, sellerId, 'food')).toBe(300);
+    // ...a third buyer finds the quota exhausted (a hard cap, no path around).
+    expect(signContract(state, order[3], sellerId, 'food', 1, 50, config(), () => 'q3c').ok).toBe(false);
+    executeMonthlyContracts(state, order, config(), 51);
+    // Each received EXACTLY its share; Σ deliveries = the quota itself.
+    expect(state.economy.resources[buyers[0]]!.imports.food ?? 0).toBe(200);
+    expect(state.economy.resources[buyers[1]]!.imports.food ?? 0).toBe(100);
+    expect(state.economy.resources[sellerId]!.exports.food ?? 0).toBe(300);
+  });
+
+  it('Q4 the AI\'s direct construction-materials deal cannot bypass the quota (no other trade path exists)', () => {
+    const state = context.state;
+    state.economy.contracts = [];
+    const order = ids();
+    const buyerId = order[0];
+    // Exactly ONE seller on the industrial market, with a 60-unit quota:
+    // an AI needing far more can only EVER buy the quota — the direct-deal
+    // path respects the same sale limit as the contract path.
+    for (const other of order.slice(1)) {
+      if (other === order[1]) continue;
+      state.economy.resources[other]!.stock.industrial =
+        safetyReserveUnits(state.economy.resources[other]!.consumption, 'industrial', config());
+    }
+    const sellerId = order[1];
+    giveQuota(sellerId, 'industrial', 60);
+    state.economy.treasury[buyerId] = 1_000_000;
+    const before = state.economy.resources[sellerId]!.stock.industrial ?? 0;
+    const missing = Math.max(0, 200 - Math.floor(state.economy.resources[buyerId]!.stock.industrial ?? 0));
+    const secured = aiSecureConstructionMaterials(state, buyerId, config(), 200);
+    expect(secured).toBe(missing <= 60); // the quota alone cannot serve a bigger need
+    const bought = before - (state.economy.resources[sellerId]!.stock.industrial ?? 0);
+    expect(bought).toBe(Math.min(missing, 60)); // exactly the quota — never more
   });
 });

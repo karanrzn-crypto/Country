@@ -70,6 +70,7 @@ import {
   buildingProductionOf,
   spendBuildingReserves,
   specializedBaselineProduction,
+  economicBudgetProductionFactor,
   satisfactionPenaltyTotalOf
 } from './resources';
 import { executeMonthlyContracts } from './contracts';
@@ -174,8 +175,15 @@ export function runEconomyCycle(
   // shortage check (step ۴) measures the deficit against what the country
   // actually HAD when the month began, never double-counting this month's
   // production. Buildings now produce through QUALITY × POTENTIAL ×
-  // DIMINISHING × level (spec §3/§7/§15); extractive buildings pull from
-  // their FINITE reserve, which this pass spends (spec §8).
+  // DIMINISHING × level × BUDGET (spec §3/§7/§15 + the budget directive
+  // §2); extractive buildings pull from their FINITE reserve, which this
+  // pass spends (spec §8).
+  //
+  // THE ECONOMIC BUDGET (the budget directive §2): the ONE shared factor
+  // (economicBudgetProductionFactor — 50 neutral, +1 point above 50 lifts,
+  // below 50 cuts) scales EVERY production path: the buildings carry it
+  // already (singleBuildingOutput), the deposits and the specialized
+  // baseline take it here. There is no production route that skips it.
   const productionCache = new Map<string, Record<string, number>>();
   const stockAtMonthStart = new Map<string, Record<string, number>>();
   const extractions = new Map<string, Record<string, number>>();
@@ -187,14 +195,18 @@ export function runEconomyCycle(
       startStock[resourceId] = Math.max(0, Math.round(record.stock[resourceId] ?? 0));
     }
     stockAtMonthStart.set(countryId, startStock);
+    const budgetFactor = economicBudgetProductionFactor(state, countryId, config);
     const buildings = buildingProductionOf(state, mapModel, countryId, config);
-    record.production = { ...deposits };
+    record.production = {};
+    for (const [resourceId, amount] of Object.entries(deposits)) {
+      record.production[resourceId] = Math.round(amount * budgetFactor);
+    }
     for (const [resourceId, amount] of Object.entries(buildings.totals)) {
       record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
     }
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
     for (const [resourceId, amount] of Object.entries(baseline)) {
-      record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
+      record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount * budgetFactor);
     }
     extractions.set(countryId, buildings.extraction);
     if (applyStep) {

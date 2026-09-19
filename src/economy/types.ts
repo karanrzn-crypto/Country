@@ -240,10 +240,40 @@ export interface StartingStockConfig {
   readonly flavorByRank: readonly number[];
 }
 
+/**
+ * THE MARKET SALE QUOTA (the sale-quantity directive): every country puts
+ * up a FIXED, LIMITED monthly amount of each good for sale — a config SHARE
+ * of its real export capacity (stock above the safety reserve). The number
+ * is derived ONLY from the seller's own state, NEVER from any buyer's
+ * shortage or need; a buyer's demand can never inflate it.
+ */
+export interface MarketConfig {
+  /** Share of the real export capacity a country offers for sale (0..1;
+   *  0.5 → a country with 1,000 spare units puts up 500/month). */
+  readonly saleQuotaShare: number;
+}
+
+/**
+ * THE ECONOMIC BUDGET → PRODUCTION (the budget directive §2): the economic
+ * budget (0..100, TEN-point steps, 50 = neutral) scales ALL domestic
+ * production LINEARLY around 50 — (budgetPct − 50) × productionPerPoint.
+ * With 0.006: budget 60 → +6% production, 40 → −6%, 0 → −30%, 100 → +30%.
+ * ONE shared factor for EVERY production path (deposits, baseline and
+ * buildings) — no per-building formula.
+ */
+export interface EconomicBudgetConfig {
+  /** Production change per budget point away from the neutral 50. */
+  readonly productionPerPoint: number;
+}
+
 /** Data-driven tuning of the simple economy (economy.json). */
 export interface StrategicResourcesConfig {
   /** Deposit quantity (1..100) → monthly production multiplier. */
   readonly productionScale: number;
+  /** The market sale-quota rule (§market — the sellers' fixed offers). */
+  readonly market: MarketConfig;
+  /** The economic-budget production modifier (§budget — 50 = neutral). */
+  readonly economicBudget: EconomicBudgetConfig;
   /** Anti-famine safety buffer (§5): months of consumption kept out of
    *  exports — food its own (larger) reserve, others `reserveMonths`. */
   readonly safetyBuffer: { readonly foodMonths: number; readonly reserveMonths: number };
