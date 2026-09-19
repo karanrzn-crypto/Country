@@ -609,7 +609,13 @@ export class PresidentDashboard {
         buyer.setText(state.countries.countries[request.buyerId]?.name ?? request.buyerId);
         head.appendChild(buyer);
         const chip = this.create('span', `pd-request-status ${request.status}`);
-        chip.setText(request.status === 'approved' ? 'موافقت شد' : 'مخالفت شد');
+        chip.setText(
+          request.status === 'approved'
+            ? 'موافقت شد'
+            : request.status === 'expired'
+              ? 'بی‌پاسخ ماند'
+              : 'مخالفت شد'
+        );
         head.appendChild(chip);
         card.appendChild(head);
         const body = this.create('div', 'pd-request-detail');

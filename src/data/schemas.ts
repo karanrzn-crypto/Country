@@ -71,7 +71,8 @@ export const ECONOMY_SCHEMA: FieldSchema = {
           allowUnknown: false,
           fields: {
             saleQuotaShare: { type: 'number', min: 0, max: 1 },
-            requestCooldownMonths: { type: 'number', min: 0, max: 120, integer: true }
+            requestCooldownMonths: { type: 'number', min: 0, max: 120, integer: true },
+            requestTtlMonths: { type: 'optional', inner: { type: 'number', min: 1, max: 240, integer: true } }
           }
         },
         // Year-over-year demand growth (the demand directive — config):

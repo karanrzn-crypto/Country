@@ -136,8 +136,10 @@ export interface TradeRequest {
   readonly amountPerMonth: number;
   /** Money per unit offered (the BASE price at request time). */
   readonly price: number;
-  /** pending → approved | rejected (decided by the president). */
-  status: 'pending' | 'approved' | 'rejected';
+  /** pending → approved | rejected (decided by the president) | expired
+   *  (left unanswered past `market.requestTtlMonths` — a polite no that
+   *  keeps the inbox fresh and lets the asker re-file after the cooldown). */
+  status: 'pending' | 'approved' | 'rejected' | 'expired';
   /** The absolute month the request was created. */
   readonly createdAtMonth: number;
   /** Set when the president decides (approve or reject). */

@@ -111,7 +111,8 @@
     "productionScale": 1.92,
     "market": {
       "saleQuotaShare": 0.5,
-      "requestCooldownMonths": 6
+      "requestCooldownMonths": 6,
+      "requestTtlMonths": 12
     },
     "consumptionGrowth": {
       "graceYears": 5,

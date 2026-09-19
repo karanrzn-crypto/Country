@@ -431,7 +431,7 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               resourceId: { type: 'string' },
               amountPerMonth: { type: 'number', min: 1 },
               price: { type: 'number', min: 0 },
-              status: { type: 'enum', values: ['pending', 'approved', 'rejected'] },
+              status: { type: 'enum', values: ['pending', 'approved', 'rejected', 'expired'] },
               createdAtMonth: { type: 'number', min: 0 },
               decidedMonth: { type: 'optional', inner: { type: 'number', min: 0 } }
             }

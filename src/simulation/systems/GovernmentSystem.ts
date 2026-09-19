@@ -36,6 +36,7 @@ import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject, workforceCapacityOf, workforceUsedBy } from '../../economy/construction';
 import { stepEconomicEvents } from '../../economy/economicEvents';
+import { expireStaleExportRequests } from '../../economy/contracts';
 import { aiBuildingTypeId, aiSecureConstructionMaterials, aiTradeStep } from '../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
 import { cellQualityOf } from '../../economy/quality';
@@ -88,6 +89,10 @@ export class GovernmentSystem implements SimulationSystemDef {
           applyStep: true,
           month: currentMonth
         });
+        // THE REQUEST-TTL SWEEP (once per month-pass): unanswered export
+        // requests age into 'expired' — the president's inbox stays fresh
+        // and the asking country is free to re-ask after the cooldown.
+        expireStaleExportRequests(state, currentMonth, context.data.economyData.strategicResources);
       }
       for (const countryId of due) {
         const government = state.government.countries[countryId];

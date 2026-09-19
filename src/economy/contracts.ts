@@ -507,9 +507,9 @@ export function requestExport(
 }
 
 /**
- * TRUE while a REJECTED request for the same buyer+seller+good still holds
- * the cooldown (the president said no — the asking country waits
- * `market.requestCooldownMonths` before asking again).
+ * TRUE while a REJECTED (or unanswered-expired) request for the same
+ * buyer+seller+good still holds the cooldown — the asking country waits
+ * `market.requestCooldownMonths` before asking again.
  */
 export function exportRequestCooldownActive(
   state: GameState,
@@ -523,12 +523,38 @@ export function exportRequestCooldownActive(
   if (cooldown === 0) return false;
   return (state.economy.exportRequests ?? []).some(
     (entry) =>
-      entry.status === 'rejected' &&
+      (entry.status === 'rejected' || entry.status === 'expired') &&
       entry.buyerId === buyerId &&
       entry.sellerId === sellerId &&
       entry.resourceId === resourceId &&
       month - (entry.decidedMonth ?? entry.createdAtMonth) < cooldown
   );
+}
+
+/**
+ * EXPIRES stale PENDING export requests (the request-TTL rule): a request
+ * left unanswered for `market.requestTtlMonths` becomes 'expired' — a
+ * polite no that (a) keeps the president's inbox fresh (no decade-old
+ * dead rows) and (b) frees the asking country to re-ask (after the
+ * cooldown) with a size that fits the market as it is NOW. Returns the
+ * requests this sweep expired. Runs ONCE per month-pass (the caller).
+ */
+export function expireStaleExportRequests(
+  state: GameState,
+  month: number,
+  config: StrategicResourcesConfig
+): TradeRequest[] {
+  const ttl = config.market.requestTtlMonths;
+  if (ttl === undefined) return [];
+  const expired: TradeRequest[] = [];
+  for (const request of state.economy.exportRequests ?? []) {
+    if (request.status !== 'pending') continue;
+    if (month - request.createdAtMonth < Math.max(1, Math.round(ttl))) continue;
+    request.status = 'expired';
+    request.decidedMonth = month;
+    expired.push(request);
+  }
+  return expired;
 }
 
 export type DecideRequestResult =

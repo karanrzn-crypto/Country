@@ -264,6 +264,11 @@ export interface MarketConfig {
   /** After a REJECTED export request, the buyer waits THIS many months
    *  before asking the same seller for the same good again. */
   readonly requestCooldownMonths: number;
+  /** PENDING export requests older than THIS many months expire on their
+   *  own («بی‌پاسخ ماند») — the president's inbox stays fresh and the
+   *  asking country is free to re-ask (after the cooldown). Optional:
+   *  legacy configs without it never expire pending requests. */
+  readonly requestTtlMonths?: number;
 }
 
 /**
