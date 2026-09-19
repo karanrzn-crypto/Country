@@ -1,5 +1,5 @@
 /**
- * THE ECONOMIC CYCLE (spec §10) — one transparent, deterministic pass that
+ * THE ECONOMIC CYCLE (spec §12) — one transparent, deterministic pass that
  * advances the WHOLE simple economy by ONE campaign month:
  *
  *   شروع ماه
@@ -11,16 +11,25 @@
  *   ۳. تولید منابع          — deposits + specialized baseline + buildings
  *                             (× economy level) → stock += P
  *     ↓
- *   ۴. مصرف کالاها          — population base for EVERY good (§6) + military
- *                             wear → stock −= C, honest shortage
+ *   ۴. اجرای قراردادهای تجاری — every ACTIVE trade contract (§6/§24)
+ *                             delivers REAL units from the seller's stock
+ *                             to the buyer's stock (§9 — honest partial
+ *                             deliveries, never faked) + ledger money;
+ *                             the records' trade lines restart here (§11 —
+ *                             no stale accumulations)
  *     ↓
- *   ۵. هزینه ارتش/دولت/زیرساخت — recorded, not applied
+ *   ۵. مصرف کالاها          — population base for EVERY good (§6) + military
+ *                             wear → stock −= C, the ONE honest shortage
+ *                             computation of the month:
+ *
+ *                             shortage = C − P − month-start stock − deliveries
+ *
+ *                             (§11's formula — domestic production + actual
+ *                             imports + existing stock against consumption;
+ *                             NOTHING overwrites it afterwards — §19)
  *     ↓
- *   ۶. تجارت               — world trade: shortage countries buy from
- *                             surplus countries at the BASE price (§6/§7);
- *                             units AND ledger lines move, treasury not yet;
- *                             the shortage record becomes the POST-trade
- *                             uncovered deficit (imports compensated — §8)
+ *   ۶. هزینه ارتش/دولت/زیرساخت — recorded, not applied; the ledger's trade
+ *                             line reads THIS month's contract money
  *     ↓
  *   ۷. محاسبه پول نهایی     — treasury += tax + trade − expenses
  *                             (ONE treasury write per country, floored at 0)
@@ -36,8 +45,11 @@
  *  - ONE writer: this pass is the only thing that mutates resource records
  *    monthly, the ledger, and (with the construction/military systems) the
  *    stockpile — no parallel systems, no double application;
- *  - trade never touches the treasury directly: the money lands in step ۷
- *    through the ledger (one honest تغییر خزانه per month);
+ *  - the shortage is computed EXACTLY ONCE per month, from THIS month's
+ *    real numbers, and is never reset or overwritten afterwards (§11/§19 —
+ *    a shortage only ends when the real supply really covers the need);
+ *  - trade never touches the treasury directly: contract money lands in
+ *    step ۷ through the ledger (one honest تغییر خزانه per month);
  *  - every amount is floored at zero — stock, treasury, shortage;
  *  - `applyStep: false` turns the pass into a pure SEED (state creation and
  *    load heal) that computes production/consumption and fills starting
@@ -57,10 +69,10 @@ import {
   countryResourceConsumption,
   buildingProductionOf,
   spendBuildingReserves,
-  safetyReserveUnits,
   specializedBaselineProduction,
   satisfactionPenaltyTotalOf
 } from './resources';
+import { executeMonthlyContracts } from './contracts';
 import { emptyCountryResourceState, emptyCountryFinanceState } from './resourceTypes';
 import { roundTo } from '../utils/math';
 
@@ -71,6 +83,8 @@ export interface EconomyCycleOptions {
    * those only seed the records (a heal must not spend a month).
    */
   readonly applyStep?: boolean;
+  /** The absolute campaign month (contract bookkeeping timestamps). */
+  readonly month?: number;
 }
 
 /** The base tax RATE of each tax level (spec §9 — کم/متوسط/زیاد). */
@@ -193,7 +207,18 @@ export function runEconomyCycle(
     }
   }
 
-  // —— ۴. مصرف غذا (spec §5) → stock −= consumption + shortage detection ——
+  // —— ۴. اجرای قراردادهای تجاری (spec §9/§12) → REAL deliveries ——
+  // Contracts signed by presidents (player or AI) deliver REAL units from
+  // the seller's stock to the buyer's stock — BEFORE consumption, so the
+  // month's imports are part of THIS month's real supply (§15). The
+  // execution also restarts the records' trade lines (imports/exports/
+  // tradeIncome/tradeExpense): from here they hold EXACTLY this month's
+  // contract flows (§11 — no stale accumulations, no hidden imports).
+  if (applyStep) {
+    executeMonthlyContracts(state, order, config, options.month ?? 0);
+  }
+
+  // —— ۵. مصرف کالاها (spec §5/§11/§13/§14) → stock −= consumption + THE shortage ——
   for (const countryId of order) {
     const record = state.economy.resources[countryId]!;
     record.consumption = countryResourceConsumption(state, countryId, config);
@@ -209,9 +234,21 @@ export function runEconomyCycle(
       const consumed = record.consumption[resourceId] ?? 0;
       const before = record.stock[resourceId] ?? 0;
       record.stock[resourceId] = Math.max(0, Math.round(before - consumed));
-      // Honest shortage (§5): consumption − production − the warehouse's
-      // month-start buffer. Positive = the country ran DRY this month.
-      const gap = consumed - (record.production[resourceId] ?? 0) - Math.max(0, startStock[resourceId] ?? 0);
+      // THE honest shortage (spec §11's formula, computed EXACTLY ONCE —
+      // §19: nothing overwrites it afterwards):
+      //
+      //   available supply = production + contract deliveries + the
+      //                      month-start warehouse buffer
+      //   shortage         = consumption − available supply
+      //
+      // Zero stock NEVER means zero shortage (§13/§14) — a dry warehouse
+      // with a hungry population is exactly when the shortage is real.
+      const deliveries = record.imports[resourceId] ?? 0;
+      const gap =
+        consumed -
+        (record.production[resourceId] ?? 0) -
+        Math.max(0, startStock[resourceId] ?? 0) -
+        deliveries;
       const short = Math.max(0, Math.round(gap));
       if (short > 0) {
         record.shortage[resourceId] = short;
@@ -228,7 +265,10 @@ export function runEconomyCycle(
     }
   }
 
-  // —— ۵. هزینه‌ها: ارتش / دولت / زیرساخت (spec §3) ——
+  // —— ۶. هزینه‌ها: ارتش / دولت / زیرساخت (spec §3) ——
+  // AFTER the contract step: the ledger's تجارت line reads THIS month's
+  // contract money (deliveries − payments), applied to the treasury in
+  // step ۷ EXACTLY once.
   for (const countryId of order) {
     const country = state.countries.countries[countryId];
     if (country === undefined) continue;
@@ -247,11 +287,6 @@ export function runEconomyCycle(
         )
       : 0;
     finance.lastTradeIncome = tradeNet;
-  }
-
-  // —— ۶. تجارت (spec §6/§7): shortage buys from surplus at the BASE price ——
-  if (applyStep) {
-    resolveWorldTrade(state, order, resourceIds, config);
   }
 
   // —— ۷. پول نهایی (spec §3): ONE treasury write per country ——
@@ -320,142 +355,6 @@ export function economyLevelTargetOf(
   ).length;
   const target = spec.targetBase + balanceTerm - uncovered * spec.shortagePenalty;
   return Math.min(100, Math.max(0, target));
-}
-
-/**
- * THE WORLD TRADE (spec §6/§7) — the ONE trade path of the simple economy.
- * Every shortage country tries to buy its deficit from surplus countries at
- * the resource's BASE price; real units and real ledger money move together.
- *
- * Timing: this pass FIRST resets the records' tradeIncome/tradeExpense —
- * so a record always holds THIS month's trade money. The LEDGER line
- * (finance.lastTradeIncome) is written in step ۵ from the PREVIOUS pass's
- * accumulation (plus any manual deals the player made since), and step ۷
- * applies THAT number to the treasury — trade money is applied exactly
- * once, one month later, never double-counted.
- *
- * Deterministic: most urgent buyer first (largest deficit, tie → country
- * id), largest seller stock first (tie → country id). A buyer with no money
- * simply buys nothing (no debt exists). Sellers never dip below their
- * safety reserve (food keeps the larger buffer — §5's anti-famine guard).
- *
- * BUDGET HONESTY (spec §11/§12): one buyer buys in SEVERAL resource passes
- * per month — the affordability of EVERY deal draws down the SAME running
- * budget, so a country can never commit more import money than its
- * treasury holds (food is settled first — config order — the essential
- * good is protected). Without this, the per-resource caps would each see
- * the whole treasury and over-commit it, draining the floor month after
- * month into a famine the real budget could never have caused.
- *
- * POST-trade honesty (spec §8): whatever the imports covered is no longer a
- * shortage — every buyer's record keeps only the UNCOVERED deficit, the ONE
- * number the coverage ratio, the satisfaction penalty, opinion and the
- * population-growth guard all read.
- */
-export function resolveWorldTrade(
-  state: GameState,
-  order: readonly string[],
-  resourceIds: readonly string[],
-  config: StrategicResourcesConfig
-): void {
-  for (const countryId of order) {
-    const record = state.economy.resources[countryId];
-    if (record !== undefined) {
-      record.tradeIncome = 0;
-      record.tradeExpense = 0;
-      record.imports = {};
-      record.exports = {};
-    }
-  }
-  // The running IMPORT BUDGET of every buyer (spec §11/§12): every deal
-  // this month draws it down — the sum of a country's deals can never
-  // exceed what its treasury actually holds.
-  const importBudget = new Map<string, number>();
-  for (const countryId of order) {
-    importBudget.set(countryId, Math.max(0, state.economy.treasury[countryId] ?? 0));
-  }
-  for (const resourceId of resourceIds) {
-    const price = config.resources.find((resource) => resource.id === resourceId)?.price ?? 0;
-    if (price <= 0) continue;
-
-    // Buyers: uncovered consumption this month (shortage), most urgent first.
-    const buyers = order
-      .map((countryId) => ({
-        countryId,
-        needed: state.economy.resources[countryId]?.shortage[resourceId] ?? 0
-      }))
-      .filter((entry) => entry.needed > 0)
-      .sort((a, b) => b.needed - a.needed || (a.countryId < b.countryId ? -1 : 1));
-
-    // Sellers: real free stock above the safety reserve, largest first.
-    const sellers = order
-      .map((countryId) => {
-        const record = state.economy.resources[countryId]!;
-        const reserve = safetyReserveUnits(record.consumption, resourceId, config);
-        return {
-          countryId,
-          spare: Math.floor((record.stock[resourceId] ?? 0) - reserve)
-        };
-      })
-      .filter((entry) => entry.spare > 0)
-      .sort((a, b) => b.spare - a.spare || (a.countryId < b.countryId ? -1 : 1));
-
-    for (const buyer of buyers) {
-      let needed = buyer.needed;
-      for (const seller of sellers) {
-        if (needed <= 0) break;
-        if (seller.countryId === buyer.countryId) continue;
-        const sellerRecord = state.economy.resources[seller.countryId]!;
-        const buyerRecord = state.economy.resources[buyer.countryId]!;
-        // The seller's spare shrinks as the resource trades this month.
-        const spare = Math.floor(
-          (sellerRecord.stock[resourceId] ?? 0) -
-            safetyReserveUnits(sellerRecord.consumption, resourceId, config)
-        );
-        if (spare <= 0) continue;
-        const affordable =
-          price > 0
-            ? Math.floor((importBudget.get(buyer.countryId) ?? 0) / price)
-            : needed;
-        const amount = Math.max(0, Math.min(needed, spare, affordable));
-        if (amount <= 0) continue;
-
-        const cost = roundTo(amount * price, 2);
-        // REAL units move: seller −, buyer +.
-        sellerRecord.stock[resourceId] = (sellerRecord.stock[resourceId] ?? 0) - amount;
-        buyerRecord.stock[resourceId] = Math.round((buyerRecord.stock[resourceId] ?? 0) + amount);
-        // The buyer's import budget draws down across ALL resource passes.
-        importBudget.set(buyer.countryId, roundTo((importBudget.get(buyer.countryId) ?? 0) - cost, 2));
-        // Ledger lines (treasury is written ONCE in step ۷ — never here).
-        buyerRecord.imports[resourceId] = Math.round((buyerRecord.imports[resourceId] ?? 0) + amount);
-        sellerRecord.exports[resourceId] = Math.round((sellerRecord.exports[resourceId] ?? 0) + amount);
-        buyerRecord.tradeExpense = roundTo(buyerRecord.tradeExpense + cost, 2);
-        sellerRecord.tradeIncome = roundTo(sellerRecord.tradeIncome + cost, 2);
-        seller.spare -= amount;
-        needed -= amount;
-      }
-    }
-  }
-
-  // POST-trade deficit bookkeeping (spec §8): imports shrink the shortage;
-  // only the UNCOVERED part survives as the record's shortage. A deficit
-  // the market covered resets that good's duration clock too (§13 measures
-  // the CONSECUTIVE months the people were actually left unsupplied).
-  for (const countryId of order) {
-    const record = state.economy.resources[countryId];
-    if (record === undefined) continue;
-    for (const resourceId of resourceIds) {
-      const remaining = Math.max(
-        0,
-        Math.round((record.shortage[resourceId] ?? 0) - (record.imports[resourceId] ?? 0))
-      );
-      if (remaining > 0) record.shortage[resourceId] = remaining;
-      else {
-        delete record.shortage[resourceId];
-        delete record.shortageMonths[resourceId];
-      }
-    }
-  }
 }
 
 /** City-area count of ONE country (the infrastructure expense base). */

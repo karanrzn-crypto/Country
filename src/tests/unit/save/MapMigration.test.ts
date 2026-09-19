@@ -34,7 +34,7 @@ import { DEFAULT_CONFIG } from '../../../config/configTypes';
  *   economy-level record appears
  * Old saves must keep loading; nothing is destroyed.
  */
-describe('save migrations (v1 → … → v18)', () => {
+describe('save migrations (v1 → … → v19)', () => {
   const v1 = {
     state: {
       world: { worldId: 'demo-country' },
@@ -563,6 +563,36 @@ describe('save migrations (v1 → … → v18)', () => {
     expect(economy.construction.country_0.projects[0]).toMatchObject({ id: 'p1', cellKey: '' });
     // The economy level record appears (the heal fills the neutral start).
     expect(economy.economyLevel).toEqual({});
+  });
+
+  it('v18→v19: the CONTRACT trade economy — the empty contract book appears', () => {
+    const v18 = {
+      state: {
+        economy: {
+          treasury: { country_0: 5000 },
+          resources: {
+            country_0: {
+              stock: { food: 900 }, production: {}, consumption: {}, imports: {}, exports: {},
+              shortage: {}, shortageMonths: {}, tradeIncome: 0, tradeExpense: 0
+            }
+          },
+          finance: { country_0: { lastTaxIncome: 90, lastTradeIncome: 0, lastArmyExpense: 10, lastGovernmentExpense: 5, lastInfrastructureExpense: 2, lastBalance: 73 } },
+          construction: { country_0: { projects: [] } },
+          buildings: { country_0: {} },
+          economyLevel: { country_0: 50 }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v18, 18, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, any> } }).state.economy;
+    // The additive contract book appears EMPTY — old saves never held any
+    // agreement (§6: contracts are signed during the campaign only).
+    expect(economy.contracts).toEqual([]);
+    // Everything else survived untouched.
+    expect(economy.treasury.country_0).toBe(5000);
+    expect(economy.resources.country_0.shortageMonths).toEqual({});
   });
 
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {

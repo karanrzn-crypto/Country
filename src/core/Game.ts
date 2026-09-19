@@ -38,7 +38,7 @@ import {
   distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
-import { purchaseResource } from '../economy/purchase';
+import { signContract, cancelContract } from '../economy/contracts';
 import { startProject } from '../economy/construction';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
@@ -1103,28 +1103,56 @@ export class Game {
 
   // ————————————————— Phase 3 — the simple economy commands —————————————————
 
-  /** ONE explicit deal (spec §6): buy units of a resource from ONE seller. */
-  economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean {
+  /**
+   * Signs ONE monthly trade contract (spec §6/§16): the buyer country
+   * commits to `amountPerMonth` units of the good from the seller EVERY
+   * month at the base price, until cancelled. The seller's REAL export
+   * capacity is checked at signing (§16) — the market can never promise
+   * goods a country does not truly have.
+   */
+  economySignContract(
+    countryId: string,
+    sellerId: string,
+    resourceId: string,
+    amountPerMonth: number
+  ): boolean {
     this.assertInitialized();
-    const result = purchaseResource(
+    const result = signContract(
       this.state,
       countryId,
       sellerId,
       resourceId,
-      amount,
-      this.data.economyData.strategicResources
+      amountPerMonth,
+      this.currentMonth(),
+      this.data.economyData.strategicResources,
+      (kind) => this.ids.next(kind)
     );
     if (!result.ok) {
-      this.log.debug(`buyResource blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId})`);
+      this.log.debug(
+        `signContract blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId})`
+      );
       return false;
     }
-    this.events.emit('economy.resourceBought', {
+    this.events.emit('economy.contractSigned', {
+      contractId: result.contract.id,
       buyerId: countryId,
-      sellerId: result.sellerId,
-      resourceId: result.resourceId,
-      amount: result.amount,
-      cost: result.cost
+      sellerId,
+      resourceId,
+      amountPerMonth: result.contract.amountPerMonth
     });
+    return true;
+  }
+
+  /** Cancels ONE of the caller's contracts (spec §7) — the delivery stops
+   *  from the next monthly execution on (§18). */
+  economyCancelContract(countryId: string, contractId: string): boolean {
+    this.assertInitialized();
+    const result = cancelContract(this.state, contractId, countryId, this.currentMonth());
+    if (result !== 'ok') {
+      this.log.debug(`cancelContract blocked: ${result} (${countryId}, ${contractId})`);
+      return false;
+    }
+    this.events.emit('economy.contractCancelled', { contractId, countryId });
     return true;
   }
 

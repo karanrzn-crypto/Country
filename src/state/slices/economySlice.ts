@@ -21,7 +21,8 @@ import type {
   CountryResourceState,
   CountryFinanceState,
   CountryConstructionState,
-  BuildingRecord
+  BuildingRecord,
+  TradeContract
 } from '../../economy/resourceTypes';
 
 export interface EconomySlice {
@@ -62,6 +63,15 @@ export interface EconomySlice {
    * (economyCycle step ۸) and scales building production around 50.
    */
   economyLevel: Record<string, number>;
+  /**
+   * The world's TRADE CONTRACTS (spec §6/§24): every signed monthly
+   * agreement — active AND cancelled (the قراردادها panel reads the real
+   * State, §8). ONE global list; a country's contracts are the records
+   * where it is the buyer or the seller. The monthly cycle executes the
+   * active ones (step ۴ — real deliveries, §9); signing reserves the
+   * seller's real export capacity (§16).
+   */
+  contracts: TradeContract[];
 }
 
 export function addStockpile(

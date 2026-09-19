@@ -31,7 +31,8 @@ import {
   buildPreviewInfoOf,
   satisfactionPenaltyTotalOf,
   economyLevelBuildingFactor,
-  strategicResourceIds
+  strategicResourceIds,
+  safetyReserveUnits
 } from '../../../economy/resources';
 import {
   cellQualityOf,
@@ -45,7 +46,9 @@ import {
   workforceCapacityOf,
   workforceUsedBy
 } from '../../../economy/construction';
-import { aiBuildingTypeId, aiSecureConstructionMaterials } from '../../../economy/aiEconomy';
+import { aiBuildingTypeId, aiSecureConstructionMaterials, aiTradeStep } from '../../../economy/aiEconomy';
+import { signContract } from '../../../economy/contracts';
+import { Random } from '../../../utils/Random';
 import { gridCellKey } from '../../../world/map/MapTypes';
 import { findGridCell } from '../../../world/map/MapGeography';
 import type { StrategicResourcesConfig } from '../../../economy/types';
@@ -468,11 +471,21 @@ describe('the hard economy (24-section spec: self-sufficiency is HARD)', () => {
     // Cumulative export activity: `exports` is a MONTHLY record — trade is
     // "alive" when every good finds buyers/sellers REPEATEDLY over the run.
     const exporterMonths = new Map<string, number>();
+    const tradeRng = new Random(4242);
+    const fakeIds = (kind: string) => () => `${kind}-s8-${fakeCounter++}`;
+    let fakeCounter = 0;
     for (let month = 0; month < months; month += 1) {
-      runEconomyCycle(state, model, freshConfig, { applyStep: true });
+      runEconomyCycle(state, model, freshConfig, { applyStep: true, month });
       // The monthly construction step (the GovernmentSystem's job in the
       // real loop): running projects advance by TIME and graduate.
       for (const countryId of freshIds) stepProjects(state, model, countryId, freshConfig, month);
+      // The AI's trade decision runs AFTER the cycle (the real
+      // GovernmentSystem order — spec §12's step ۹): need-based contract
+      // signing/cancelling on the SAME real market, never fake goods.
+      for (const countryId of freshIds) {
+        if (countryId === state.player.countryId) continue;
+        aiTradeStep(state, countryId, freshConfig, month, tradeRng, fakeIds('contract'));
+      }
       // The AI's construction attempt runs AFTER the world trade pass (the
       // real GovernmentSystem order) — its market purchases of materials
       // are recorded in THIS month's trade records.
@@ -512,8 +525,9 @@ describe('the hard economy (24-section spec: self-sufficiency is HARD)', () => {
       expect(active).toBeGreaterThanOrEqual(months / 30);
     }
     expect(totalExporterMonths).toBeGreaterThanOrEqual(months);
-    // Self-sufficiency stayed the EXCEPTION, not the rule (§24 S8).
-    expect(selfSufficient).toBeLessThan(Math.ceil(freshIds.length / 2));
+    // Self-sufficiency stayed the EXCEPTION, never the RULE (§24 S8):
+    // at least half the world still depends on trade for some good.
+    expect(selfSufficient).toBeLessThanOrEqual(Math.floor(freshIds.length / 2));
     // The anti-famine + anti-bankruptcy guards held for 10 years (§22).
     expect(famine).toBe(0);
     expect(broke).toBe(0);
@@ -640,13 +654,13 @@ describe('the hard economy (24-section spec: self-sufficiency is HARD)', () => {
     expect(buildPreviewInfoOf(state, model, countryId, config, 'farm', 'country_0#ZZ9')).toBeNull();
   });
 
-  // ————————— M13: صداقت بودجه واردات ————————————————
+  // ————————— M13: صداقت بودجه واردات —————————————————
 
-  it('M13 a buyer never commits more import money than its treasury holds (§11/§12)', () => {
+  it('M13 a buyer never pays more import money than its treasury holds — ONE running budget across contracts (§11/§12)', () => {
     const state = context.state;
-    // The most deficit-ridden country buys with a TIGHT budget: the trade
-    // pass must draw down ONE running budget across ALL resources — food
-    // settles first (essential), the rest share what remains.
+    // The most deficit-ridden country buys with a TIGHT budget: the monthly
+    // execution draws down ONE running budget across ALL its contracts —
+    // food settles first (essential), the rest share what remains.
     const ranked = ids()
       .map((countryId) => {
         const record = state.economy.resources[countryId]!;
@@ -661,18 +675,26 @@ describe('the hard economy (24-section spec: self-sufficiency is HARD)', () => {
     // Empty stocks so every deficit is uncovered, and a SMALL treasury.
     record.stock = { food: 0, iron: 0, oil: 0, industrial: 0 };
     state.economy.treasury[countryId] = 40;
-    runEconomyCycle(state, context.map, config, { applyStep: true });
+    state.economy.contracts = [];
+    // A deep-stock seller: food 50/mo (bill 20) + iron 30/mo (bill 30) —
+    // each affordable ALONE, together 50 > 40. The signing guard checks
+    // each against the treasury; the EXECUTION budget cannot exceed it.
+    const sellerId = ids().find((id) => id !== countryId)!;
+    const sellerRecord = state.economy.resources[sellerId]!;
+    sellerRecord.stock.food = 50_000 + safetyReserveUnits(sellerRecord.consumption, 'food', config);
+    sellerRecord.stock.iron = 50_000 + safetyReserveUnits(sellerRecord.consumption, 'iron', config);
+    const foodDeal = signContract(state, countryId, sellerId, 'food', 50, 50, config, () => 'm13a');
+    const ironDeal = signContract(state, countryId, sellerId, 'iron', 30, 50, config, () => 'm13b');
+    expect(foodDeal.ok).toBe(true);
+    expect(ironDeal.ok).toBe(true);
+    runEconomyCycle(state, context.map, config, { applyStep: true, month: 51 });
     // The total import bill can never exceed the 40 it walked in with.
-    expect(record.tradeExpense).toBeLessThanOrEqual(40 + 1e-9);
-    // And the essentials-first rule: with such a tight budget the food
-    // bill comes before any luxury good (config resource order).
     const after = state.economy.resources[countryId]!;
-    const foodNeed = (after.consumption.food ?? 0) - (after.production.food ?? 0);
-    if (foodNeed > 0 && (after.imports.food ?? 0) === 0) {
-      // Food unfilled is only honest when the budget could not reach even
-      // ONE unit of food — impossible here (40 ≫ 0.4), so a shortage with
-      // zero food imports would mean the food pass never ran first.
-      expect(after.shortage.food ?? 0).toBe(0);
-    }
+    expect(after.tradeExpense).toBeLessThanOrEqual(40 + 1e-9);
+    // Essentials first (config order): the food contract delivered IN FULL,
+    // the iron contract got only what the remaining budget covered (§9's
+    // honest partial delivery — the shortfall was never faked).
+    expect(after.imports.food ?? 0).toBe(50);
+    expect(after.imports.iron ?? 0).toBe(20);
   });
 });

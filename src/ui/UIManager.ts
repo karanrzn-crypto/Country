@@ -133,9 +133,18 @@ export class UIManager implements PhaseSystem {
         }
       }),
       // —— Phase 3 simple-economy events: map panel + dashboard refresh ——
-      // Purchases/construction move the dashboard's live lists.
-      this.events.on('economy.resourceBought', ({ buyerId }) => {
-        if (buyerId === context.state.player.countryId) this.dashboard.refresh();
+      // Contracts/construction move the dashboard's live lists.
+      this.events.on('economy.contractSigned', ({ buyerId }) => {
+        if (buyerId === context.state.player.countryId) {
+          this.notify('info', 'قرارداد تجاری', 'قرارداد ماهانه امضا شد — تحویل هر ماه انجام می‌شود.');
+          this.dashboard.refresh();
+        }
+      }),
+      this.events.on('economy.contractCancelled', ({ countryId }) => {
+        if (countryId === context.state.player.countryId) {
+          this.notify('info', 'قرارداد تجاری', 'قرارداد لغو شد — تحویل ماه بعد انجام نمی‌شود.');
+          this.dashboard.refresh();
+        }
       }),
       this.events.on('economy.constructionStarted', ({ countryId }) => {
         if (countryId === context.state.player.countryId) {

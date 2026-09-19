@@ -19,7 +19,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createTestGame } from '../../helpers/testGame';
 import type { Game } from '../../../core/Game';
 import type { SystemContext } from '../../../core/GameContext';
-import { runEconomyCycle, resolveWorldTrade } from '../../../economy/economyCycle';
+import { runEconomyCycle } from '../../../economy/economyCycle';
 import {
   coverageOf,
   satisfactionPenaltyOf,
@@ -32,8 +32,10 @@ import {
   cellIsUnderConstruction,
   cellUnderConstruction,
   cellEconomyTintOf,
-  strategicResourceIds
+  strategicResourceIds,
+  safetyReserveUnits
 } from '../../../economy/resources';
+import { signContract, executeMonthlyContracts, committedExportUnitsOf } from '../../../economy/contracts';
 import { startProject, stepProjects, projectMonthsRemaining } from '../../../economy/construction';
 import { aiBuildingTypeId } from '../../../economy/aiEconomy';
 import { economyTintRGB, rgb } from '../../../rendering/map/MapSurface';
@@ -167,14 +169,23 @@ describe('wider simple economy (11-section spec)', () => {
     const spec = config.economyLevel;
     state.economy.economyLevel[countryId] = spec.start;
 
-    // A strongly profitable month (real trade money) drags the level UP by
-    // at most maxStep — the balance term is capped, the drift is capped.
-    state.economy.resources[countryId]!.tradeIncome = 1000;
-    state.economy.resources[countryId]!.tradeExpense = 0;
-    runEconomyCycle(state, context.map, config, { applyStep: true });
+    // A strongly profitable month (REAL contract sales) drags the level UP
+    // by at most maxStep — the balance term is capped, the drift is capped.
+    state.economy.contracts = [];
+    const sellerRecord = state.economy.resources[countryId]!;
+    sellerRecord.stock.oil = 100_000 +
+      safetyReserveUnits(sellerRecord.consumption, 'oil', config);
+    const tradeBuyerId = ids().find((id) => id !== countryId)!;
+    state.economy.treasury[tradeBuyerId] = 1_000_000;
+    const sale = signContract(state, tradeBuyerId, countryId, 'oil', 5000, 50, config, () => 'r4');
+    expect(sale.ok).toBe(true);
+    runEconomyCycle(state, context.map, config, { applyStep: true, month: 51 });
+    // The delivery REALLY happened (5000 oil × base price).
+    expect(sellerRecord.exports.oil ?? 0).toBe(5000);
     const afterGood = state.economy.economyLevel[countryId]!;
     expect(afterGood).toBeGreaterThan(spec.start);
     expect(afterGood - spec.start).toBeLessThanOrEqual(spec.maxStepPerMonth + 1e-9);
+    state.economy.contracts = [];
 
     // An uncovered shortage drags the target DOWN — still gradual.
     state.economy.economyLevel[countryId] = spec.start + 20;
@@ -292,66 +303,88 @@ describe('wider simple economy (11-section spec)', () => {
     expect(total).toBeLessThan(0.2);
   });
 
-  // ————————————————————— §8 — واردات کمبود را جبران می‌کند ————————————————
+  // ————————————————————— §15 — واردات قراردادی بخشی از Supply است ————————
 
-  it('T9 world trade covers a shortage; the post-trade deficit shrinks (§8)', () => {
+  it('T9 contract deliveries are REAL supply: the honest shortage shrinks by exactly the delivery (§15/§12)', () => {
     const state = context.state;
     const order = ids();
-    const buyerId = order[0];
     for (const id of order) {
       state.economy.resources[id]!.shortage = {};
       state.economy.resources[id]!.imports = {};
       state.economy.resources[id]!.exports = {};
     }
+    state.economy.contracts = [];
+    // The buyer: the country with the LARGEST REAL food deficit (the cycle
+    // recomputes production + consumption from the map, so the deficit must
+    // be genuine, never hand-forced).
+    const ranked = order
+      .map((id) => {
+        const record = state.economy.resources[id]!;
+        return { id, gap: (record.consumption.food ?? 0) - (record.production.food ?? 0) };
+      })
+      .sort((a, b) => b.gap - a.gap);
+    expect(ranked[0].gap).toBeGreaterThan(0); // the calibration leaves deficits
+    const buyerId = ranked[0].id;
+    const gap = ranked[0].gap;
     const buyer = state.economy.resources[buyerId]!;
-    buyer.consumption = { ...buyer.consumption, food: 100 };
-    buyer.shortage.food = 100; // the deficit BEFORE trade
+    buyer.stock = { food: 0, iron: 0, oil: 0, industrial: 0 }; // no warehouse buffer
 
-    resolveWorldTrade(state, order, strategicResourceIds(config), config);
+    // A seller with a real surplus signs a contract covering HALF the gap:
+    // the delivery is REAL supply (§15) and the REMAINING shortage stays (§19).
+    const sellerId = order.find((id) => id !== buyerId)!;
+    const seller = state.economy.resources[sellerId]!;
+    seller.stock.food = 50_000 + safetyReserveUnits(seller.consumption, 'food', config);
+    state.economy.treasury[buyerId] = 100_000;
+    const amount = Math.max(1, Math.floor(gap / 2));
+    const signed = signContract(state, buyerId, sellerId, 'food', amount, 50, config, () => 'r9');
+    expect(signed.ok).toBe(true);
 
-    const uncovered = buyer.shortage.food ?? 0;
-    expect(buyer.imports.food ?? 0).toBe(100 - uncovered);
-    expect(uncovered).toBeLessThan(100); // imports compensated part of it
-    // Coverage reflects the post-trade situation (§8).
-    const postCoverage = coverageOf(buyer, 'food');
-    expect(postCoverage).toBeGreaterThan(0);
-    expect(postCoverage).toBeLessThanOrEqual(1);
+    runEconomyCycle(state, context.map, config, { applyStep: true, month: 51 });
+    expect(buyer.imports.food ?? 0).toBe(amount);
+    expect(buyer.shortage.food ?? 0).toBe(gap - amount); // EXACTLY the uncovered part
+    expect(buyer.shortage.food ?? 0).toBeGreaterThan(0);
+    expect(seller.exports.food ?? 0).toBe(amount);
+    // Coverage reflects the post-delivery situation (§8) — partially served.
+    const coverage = coverageOf(buyer, 'food');
+    expect(coverage).toBeGreaterThan(0);
+    expect(coverage).toBeLessThan(1);
   });
 
-  // ————————————————————— §5 — صادرات به چند کشور ————————————————————————
+  // ————————————————————— §17 — یک فروشنده، چند قرارداد ——————————————————————
 
-  it('T10 ONE surplus seller serves SEVERAL shortage buyers in the same pass (§5)', () => {
+  it('T10 ONE surplus seller serves SEVERAL buyers through SEPARATE contracts (§17) — within its real capacity (§16)', () => {
     const state = context.state;
     const order = ids();
     expect(order.length).toBeGreaterThanOrEqual(3);
+    // A clean contract book: only THIS seller's two agreements deliver.
+    state.economy.contracts = [];
     const sellerId = order[0];
     const buyers = order.slice(1, 3);
     const seller = state.economy.resources[sellerId]!;
-    seller.stock.industrial = 1_000_000; // a huge surplus of industrial goods
+    seller.stock.industrial = 1_000_000; // a huge real surplus of industrial goods
     seller.consumption = { ...seller.consumption, industrial: 10 };
 
-    // ONLY the two buyers need anything — they are the whole market.
     for (const id of order) {
-      const record = state.economy.resources[id]!;
-      record.imports = {};
-      record.exports = {};
-      record.shortage = {};
       state.economy.treasury[id] = 100_000; // everyone can pay
     }
-    for (const buyerId of buyers) {
-      state.economy.resources[buyerId]!.shortage.industrial = 40;
+    // Each buyer signs its OWN contract (§17 — one country, many buyers).
+    for (const [index, buyerId] of buyers.entries()) {
+      const signed = signContract(state, buyerId, sellerId, 'industrial', 40, 50, config, () => `r10-${index}`);
+      expect(signed.ok).toBe(true);
     }
+    // The seller's committed exports now total 80 (§16's reservation).
+    expect(committedExportUnitsOf(state, sellerId, 'industrial')).toBe(80);
 
-    resolveWorldTrade(state, order, ['industrial'], config);
-
-    // The 80 units split across BOTH buyers (40 each — the seller never ran dry).
+    executeMonthlyContracts(state, order, config, 51);
+    // BOTH buyers received their monthly 40 (the seller never ran dry).
     for (const buyerId of buyers) {
       expect(state.economy.resources[buyerId]!.imports.industrial ?? 0).toBe(40);
-      expect(state.economy.resources[buyerId]!.shortage.industrial ?? 0).toBe(0);
     }
     expect(seller.exports.industrial ?? 0).toBe(80);
     // Money moved to the seller at the BASE price (§6/§7).
-    expect(seller.tradeIncome).toBeCloseTo(80 * (config.resources.find((r) => r.id === 'industrial')?.price ?? 0), 2);
+    expect(seller.tradeIncome).toBeCloseTo(
+      80 * (config.resources.find((r) => r.id === 'industrial')?.price ?? 0), 2
+    );
   });
 
   // ————————————————————— چرخه کامل — اجرای ماه ————————————————————————————
@@ -359,8 +392,10 @@ describe('wider simple economy (11-section spec)', () => {
   it('T11 the full cycle runs once per month over FOUR goods without double-application (§9)', () => {
     const state = context.state;
     const countryId = ids()[0];
-    // A fully frozen world: no trade (prices 0), no growth, no level drift —
-    // every number is then exact and the ONE-write semantics is checkable.
+    // A fully frozen world: no trade (no contracts, prices 0), no growth,
+    // no level drift — every number is then exact and the ONE-write
+    // semantics is checkable.
+    state.economy.contracts = [];
     const frozen: StrategicResourcesConfig = {
       ...config,
       resources: config.resources.map((resource) => ({ ...resource, price: 0 })),

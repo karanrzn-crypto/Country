@@ -1,17 +1,18 @@
 /**
- * The ECONOMIC AI of ONE country (spec §16) — the PURE decision of WHAT to
- * build next; the GovernmentSystem owns WHEN (monthly chance, affordability
- * margin, project cap) and WHERE (a free cell of the country's own land —
- * one economic building per region, spec §1).
+ * The ECONOMIC AI of ONE country (spec §16) — the PURE decisions of WHAT
+ * to BUILD next and WHICH TRADE CONTRACTS to sign or drop; the
+ * GovernmentSystem owns WHEN (monthly chances, affordability margins,
+ * project caps) and WHERE (a free cell of the country's own land — one
+ * economic building per region, spec §1).
  *
- * The priority follows the country's REAL economic state (spec §16 — never
+ * The priorities follow the country's REAL economic state (spec §16 — never
  * random, never filling every region):
  *
  *   ۱. NEED FIRST — the largest UNCOVERED shortage wins (the record's
- *      post-trade deficit: imports were already tried and could not cover
- *      it). A food shortage → مزرعه, an oil shortage → میدان نفتی, iron →
- *      معدن آهن, industrial → کارخانه. Ties resolve by config resource
- *      order (deterministic).
+ *      honest deficit: contract deliveries were already tried and could
+ *      not cover it). A food shortage → مزرعه, an oil shortage → میدان
+ *      نفتی, iron → معدن آهن, industrial → کارخانه. Ties resolve by config
+ *      resource order (deterministic).
  *   ۲. CLOSE A REAL FLOW GAP where the country is actually GOOD (spec §16's
  *      «مزیت منطقه‌ای»): the strongest good that is (a) not already in
  *      display-surplus, (b) not yet covered with a 10% buffer, and (c) has
@@ -24,6 +25,12 @@
  *      a developed economy stops building (§24 S8: self-sufficiency must
  *      stay the exception, never the grind).
  *
+ * The TRADE side (spec §22/§23 — aiTradeStep) lives under the SAME rules:
+ * the AI signs an import contract only for a REAL uncovered shortage, only
+ * from a seller's REAL available surplus, at most ONE new contract per
+ * month, and NEVER a duplicate for a good it already imports (§23 — the
+ * existing contract continues). Contracts it no longer needs are cancelled.
+ *
  * Leaf module: state types + config only. Unit-testable without a system.
  */
 
@@ -32,6 +39,15 @@ import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { StrategicResourcesConfig } from './types';
 import { resourceDisplayStatusOf, safetyReserveUnits } from './resources';
 import { countryPotentialFactor } from './quality';
+import {
+  marketOffersOf,
+  hasActiveImportContract,
+  signContract,
+  cancelContract,
+  activeContractsOf,
+  unitPriceOf
+} from './contracts';
+import type { Random } from '../utils/Random';
 import { roundTo } from '../utils/math';
 
 /** The COVERAGE target of step ۲ (production ≥ consumption × THIS → built). */
@@ -40,13 +56,21 @@ const COVERAGE_TARGET = 1.1;
 const EXPORT_DEPTH_CAP = 2.0;
 
 /**
+ * The monthly chance an AI country TRIES to sign ONE import contract
+ * (spec §22 — the AI trades on the SAME real market as the player; the
+ * chance keeps the world's contracts from all appearing in one month).
+ */
+const AI_CONTRACT_CHANCE = 0.35;
+
+/**
  * Secures a country's CONSTRUCTION MATERIALS on the world market (spec §16
  * — «از بازار جهانی وارد کند»): the missing industrial-goods units are
- * BOUGHT from the largest real seller at the base price, exactly like the
- * manual deal (real units + real money move; a country with no money or no
- * seller secures nothing). TRUE when the full amount is in stock after the
- * purchase. This is what keeps material-poor countries able to build —
- * their import bill is the honest price of construction.
+ * BOUGHT directly from real sellers at the base price (real units + real
+ * money move IMMEDIATELY — the construction needs the materials in stock
+ * now; a country with no money or no seller secures nothing). TRUE when
+ * the full amount is in stock after the purchase. This is what keeps
+ * material-poor countries able to build — their import bill is the honest
+ * price of construction.
  */
 export function aiSecureConstructionMaterials(
   state: GameState,
@@ -58,17 +82,11 @@ export function aiSecureConstructionMaterials(
   if (record === undefined) return false;
   const missing = Math.ceil(neededUnits - (record.stock.industrial ?? 0));
   if (missing <= 0) return true;
-  const price = config.resources.find((resource) => resource.id === 'industrial')?.price ?? 0;
+  const price = unitPriceOf(config, 'industrial');
   if (price <= 0) return false;
-  // The sellers of industrial goods, largest free stock first (§6/§18).
-  const sellers: { countryId: string; amount: number }[] = [];
-  for (const [sellerId, sellerRecord] of Object.entries(state.economy.resources)) {
-    if (sellerId === countryId) continue;
-    const free = Math.floor((sellerRecord.stock.industrial ?? 0) -
-      safetyReserveUnits(sellerRecord.consumption, 'industrial', config));
-    if (free > 0) sellers.push({ countryId: sellerId, amount: free });
-  }
-  sellers.sort((a, b) => b.amount - a.amount || (a.countryId < b.countryId ? -1 : 1));
+  // The sellers of industrial goods, largest REAL available surplus first
+  // (§3/§16 — offers come from real surplus, never from a buyer's need).
+  const sellers = marketOffersOf(state, countryId, 'industrial', config);
   let stillMissing = missing;
   for (const seller of sellers) {
     if (stillMissing <= 0) break;
@@ -78,15 +96,15 @@ export function aiSecureConstructionMaterials(
     if (amount <= 0) continue;
     const sellerRecord = state.economy.resources[seller.countryId]!;
     const cost = roundTo(amount * price, 2);
-    // REAL units + REAL money move (the §6 deal).
+    // REAL units + REAL money move, immediately (a one-time direct deal —
+    // NOT a contract; the ledger lines are never booked here, the money
+    // has already left/arrived — no double-count, §11).
     sellerRecord.stock.industrial = Math.round((sellerRecord.stock.industrial ?? 0) - amount);
     record.stock.industrial = Math.round((record.stock.industrial ?? 0) + amount);
     state.economy.treasury[countryId] = roundTo((state.economy.treasury[countryId] ?? 0) - cost, 4);
     state.economy.treasury[seller.countryId] = roundTo((state.economy.treasury[seller.countryId] ?? 0) + cost, 4);
     record.imports.industrial = Math.round((record.imports.industrial ?? 0) + amount);
     sellerRecord.exports.industrial = Math.round((sellerRecord.exports.industrial ?? 0) + amount);
-    record.tradeExpense = roundTo(record.tradeExpense + cost, 2);
-    sellerRecord.tradeIncome = roundTo(sellerRecord.tradeIncome + cost, 2);
     stillMissing -= amount;
   }
   return stillMissing <= 0;
@@ -125,6 +143,9 @@ export function aiBuildingTypeId(
   //    the strongest good that is not in surplus, not yet covered with the
   //    10% buffer, and where the country's potential makes building sensible.
   //    Deterministic: ties resolve by config resource order.
+  //    A good an ACTIVE IMPORT CONTRACT already serves is skipped (§16/§22
+  //    — trade OR build, never both: double supply would grind the world
+  //    toward effortless self-sufficiency; §25 wants interdependence).
   let bestResource: string | null = null;
   let bestAmount = -1;
   for (const resource of config.resources) {
@@ -137,6 +158,8 @@ export function aiBuildingTypeId(
     // Weak goods stay import-fed: a low-potential building yields little
     // (§2/§15) and would waste the country's scarce money + materials.
     if (countryPotentialFactor(model, countryId, resource.id, config) < 1) continue;
+    // An active import contract already closes this flow — trade serves it.
+    if (hasActiveImportContract(state, countryId, resource.id)) continue;
     bestAmount = amount;
     bestResource = resource.id;
   }
@@ -161,4 +184,77 @@ export function aiBuildingTypeId(
   const ownConsumption = record.consumption[strongest] ?? 0;
   if (ownConsumption > 0 && strongestOutput >= EXPORT_DEPTH_CAP * ownConsumption) return null;
   return config.buildings.find((candidate) => candidate.resource === strongest)?.id ?? null;
+}
+
+/**
+ * The AI's MONTHLY TRADE DECISION (spec §22/§23) — the AI trades on the
+ * SAME real market as the player, with the SAME constraints (never fake
+ * goods, never unlimited money):
+ *
+ *  ۱. CANCEL what is no longer needed (deterministic): an active IMPORT
+ *     contract whose good the country now really covers by itself —
+ *     production ≥ consumption AND the stock holds the safety reserve —
+ *     is dropped (the monthly bill must not drain a self-sufficient
+ *     treasury, §23's contracts-serve-needs spirit).
+ *  ۲. SIGN at most ONE new contract per month (chance-gated): for the
+ *     LARGEST uncovered shortage that no active import contract already
+ *     serves (§23 — the existing contract continues; no monthly
+ *     duplicates), from the largest REAL market offer (§3/§24 — real
+ *     surplus only), sized min(need, offer) and checked against the
+ *     treasury (signContract guards capacity + first month's bill).
+ *
+ * Deterministic ordering: config resource order for the need scan, the
+ * market's largest-offer-first order for the seller pick.
+ */
+export function aiTradeStep(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig,
+  month: number,
+  rng: Random,
+  newId: (kind: string) => string
+): void {
+  const record = state.economy.resources[countryId];
+  if (record === undefined) return;
+
+  // —— ۱. cancel import contracts the country no longer needs ——
+  for (const contract of activeContractsOf(state, countryId)) {
+    if (contract.buyerId !== countryId) continue; // only its own imports
+    const resourceId = contract.resourceId;
+    const production = record.production[resourceId] ?? 0;
+    const consumption = record.consumption[resourceId] ?? 0;
+    const stock = record.stock[resourceId] ?? 0;
+    const reserve = safetyReserveUnits(record.consumption, resourceId, config);
+    if (production >= consumption && stock >= reserve) {
+      cancelContract(state, contract.id, countryId, month);
+    }
+  }
+
+  // —— ۲. at most ONE new contract this month, for the largest uncovered
+  //      shortage that no active contract already serves (§23) ——
+  if (!rng.chance(AI_CONTRACT_CHANCE)) return;
+  let neededResource: string | null = null;
+  let worst = 0;
+  for (const resource of config.resources) {
+    const uncovered = record.shortage[resource.id] ?? 0;
+    if (uncovered > worst) {
+      worst = uncovered;
+      neededResource = resource.id;
+    }
+  }
+  if (neededResource === null) return;
+  if (hasActiveImportContract(state, countryId, neededResource)) return;
+  const offers = marketOffersOf(state, countryId, neededResource, config);
+  if (offers.length === 0) return; // no real seller — the shortage stays (§25)
+  const best = offers[0];
+  signContract(
+    state,
+    countryId,
+    best.countryId,
+    neededResource,
+    Math.min(worst, best.amount),
+    month,
+    config,
+    newId
+  );
 }

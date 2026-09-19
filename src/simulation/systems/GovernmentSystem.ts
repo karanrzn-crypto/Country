@@ -35,7 +35,7 @@ import type { StrategicResourcesConfig } from '../../economy/types';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject, workforceCapacityOf, workforceUsedBy } from '../../economy/construction';
-import { aiBuildingTypeId, aiSecureConstructionMaterials } from '../../economy/aiEconomy';
+import { aiBuildingTypeId, aiSecureConstructionMaterials, aiTradeStep } from '../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
 import { cellQualityOf } from '../../economy/quality';
 import { gridCellKey } from '../../world/map/MapTypes';
@@ -82,9 +82,10 @@ export class GovernmentSystem implements SimulationSystemDef {
       if (due.length === 0) break;
       if (context.map !== undefined) {
         // THE ECONOMIC CYCLE — the whole world advances ONE month per pass
-        // (spec §10's fixed order; the lockstep loop keeps it once/month).
+        // (spec §12's fixed order; the lockstep loop keeps it once/month).
         runEconomyCycle(state, context.map, context.data.economyData.strategicResources, {
-          applyStep: true
+          applyStep: true,
+          month: currentMonth
         });
       }
       for (const countryId of due) {
@@ -118,9 +119,13 @@ export class GovernmentSystem implements SimulationSystemDef {
       events.emit('economy.constructionCompleted', { countryId, projectId: project.id, typeId: project.typeId });
     }
 
-    // —— 2. resource AI: the whole world builds, simply (spec §8) ——
+    // —— 2. resource AI: the whole world builds AND trades, simply ——
+    //    (spec §16/§22: need-based construction + need-based trade
+    //    contracts on the SAME real market the player uses — §23: at most
+    //    one new contract per month, never duplicates for one need.)
     if (state.player.countryId !== countryId && context.map !== undefined) {
       this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind), context.map);
+      aiTradeStep(state, countryId, config, month, rng, (kind) => ids.next(kind));
     }
 
     // —— 3. public opinion → presidential approval ——

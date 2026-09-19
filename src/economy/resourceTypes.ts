@@ -58,6 +58,45 @@ export interface CountryResourceState {
   tradeExpense: number;
 }
 
+/**
+ * ONE monthly TRADE CONTRACT (spec §6/§18/§24) — a permanent agreement
+ * between two countries: every month the seller delivers `amountPerMonth`
+ * units of the good to the buyer at the agreed unit `price`, until the
+ * contract is CANCELLED (§18) or becomes unexecutable (a country is gone).
+ *
+ * A contract is NOT production (§10): it only TRANSFERS units that really
+ * exist in the seller's stock — the monthly execution (economyCycle step ۴)
+ * delivers whatever the seller can actually spare and never fakes the rest.
+ * The seller's export capacity is RESERVED at signing (§16): the sum of a
+ * seller's active contracts can never exceed its real available surplus.
+ *
+ * Fully JSON-safe (save-friendly). The ONE list lives in
+ * `state.economy.contracts` — the قراردادها panel, the market and the AI
+ * all read the same records (§8 — no UI-side shadow state).
+ */
+export interface TradeContract {
+  readonly id: string;
+  /** The country that delivers the goods every month. */
+  readonly sellerId: string;
+  /** The country that receives the goods and pays every month. */
+  readonly buyerId: string;
+  /** Which good (config resource id). */
+  readonly resourceId: string;
+  /** Committed units PER MONTH (the delivery may be smaller when the
+   *  seller's real stock runs short — §9's honest partial delivery). */
+  readonly amountPerMonth: number;
+  /** Agreed money per unit (the BASE price at signing). */
+  readonly price: number;
+  /** Active contracts execute monthly; cancelled ones never do again. */
+  status: 'active' | 'cancelled';
+  /** The absolute month the contract was signed. */
+  readonly createdAtMonth: number;
+  /** Set when cancelled (spec §7 — لغو قرارداد). */
+  cancelledMonth?: number;
+  /** What the last monthly execution ACTUALLY delivered (display + tests). */
+  lastDelivery?: number;
+}
+
 /** Empty record (trade is resolved by the monthly cycle, not by policies). */
 export function emptyCountryResourceState(): CountryResourceState {
   return {

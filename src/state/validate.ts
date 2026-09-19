@@ -396,6 +396,26 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               }
             }
           }
+        },
+        // The world's TRADE CONTRACTS (spec §6/§24) — signed monthly
+        // agreements, active and cancelled (saves predating v19 carry []).
+        contracts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            fields: {
+              id: { type: 'string' },
+              sellerId: { type: 'string' },
+              buyerId: { type: 'string' },
+              resourceId: { type: 'string' },
+              amountPerMonth: { type: 'number', min: 1 },
+              price: { type: 'number', min: 0 },
+              status: { type: 'enum', values: ['active', 'cancelled'] },
+              createdAtMonth: { type: 'number', min: 0 },
+              cancelledMonth: { type: 'optional', inner: { type: 'number', min: 0 } },
+              lastDelivery: { type: 'optional', inner: { type: 'number', min: 0 } }
+            }
+          }
         }
       }
     },

@@ -361,6 +361,30 @@
         border: 1px solid #22304a; border-radius: 3px; padding: 3px 8px;
       }
       .pd-purchase-seller { color: #cfd8e6; font-size: 12px; }
+      /* CONTRACTS panel (spec §7/§8): every active trade contract, read
+         straight from state — partner, good, monthly amount, price, status,
+         permanence, last real delivery + the cancel button. */
+      .pd-contract-list { display: flex; flex-direction: column; gap: 6px; }
+      .pd-contract {
+        border: 1px solid #22304a; border-radius: 5px; padding: 6px 9px;
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      .pd-contract-head { display: flex; align-items: baseline; gap: 8px; }
+      .pd-contract-name { color: #e8edf5; font-weight: 700; flex: 1 1 auto; }
+      .pd-contract-direction {
+        font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 8px;
+        border: 1px solid #22304a; color: #cfd8e6;
+      }
+      .pd-contract-direction.in { color: #a8c4f0; border-color: #2f4a6e; }
+      .pd-contract-direction.out { color: #9fd89f; border-color: #2f5233; }
+      .pd-contract-status { font-size: 11px; font-weight: 700; color: #9fd89f; }
+      .pd-contract-detail { color: #cfd8e6; font-size: 12px; }
+      .pd-contract-cancel {
+        border: 1px solid #4a3038; background: transparent; color: #e8b4a0;
+        border-radius: 4px; padding: 3px 10px; cursor: pointer; font-weight: 700;
+        align-self: flex-start; font-size: 12px;
+      }
+      .pd-contract-cancel:hover { background: #33222a; }
       .pd-research-name { color: #e8edf5; font-weight: 700; flex: 0 0 96px; }
       .pd-research-level { color: #cfd8e6; flex: 1 1 auto; font-size: 12px; }
       .pd-research-max { color: #9aa6ba; font-size: 12px; }

@@ -5,13 +5,13 @@
  *  - درآمد مالیاتی   : جمعیت(میلیون) × نرخ × ضریب            (§2)
  *  - تولید منابع      : deposits + baseline + buildings        (§4)
  *  - مصرف غذا        : جمعیت(میلیون) × perMillionPopulation   (§5)
- *  - خرید و فروش      : −money +units / +money −units at the BASE price (§6/§7)
+ *  - قرارداد تجاری    : monthly contract moves REAL units + ledger money (§6)
  *  - هزینه‌ها         : ارتش + دولت + زیرساخت                  (§3)
- *  - تغییر خزانه      : درآمد − هزینه‌ها, applied ONCE          (§3/§10)
+ *  - تغییر خزانه      : درآمد − هزینه‌ها, applied ONCE          (§3/§12)
  *  - کمبود غذا        : uncovered deficit → shortage consequences (§5)
- *  - اجرای چرخه کامل  : the §10 order, deterministic, no double-apply (§10)
+ *  - اجرای چرخه کامل  : the §12 order, deterministic, no double-apply (§12)
  *
- * §14 review items covered: negative values, buying/selling more than the
+ * §14 review items covered: negative values, selling more than the
  * stockpile, zero population, zero production, expenses exceeding the
  * treasury, running the cycle repeatedly, trade conservation.
  */
@@ -19,9 +19,9 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { createTestGame } from '../../helpers/testGame';
 import type { Game } from '../../../core/Game';
 import type { SystemContext } from '../../../core/GameContext';
-import { runEconomyCycle, resolveWorldTrade, taxIncomeOf, armyExpenseOf, governmentExpenseOf, infrastructureExpenseOf } from '../../../economy/economyCycle';
+import { runEconomyCycle, taxIncomeOf, armyExpenseOf, governmentExpenseOf, infrastructureExpenseOf } from '../../../economy/economyCycle';
 import { resourceDisplayStatusOf, safetyReserveUnits } from '../../../economy/resources';
-import { purchaseResource, sellersOf, unitPriceOf } from '../../../economy/purchase';
+import { marketOffersOf, unitPriceOf, signContract, executeMonthlyContracts } from '../../../economy/contracts';
 import { startProject, stepProjects, constructionSpeedFactorOf } from '../../../economy/construction';
 import type { StrategicResourcesConfig } from '../../../economy/types';
 
@@ -102,70 +102,100 @@ describe('simple economy (14-section spec)', () => {
     );
   });
 
-  // ———————————————————————— §6/§7 — خرید و فروش ————————————————————————
+  // ————————————————————— §6 — قرارداد تجاری ماهانه —————————————————————
 
-  it('T4 a manual deal moves EXACTLY §6\'s amounts at the base price (§6)', () => {
+  it('T4 ONE monthly contract delivers EXACTLY §6\'s amounts at the base price (§6/§9)', () => {
     const state = context.state;
     const [buyerId, sellerId] = ids();
     const price = unitPriceOf(config, 'food');
     expect(price).toBeGreaterThan(0); // §7: base prices from config
 
-    // Arrange: seller holds 1,000 spare food, buyer pays from a fresh treasury.
+    // Arrange: seller holds 1,000 spare food above its reserve.
     state.economy.resources[sellerId]!.stock.food = 1000 +
       safetyReserveUnits(state.economy.resources[sellerId]!.consumption, 'food', config);
     state.economy.treasury[buyerId] = 10000;
     const buyerStockBefore = Math.round(state.economy.resources[buyerId]!.stock.food ?? 0);
+    const sellerStockBefore = Math.round(state.economy.resources[sellerId]!.stock.food ?? 0);
 
-    const sellerTreasuryBefore = state.economy.treasury[sellerId] ?? 0;
-    const result = purchaseResource(state, buyerId, sellerId, 'food', 1000, config);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const cost = 1000 * price; // 1,000 غذا × ۰٫۵ = ۵۰۰ (§7's example)
-    expect(result.cost).toBeCloseTo(cost, 2);
-    // Buyer: −money +units; Seller: +money −units (§6 EXACTLY).
-    expect(state.economy.treasury[buyerId]).toBeCloseTo(10000 - cost, 2);
-    expect(state.economy.treasury[sellerId]).toBeCloseTo(sellerTreasuryBefore + cost, 2);
-    expect(Math.round(state.economy.resources[buyerId]!.stock.food ?? 0)).toBe(buyerStockBefore + 1000);
-    // The deal is visible in BOTH countries' month ledger (تجارت line).
+    const signed = signContract(state, buyerId, sellerId, 'food', 50, 100, config, () => 'c1');
+    expect(signed.ok).toBe(true);
+    if (!signed.ok) return;
+    expect(signed.contract.amountPerMonth).toBe(50);
+    expect(signed.contract.price).toBe(price);
+    expect(signed.contract.status).toBe('active');
+    // Signing moves NOTHING — goods and money only move at EXECUTION (§10).
+    expect(Math.round(state.economy.resources[buyerId]!.stock.food ?? 0)).toBe(buyerStockBefore);
+
+    executeMonthlyContracts(state, ids(), config, 101);
+    const cost = 50 * price;
+    // Buyer: +units; Seller: −units (§6/§9 EXACTLY).
+    expect(Math.round(state.economy.resources[buyerId]!.stock.food ?? 0)).toBe(buyerStockBefore + 50);
+    expect(Math.round(state.economy.resources[sellerId]!.stock.food ?? 0)).toBe(sellerStockBefore - 50);
+    // The delivery is visible in BOTH countries' month ledger (تجارت line).
     expect(state.economy.resources[buyerId]!.tradeExpense).toBeCloseTo(cost, 2);
     expect(state.economy.resources[sellerId]!.tradeIncome).toBeCloseTo(cost, 2);
+    // The contract recorded its honest last delivery (§8's display data).
+    expect(state.economy.contracts.find((contract) => contract.id === 'c1')?.lastDelivery).toBe(50);
   });
 
-  it('T5 selling/buying more than available is capped — never negative (§14)', () => {
+  it('T5 contracting more than the seller\'s real surplus is refused — capacity is reserved (§16)', () => {
     const state = context.state;
     const [buyerId, sellerId] = ids();
     const sellerRecord = state.economy.resources[sellerId]!;
     const reserve = safetyReserveUnits(sellerRecord.consumption, 'iron', config);
-    sellerRecord.stock.iron = reserve + 100; // only 100 spare units
+    sellerRecord.stock.iron = reserve + 100; // only 100 REAL spare units
     state.economy.treasury[buyerId] = 100000; // plenty of money
 
-    const result = purchaseResource(state, buyerId, sellerId, 'iron', 5000, config);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.amount).toBe(100);
-    expect(sellerRecord.stock.iron).toBe(reserve); // never dips below the reserve
-    expect(sellerRecord.stock.iron).toBeGreaterThanOrEqual(0);
+    // 5,000/month against 100 real surplus → NO-CAPACITY (§16: the market
+    // can never promise what a country does not truly hold).
+    const over = signContract(state, buyerId, sellerId, 'iron', 5000, 100, config, () => 'c2');
+    expect(over.ok).toBe(false);
+    if (!over.ok) expect(over.reason).toBe('no-capacity');
 
-    // Buying with an empty treasury fails cleanly (no debt, §14).
-    sellerRecord.stock.iron = reserve + 100; // spare exists again
+    // The 100 real surplus CAN be contracted once...
+    const ok = signContract(state, buyerId, sellerId, 'iron', 100, 100, config, () => 'c3');
+    expect(ok.ok).toBe(true);
+    // ...but the capacity is now RESERVED: another buyer gets refused.
+    const second = signContract(state, ids()[2], sellerId, 'iron', 1, 100, config, () => 'c4');
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toBe('no-capacity');
+
+    // Signing with an empty treasury fails cleanly (the buyer cannot pay
+    // the FIRST month's bill — no debt exists, §14).
+    const thirdId = ids()[2];
+    state.economy.resources[thirdId]!.stock.oil = 10_000 +
+      safetyReserveUnits(state.economy.resources[thirdId]!.consumption, 'oil', config);
     state.economy.treasury[buyerId] = 0;
-    const broke = purchaseResource(state, buyerId, sellerId, 'iron', 10, config);
+    const broke = signContract(state, buyerId, thirdId, 'oil', 10, 100, config, () => 'c5');
     expect(broke.ok).toBe(false);
     if (!broke.ok) expect(broke.reason).toBe('no-funds');
   });
 
-  it('T6 the seller list shows only REAL free stock above the safety reserve', () => {
+  it('T6 the market offers ONLY real available surplus — stock above reserve, minus committed exports (§2/§3/§16)', () => {
     const state = context.state;
     const buyerId = playerCountryId;
-    const sellers = sellersOf(state, buyerId, 'oil', config);
-    for (const seller of sellers) {
-      const record = state.economy.resources[seller.countryId]!;
+    const offers = marketOffersOf(state, buyerId, 'oil', config);
+    for (const offer of offers) {
+      const record = state.economy.resources[offer.countryId]!;
       const reserve = safetyReserveUnits(record.consumption, 'oil', config);
-      expect(seller.amount).toBe(Math.max(0, Math.floor((record.stock.oil ?? 0) - reserve)));
+      expect(offer.amount).toBe(
+        Math.max(0, Math.floor((record.stock.oil ?? 0) - reserve))
+      );
     }
-    // A country never appears as its own seller.
-    expect(sellers.some((seller) => seller.countryId === buyerId)).toBe(false);
+    // A country never appears as its own seller; a country with NO spare
+    // stock never appears at all (§3 — no fake sellers).
+    expect(offers.some((offer) => offer.countryId === buyerId)).toBe(false);
+    for (const id of ids()) {
+      if (id === buyerId) continue;
+      const record = state.economy.resources[id]!;
+      const spare = Math.floor((record.stock.oil ?? 0) -
+        safetyReserveUnits(record.consumption, 'oil', config));
+      if (spare <= 0) {
+        expect(offers.some((offer) => offer.countryId === id)).toBe(false);
+      }
+    }
   });
+
 
   // ———————————————————————— §3 — هزینه‌ها و خزانه ———————————————————————
 
@@ -182,9 +212,14 @@ describe('simple economy (14-section spec)', () => {
       .toBeCloseTo(areas * config.finance.infrastructureCostPerArea, 2);
   });
 
-  it('T8 the cycle applies the treasury change EXACTLY ONCE per month (§3/§10)', () => {
+  it('T8 the cycle applies the treasury change EXACTLY ONCE per month (§3/§12)', () => {
     const state = context.state;
     const countryId = playerCountryId;
+    // A trade-free pair of months: no contracts may deliver in THIS
+    // measurement. Month 1 establishes the ledger; month 2 must apply
+    // EXACTLY that ledger balance to the treasury — once, no double-count.
+    state.economy.contracts = [];
+    runEconomyCycle(state, context.map, config, { applyStep: true });
     const finance = state.economy.finance[countryId]!;
     const before = state.economy.treasury[countryId] ?? 0;
     const expectedChange =
@@ -253,6 +288,8 @@ describe('simple economy (14-section spec)', () => {
 
   it('T10 zero population / zero production — no NaN, no negative stock (§14)', () => {
     const state = context.state;
+    // No contracts: the zero-pop country must earn nothing from trade here.
+    state.economy.contracts = [];
     const countryId = ids()[1];
     const country = state.countries.countries[countryId]!;
     const record = state.economy.resources[countryId]!;
@@ -319,14 +356,13 @@ describe('simple economy (14-section spec)', () => {
     void stockBefore;
   });
 
-  it('T12 world trade: two AI countries exchange real units and conserve them (§6)', () => {
+  it('T12 contracts move real units between countries and CONSERVE them (§6/§10)', () => {
     const state = context.state;
     const order = ids();
-    // One country is short 100 food, another holds 500 spare.
+    // A clean contract book: THIS pair under test is the only agreement.
+    state.economy.contracts = [];
+    // One country signs a 100/month food contract with the largest holder.
     const buyerId = order[0];
-    // No OTHER country needs anything — the pair under test is the only market.
-    for (const id of order) state.economy.resources[id]!.shortage = {};
-    state.economy.resources[buyerId]!.shortage.food = 100;
     state.economy.treasury[buyerId] = 5000;
     // The seller: the country with the LARGEST free food stock above reserve.
     const withSpare = order
@@ -343,17 +379,19 @@ describe('simple economy (14-section spec)', () => {
       .sort((a, b) => b.spare - a.spare);
     expect(withSpare.length).toBeGreaterThan(0);
     const sellerId = withSpare[0].id;
+    const signed = signContract(state, buyerId, sellerId, 'food', 100, 100, config, () => 'c10');
+    expect(signed.ok).toBe(true);
 
     const totalBefore = order.reduce(
       (sum, id) => sum + (state.economy.resources[id]!.stock.food ?? 0), 0
     );
-    resolveWorldTrade(state, order, ['food', 'iron', 'oil'], config);
+    executeMonthlyContracts(state, order, config, 101);
     const totalAfter = order.reduce(
       (sum, id) => sum + (state.economy.resources[id]!.stock.food ?? 0), 0
     );
-    // CONSERVATION: trade moves units, it never creates or destroys them.
+    // CONSERVATION: contracts move units, they never create or destroy them.
     expect(totalAfter).toBe(totalBefore);
-    // The buyer got its need; the seller recorded the export (§6).
+    // The buyer got its monthly delivery; the seller recorded the export (§6).
     expect(state.economy.resources[buyerId]!.imports.food ?? 0).toBe(100);
     expect(state.economy.resources[sellerId]!.exports.food ?? 0).toBe(100);
     // Money conservation at the BASE price: what buyers owe = what sellers get.
@@ -361,7 +399,7 @@ describe('simple economy (14-section spec)', () => {
     const expense = order.reduce((sum, id) => sum + (state.economy.resources[id]!.tradeExpense), 0);
     expect(income).toBeCloseTo(expense, 2);
     expect(income).toBeCloseTo(100 * unitPriceOf(config, 'food'), 2);
-    // The trade step NEVER touches the treasury — money lands in step ۷.
+    // The execution NEVER touches the treasury — money lands in step ۷.
     expect(state.economy.treasury[buyerId]).toBe(5000);
   });
 

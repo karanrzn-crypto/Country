@@ -74,13 +74,23 @@ export type GameCommand =
   | { readonly type: 'government.enactDecision'; readonly countryId: string; readonly decisionId: string }
   | { readonly type: 'government.resolveEvent'; readonly countryId: string; readonly instanceId: string; readonly choiceId: string }
   // —— Phase 3 — the simple economy (spec §6/§8) ——
-  /** ONE explicit deal: buy units of a resource from a chosen seller country. */
+  /** ONE monthly TRADE CONTRACT (spec §6/§16): the buyer commits to
+   *  `amountPerMonth` units/month from the seller at the base price,
+   *  permanent until cancelled. The seller's real export capacity is
+   *  checked at signing. */
   | {
-      readonly type: 'economy.buyResource';
+      readonly type: 'economy.signContract';
       readonly countryId: string;
       readonly sellerId: string;
       readonly resourceId: string;
-      readonly amount: number;
+      readonly amountPerMonth: number;
+    }
+  /** Cancel ONE of the caller's trade contracts (spec §7) — the monthly
+   *  delivery stops from the next execution on (spec §18). */
+  | {
+      readonly type: 'economy.cancelContract';
+      readonly countryId: string;
+      readonly contractId: string;
     }
   /** Start ONE building construction project (money cost paid once) on a
    *  specific grid cell of the caller's own country (spec §1). */

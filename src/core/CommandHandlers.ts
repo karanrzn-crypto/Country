@@ -42,7 +42,8 @@ export interface CoreGameApi {
   governmentSetMinistryFunding(countryId: string, ministryId: string, value: number): void;
   governmentEnactDecision(countryId: string, decisionId: string): boolean;
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
-  economyBuyResource(countryId: string, sellerId: string, resourceId: string, amount: number): boolean;
+  economySignContract(countryId: string, sellerId: string, resourceId: string, amountPerMonth: number): boolean;
+  economyCancelContract(countryId: string, contractId: string): boolean;
   economyStartConstruction(countryId: string, typeId: string, cellKey: string): boolean;
   economyBuildMode(typeId: string | null): boolean;
   economyConfirmConstruction(countryId: string): boolean;
@@ -99,7 +100,10 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('government.resolveEvent', (cmd) =>
     game.governmentResolveEvent(cmd.countryId, cmd.instanceId, cmd.choiceId)
   );
-  bus.register('economy.buyResource', (cmd) => game.economyBuyResource(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amount));
+  bus.register('economy.signContract', (cmd) =>
+    game.economySignContract(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amountPerMonth)
+  );
+  bus.register('economy.cancelContract', (cmd) => game.economyCancelContract(cmd.countryId, cmd.contractId));
   bus.register('economy.startConstruction', (cmd) => game.economyStartConstruction(cmd.countryId, cmd.typeId, cmd.cellKey));
   bus.register('economy.buildMode', (cmd) => game.economyBuildMode(cmd.typeId));
   bus.register('economy.confirmConstruction', (cmd) => game.economyConfirmConstruction(cmd.countryId));

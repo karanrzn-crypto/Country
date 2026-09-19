@@ -796,6 +796,28 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v18 → v19: the CONTRACT TRADE economy (spec §6-§24). Trade between
+    // countries is now permanent MONTHLY CONTRACTS executed from REAL
+    // stock (the automatic world matcher is gone) — the world starts with
+    // NO contracts; the additive `economy.contracts: []` is injected (old
+    // saves never had any agreement to preserve).
+    from: 18,
+    to: 19,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v18\u2192v19: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: Record<string, unknown> };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined && economy['contracts'] === undefined) {
+        economy['contracts'] = [];
+      }
+      return clone;
+    }
   }
 ];
 

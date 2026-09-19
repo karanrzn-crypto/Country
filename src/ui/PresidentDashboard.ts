@@ -1,5 +1,6 @@
 import type { CommandBus } from '../core/CommandBus';
 import type { SystemContext } from '../core/GameContext';
+import type { GameState } from '../state/GameState';
 import type { UIElement } from './adapter/UIDomAdapter';
 import type { ScreenManager } from './ScreenManager';
 import type { GameCommand } from '../core/CommandTypes';
@@ -15,7 +16,12 @@ import {
   workforceCapacityOf,
   workforceUsedBy
 } from '../economy/construction';
-import { sellersOf, unitPriceOf } from '../economy/purchase';
+import {
+  marketOffersOf,
+  unitPriceOf,
+  activeContractsOf
+} from '../economy/contracts';
+import type { TradeContract } from '../economy/resourceTypes';
 import type { StrategicResourcesConfig } from '../economy/types';
 import { faNum, faSigned, faPopulation, toFaDigits } from '../utils/format';
 
@@ -38,6 +44,7 @@ import { faNum, faSigned, faPopulation, toFaDigits } from '../utils/format';
 export type SectionId =
   | 'overview'
   | 'economy'
+  | 'contracts'
   | 'budget'
   | 'politics'
   | 'decisions'
@@ -48,6 +55,7 @@ export type SectionId =
 const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   overview: 'نمای کلی',
   economy: 'اقتصاد',
+  contracts: 'قراردادها',
   budget: 'بودجه',
   politics: 'سیاست',
   decisions: 'تصمیم‌ها',
@@ -59,6 +67,7 @@ const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
 const TAB_ORDER: readonly SectionId[] = [
   'overview',
   'economy',
+  'contracts',
   'budget',
   'politics',
   'decisions',
@@ -196,6 +205,7 @@ export class PresidentDashboard {
 
     this.refreshOverview(countryId, month);
     this.refreshEconomy(countryId);
+    this.refreshContracts(countryId);
     this.refreshBudget(countryId);
     this.refreshPolitics(countryId);
     this.refreshDecisions(countryId, month);
@@ -235,6 +245,7 @@ export class PresidentDashboard {
 
     this.sections.set('overview', this.buildOverview(body));
     this.sections.set('economy', this.buildEconomy(body));
+    this.sections.set('contracts', this.buildContracts(body));
     this.sections.set('budget', this.buildBudget(body));
     this.sections.set('politics', this.buildPolitics(body));
     this.sections.set('decisions', this.buildDecisions(body));
@@ -317,6 +328,101 @@ export class PresidentDashboard {
     this.track(marketList, 'market');
     this.marketTitle = marketTitle;
     return section;
+  }
+
+  /**
+   * The CONTRACTS panel (spec §7/§8) — every trade contract of the
+   * country, read straight from `state.economy.contracts` (no UI-side
+   * shadow state): the partner country, the good, the monthly amount, the
+   * price, the status, the permanence and the last REAL delivery — each
+   * active contract carries its لغو button (spec §7).
+   */
+  private buildContracts(container: UIElement): UIElement {
+    const section = this.section(container, 'pd-contracts');
+    const title = this.create('div', 'pd-subtitle');
+    title.setText('قراردادهای تجاری');
+    section.appendChild(title);
+    const list = this.create('div', 'pd-contract-list');
+    section.appendChild(list);
+    this.track(list, 'contractList');
+    return section;
+  }
+
+  /** Rebuilds the contract list when anything about it actually changed. */
+  private refreshContracts(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const contracts = activeContractsOf(state, countryId);
+    const signature = contracts
+      .map((contract) =>
+        [
+          contract.id,
+          contract.status,
+          contract.amountPerMonth,
+          contract.lastDelivery ?? 0
+        ].join(':')
+      )
+      .join('|') + `#${countryId}`;
+    if (signature === this.dynamicSignatures.get('contractList')) return;
+    this.dynamicSignatures.set('contractList', signature);
+    this.rebuild('contractList', this.parents.get('contractList'), () => {
+      const rows: UIElement[] = [];
+      if (contracts.length === 0) {
+        const empty = this.create('div', 'pd-trade-empty');
+        empty.setText('قرارداد فعالی وجود ندارد — از بازار منابع (برگهٔ اقتصاد) قرارداد ماهانه ببندید.');
+        rows.push(empty);
+      }
+      for (const contract of contracts) {
+        rows.push(this.contractRow(state, config, contract, countryId));
+      }
+      return rows;
+    });
+  }
+
+  /** ONE contract's display row (spec §8's full information block). */
+  private contractRow(
+    state: GameState,
+    config: StrategicResourcesConfig,
+    contract: TradeContract,
+    countryId: string
+  ): UIElement {
+    const countryName = (id: string): string => state.countries.countries[id]?.name ?? id;
+    const resourceName = config.resources.find((resource) => resource.id === contract.resourceId)?.name ?? contract.resourceId;
+    const importing = contract.buyerId === countryId;
+    const partner = importing ? contract.sellerId : contract.buyerId;
+    const card = this.create('div', 'pd-contract');
+    const head = this.create('div', 'pd-contract-head');
+    const name = this.create('span', 'pd-contract-name');
+    name.setText(`${countryName(partner)}`);
+    head.appendChild(name);
+    const direction = this.create('span', `pd-contract-direction ${importing ? 'in' : 'out'}`);
+    direction.setText(importing ? 'واردات' : 'صادرات');
+    head.appendChild(direction);
+    const status = this.create('span', 'pd-contract-status active');
+    status.setText('فعال');
+    head.appendChild(status);
+    card.appendChild(head);
+    const lines = [
+      `کالا: ${resourceName}`,
+      `مقدار: ${faNum(contract.amountPerMonth)} واحد / ماه`,
+      `قیمت هر واحد: ${faNum(contract.price, contract.price % 1 !== 0 ? 1 : 0)}`,
+      `نوع: دائمی — تا زمان لغو`,
+      `آخرین تحویل واقعی: ${faNum(contract.lastDelivery ?? 0)} واحد`
+    ];
+    for (const line of lines) {
+      const detail = this.create('div', 'pd-contract-detail');
+      detail.setText(line);
+      card.appendChild(detail);
+    }
+    const cancel = this.create('button', 'pd-contract-cancel');
+    cancel.setText('لغو قرارداد');
+    cancel.onClick(() =>
+      this.send({ type: 'economy.cancelContract', countryId, contractId: contract.id })
+    );
+    card.appendChild(cancel);
+    return card;
   }
 
   private buildBudget(container: UIElement): UIElement {
@@ -694,12 +800,16 @@ export class PresidentDashboard {
     return config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
   }
   /**
-   * The MARKET (spec §7/§18) — opens ONLY on demand, shows ONLY the
+   * The MARKET (spec §1-§5/§24) — opens ONLY on demand, shows ONLY the
    * resources that are actually needed (a focused shortage resource, or
    * the missing resources of the waiting construction projects). Each need
-   * lists the REAL sellers with their free stock and the per-unit price;
-   * one click = one explicit deal (no "Buy Cheapest" exists — the player
-   * picks the seller, spec §7).
+   * lists ONLY the sellers with a REAL available surplus (their own stock
+   * above the safety reserve, minus the export capacity they have already
+   * committed in active contracts — §2/§3/§16). The offers NEVER depend on
+   * the buyer's shortage (§1) — the amount on each row is the seller's
+   * own real surplus, and the button signs a MONTHLY CONTRACT (spec §6 —
+   * buying is never a one-time purchase; it delivers every month until
+   * cancelled, §18).
    */
   private openMarket(focus: string | null): void {
     this.marketOpen = true;
@@ -732,9 +842,10 @@ export class PresidentDashboard {
       return;
     }
     const countryName = (id: string): string => state.countries.countries[id]?.name ?? id;
-    // The NEEDS the market can serve (spec §6/§18): the country's REAL
-    // recorded shortages (the stockpile ran dry) — plus the focused
-    // resource when the player asked for it directly.
+    // The NEEDS the market can serve: the country's REAL recorded
+    // shortages (the honest monthly deficit — contract deliveries already
+    // counted as supply, §15) — plus the focused resource when the player
+    // asked for it directly.
     const needs: { resourceId: string; amount: number }[] = [];
     for (const resource of config.resources) {
       const shortage = Math.round(record.shortage[resource.id] ?? 0);
@@ -748,8 +859,8 @@ export class PresidentDashboard {
     needs.sort((a, b) => a.resourceId < b.resourceId ? -1 : 1);
 
     const signature = `${this.marketFocus ?? 'all'}|${needs.map((need) => {
-      const sellers = sellersOf(state, countryId, need.resourceId, config);
-      return `${need.resourceId}:${Math.round(need.amount)}:[${sellers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
+      const offers = marketOffersOf(state, countryId, need.resourceId, config);
+      return `${need.resourceId}:${Math.round(need.amount)}:[${offers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
     }).join('|')}#${countryId}`;
     if (signature === this.dynamicSignatures.get('market')) return;
     this.dynamicSignatures.set('market', signature);
@@ -763,7 +874,9 @@ export class PresidentDashboard {
       for (const need of needs) {
         const resource = config.resources.find((candidate) => candidate.id === need.resourceId);
         if (resource === undefined) continue;
-        const sellers = sellersOf(state, countryId, need.resourceId, config);
+        // REAL market offers only (§3/§24): each seller's available
+        // surplus, largest first — never shaped by this country's need.
+        const offers = marketOffersOf(state, countryId, need.resourceId, config);
         const price = unitPriceOf(config, need.resourceId);
         const block = this.create('div', 'pd-purchase');
         const head = this.create('div', 'pd-purchase-head');
@@ -778,29 +891,33 @@ export class PresidentDashboard {
         hint.setText(`قیمت هر واحد ${faNum(price, price % 1 !== 0 ? 1 : 0)}`);
         head.appendChild(hint);
         block.appendChild(head);
-        if (sellers.length === 0) {
+        if (offers.length === 0) {
           const empty = this.create('div', 'pd-purchase-row');
-          empty.setText('فروشنده‌ای موجودی قابل فروش ندارد');
+          empty.setText('هیچ کشور مازاد واقعی برای فروش ندارد');
           block.appendChild(empty);
         }
-        for (const seller of sellers) {
+        for (const seller of offers) {
           const row = this.create('div', 'pd-purchase-row');
           const label = this.create('span', 'pd-purchase-seller');
-          label.setText(`${countryName(seller.countryId)} — ${faNum(seller.amount)} موجود`);
+          // THE SELLER'S OWN REAL SURPLUS (§2/§3) — not this country's need.
+          label.setText(`${countryName(seller.countryId)} — ${faNum(seller.amount)} مازاد واقعی`);
           row.appendChild(label);
-          const buy = this.create('button', 'pd-buy');
+          const sign = this.create('button', 'pd-buy');
+          // A MONTHLY CONTRACT (§6): min(need, offer) units EVERY month
+          // until cancelled — the market never sells more than the seller
+          // truly holds (§16 reserves it at signing).
           const amount = Math.min(seller.amount, Math.max(1, Math.ceil(need.amount)));
-          buy.setText(`خرید ${faNum(amount)}`);
-          buy.onClick(() =>
+          sign.setText(`قرارداد ماهانه ${faNum(amount)}`);
+          sign.onClick(() =>
             this.send({
-              type: 'economy.buyResource',
+              type: 'economy.signContract',
               countryId,
               sellerId: seller.countryId,
               resourceId: need.resourceId,
-              amount
+              amountPerMonth: amount
             })
           );
-          row.appendChild(buy);
+          row.appendChild(sign);
           block.appendChild(row);
         }
         rows.push(block);

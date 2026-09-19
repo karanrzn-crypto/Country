@@ -71,7 +71,8 @@ export function createInitialState(
     finance: {} as EconomySlice['finance'],
     construction: {} as EconomySlice['construction'],
     buildings: {} as EconomySlice['buildings'],
-    economyLevel: {} as Record<string, number>
+    economyLevel: {} as Record<string, number>,
+    contracts: [] as EconomySlice['contracts']
   };
 
   // —— military ——
@@ -176,6 +177,9 @@ export function createInitialState(
       // from the middle of the scale, never from a pre-charged state).
       economy.economyLevel[countryId] = data.economyData.strategicResources.economyLevel.start;
     }
+    // The world starts with NO trade contracts — every agreement is SIGNED
+    // during the campaign (spec §6 — by presidents, never pre-seeded).
+    if (economy.contracts === undefined) economy.contracts = [];
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
       countryNames,
@@ -237,6 +241,9 @@ export function healPhase2State(
     if (state.economy.economyLevel[countryId] === undefined) {
       state.economy.economyLevel[countryId] = data.economyData.strategicResources.economyLevel.start;
     }
+    // Trade contracts (spec §6): saves predating v19 carry none — the heal
+    // injects the empty list (the migration does the same for the payload).
+    if (state.economy.contracts === undefined) state.economy.contracts = [];
     if (state.political.countries[countryId] === undefined) {
       state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
     }

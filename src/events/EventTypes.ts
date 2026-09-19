@@ -195,13 +195,17 @@ export interface GameEventMap {
   'government.electionHeld': { readonly countryId: string; readonly winnerId: string; readonly incumbentReelected: boolean };
 
   // —— the simple economy (Phase 3 — spec §6/§8) ——
-  'economy.resourceBought': {
+  /** ONE monthly trade contract SIGNED (spec §6/§16) — the buyer committed
+   *  to monthly deliveries from the seller at the base price. */
+  'economy.contractSigned': {
+    readonly contractId: string;
     readonly buyerId: string;
     readonly sellerId: string;
     readonly resourceId: string;
-    readonly amount: number;
-    readonly cost: number;
+    readonly amountPerMonth: number;
   };
+  /** ONE trade contract CANCELLED (spec §7) — deliveries stop next month. */
+  'economy.contractCancelled': { readonly contractId: string; readonly countryId: string };
   'economy.constructionStarted': {
     readonly countryId: string;
     readonly projectId: string;

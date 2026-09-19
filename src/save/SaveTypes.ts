@@ -14,8 +14,14 @@ export const SAVE_VERSION_ECONOMY_LEVEL = 17;
  *  `shortageMonths` to every resource record and `buildPreview` to the map
  *  slice (the heal fills missing building reserve fields). */
 export const SAVE_VERSION_ECONOMY_HARD_MODE = 18;
+/** Version of the CONTRACT TRADE economy (spec §6-§24): trade between
+ *  countries is permanent MONTHLY CONTRACTS (executed every month from
+ *  real stock, honest partial deliveries) — the automatic world matcher is
+ *  gone; the market offers derive live from each seller's REAL available
+ *  surplus. Adds `economy.contracts: []` (no pre-seeded contracts). */
+export const SAVE_VERSION_ECONOMY_CONTRACTS = 19;
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = SAVE_VERSION_ECONOMY_HARD_MODE;
+export const SAVE_VERSION = SAVE_VERSION_ECONOMY_CONTRACTS;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */
