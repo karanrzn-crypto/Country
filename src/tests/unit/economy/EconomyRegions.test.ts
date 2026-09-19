@@ -341,7 +341,12 @@ describe('wider simple economy (11-section spec)', () => {
 
     runEconomyCycle(state, context.map, config, { applyStep: true, month: 51 });
     expect(buyer.imports.food ?? 0).toBe(amount);
-    expect(buyer.shortage.food ?? 0).toBe(gap - amount); // EXACTLY the uncovered part
+    // The month-0 `gap` grew with the campaign month's DEMAND GROWTH (the
+    // demand directive — consumption compounds by month 51) — the honest
+    // uncovered part is measured against the POST-cycle flow of the record.
+    const postGap =
+      Math.round((buyer.consumption.food ?? 0) - (buyer.production.food ?? 0));
+    expect(buyer.shortage.food ?? 0).toBe(postGap - amount); // EXACTLY the uncovered part
     expect(buyer.shortage.food ?? 0).toBeGreaterThan(0);
     expect(seller.exports.food ?? 0).toBe(amount);
     // Coverage reflects the post-delivery situation (§8) — partially served.

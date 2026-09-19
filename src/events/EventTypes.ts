@@ -220,7 +220,30 @@ export interface GameEventMap {
    *  region's quality + estimated output and asks for confirmation. */
   'economy.buildPreview': { readonly typeId: string; readonly cellKey: string };
   /** A build click did NOT place a building — the mode stays active. */
-  'economy.buildRejected': { readonly reason: 'no-cell' | 'foreign-cell' | 'start-failed'; readonly typeId: string };
+  'economy.buildRejected': {
+    readonly reason: 'no-cell' | 'foreign-cell' | 'start-failed' | 'occupied-economic' | 'occupied-building';
+    readonly typeId: string;
+  };
+  /** ONE FORMAL EXPORT REQUEST FILED (the export-request directive §3) —
+   *  an AI country asked to buy the PLAYER's goods; the president decides
+   *  in «قراردادها» (موافقت → contract, مخالفت → nothing). */
+  'economy.exportRequested': {
+    readonly requestId: string;
+    readonly buyerId: string;
+    readonly sellerId: string;
+    readonly resourceId: string;
+    readonly amountPerMonth: number;
+    readonly price: number;
+  };
+  /** The president DECIDED one export request (approve → contractId). */
+  'economy.exportRequestDecided': {
+    readonly requestId: string;
+    readonly buyerId: string;
+    readonly sellerId: string;
+    readonly resourceId: string;
+    readonly approved: boolean;
+    readonly contractId: string | null;
+  };
 }
 
 export type GameEventName = keyof GameEventMap;

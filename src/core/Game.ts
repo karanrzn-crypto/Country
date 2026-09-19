@@ -38,8 +38,9 @@ import {
   distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
-import { signContract, cancelContract } from '../economy/contracts';
+import { signContract, cancelContract, decideExportRequest } from '../economy/contracts';
 import { startProject } from '../economy/construction';
+import { economicBuildingAtCell, cellIsUnderConstruction } from '../economy/resources';
 import { AssetRegistry } from '../assets/AssetRegistry';
 import { AssetCache } from '../assets/AssetCache';
 import { AssetManager } from '../assets/AssetManager';
@@ -1143,6 +1144,49 @@ export class Game {
     return true;
   }
 
+  /**
+   * The president's DECISION on ONE export request (the export-request
+   * directive §3) — approve (a real monthly contract forms; the AI buyer
+   * pays every month) or reject (nothing was ever created). ONLY the
+   * confirmed PLAYER country may decide; the core (not the UI) owns the
+   * guard. Emits exportRequestDecided on either outcome so the UI can
+   * refresh the «قراردادها» panel from the real State.
+   */
+  economyDecideExportRequest(requestId: string, approve: boolean): boolean {
+    this.assertInitialized();
+    const player = this.state.player.countryId;
+    if (!this.state.player.countryConfirmed) {
+      this.log.debug('export request decision blocked: no confirmed player country');
+      return false;
+    }
+    const request = (this.state.economy.exportRequests ?? []).find((entry) => entry.id === requestId);
+    if (request === undefined || request.sellerId !== player) {
+      this.log.debug(`export request decision blocked: unknown request or not the seller (${requestId})`);
+      return false;
+    }
+    const result = decideExportRequest(
+      this.state,
+      requestId,
+      approve,
+      this.currentMonth(),
+      this.data.economyData.strategicResources,
+      (kind) => this.ids.next(kind)
+    );
+    if (!result.ok) {
+      this.log.debug(`export request decision refused: ${result.reason} (${requestId})`);
+      return false;
+    }
+    this.events.emit('economy.exportRequestDecided', {
+      requestId,
+      buyerId: request.buyerId,
+      sellerId: request.sellerId,
+      resourceId: request.resourceId,
+      approved: approve,
+      contractId: result.contract?.id ?? null
+    });
+    return true;
+  }
+
   /** Cancels ONE of the caller's contracts (spec §7) — the delivery stops
    *  from the next monthly execution on (§18). */
   economyCancelContract(countryId: string, contractId: string): boolean {
@@ -1274,6 +1318,18 @@ export class Game {
     const owner = this.cellOwnerCountry(result.gridCellKey);
     if (owner !== countryId) {
       this.events.emit('economy.buildRejected', { reason: 'foreign-cell', typeId });
+      return;
+    }
+    // ONE MAIN FACILITY PER REGION (the military directive §7 — the CORE
+    // rule, not a UI nicety): a cell holding an economic OR a military
+    // building (or a running project) is simply not pickable — the reason
+    // is reported so the UI can say WHY the region is unavailable.
+    if (economicBuildingAtCell(this.state, result.gridCellKey) !== null) {
+      this.events.emit('economy.buildRejected', { reason: 'occupied-economic', typeId });
+      return;
+    }
+    if (cellIsUnderConstruction(this.state, result.gridCellKey)) {
+      this.events.emit('economy.buildRejected', { reason: 'occupied-building', typeId });
       return;
     }
     this.state.map.buildPreview = { typeId, cellKey: result.gridCellKey };

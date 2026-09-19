@@ -72,7 +72,8 @@ export function createInitialState(
     construction: {} as EconomySlice['construction'],
     buildings: {} as EconomySlice['buildings'],
     economyLevel: {} as Record<string, number>,
-    contracts: [] as EconomySlice['contracts']
+    contracts: [] as EconomySlice['contracts'],
+    exportRequests: [] as EconomySlice['exportRequests']
   };
 
   // —— military ——
@@ -180,6 +181,7 @@ export function createInitialState(
     // The world starts with NO trade contracts — every agreement is SIGNED
     // during the campaign (spec §6 — by presidents, never pre-seeded).
     if (economy.contracts === undefined) economy.contracts = [];
+    if (economy.exportRequests === undefined) economy.exportRequests = [];
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
       countryNames,
@@ -244,6 +246,8 @@ export function healPhase2State(
     // Trade contracts (spec §6): saves predating v19 carry none — the heal
     // injects the empty list (the migration does the same for the payload).
     if (state.economy.contracts === undefined) state.economy.contracts = [];
+    // Export requests (the export-request directive): same additive heal.
+    if (state.economy.exportRequests === undefined) state.economy.exportRequests = [];
     if (state.political.countries[countryId] === undefined) {
       state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
     }
@@ -313,7 +317,7 @@ function healBuildingReserves(
     for (const building of Object.values(buildings)) {
       if (building.reserveRemaining !== undefined && building.reserveCapacity !== undefined) continue;
       const def = config.buildings.find((candidate) => candidate.id === building.typeId);
-      if (def === undefined || def.reserveUnits <= 0) continue;
+      if (def === undefined || def.resource === undefined || def.reserveUnits <= 0) continue;
       const cellIndex = findGridCell(mapModel, building.cellKey);
       const quality = cellQualityOf(mapModel, cellIndex, def.resource, config);
       const capacity = reserveCapacityOf(def, quality, config);

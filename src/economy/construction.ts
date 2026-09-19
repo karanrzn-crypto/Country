@@ -208,7 +208,8 @@ function finishBuilding(
   config: StrategicResourcesConfig
 ): BuildingRecord {
   const def = config.buildings.find((candidate) => candidate.id === project.typeId);
-  if (def === undefined || def.reserveUnits <= 0) {
+  // Military infrastructure holds NO extraction reserve (nothing extracts).
+  if (def === undefined || def.resource === undefined || def.reserveUnits <= 0) {
     return { id: project.id, typeId: project.typeId, cellKey: project.cellKey };
   }
   const cellIndex = findGridCell(mapModel, project.cellKey);

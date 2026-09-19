@@ -26,7 +26,7 @@ import { createTestGame } from '../../helpers/testGame';
 import type { Game } from '../../../core/Game';
 import type { SystemContext } from '../../../core/GameContext';
 import { runEconomyCycle } from '../../../economy/economyCycle';
-import { shortageOf, safetyReserveUnits, strategicResourceIds, resourceDisplayStatusOf } from '../../../economy/resources';
+import { shortageOf, safetyReserveUnits, strategicResourceIds, resourceDisplayStatusOf, consumptionGrowthFactorOf } from '../../../economy/resources';
 import {
   marketOffersOf,
   availableSurplusOf,
@@ -77,6 +77,10 @@ describe('the contract trade (26-section spec: the market never invents goods)',
   const giveSpare = (countryId: string, resourceId: string, spare: number): void => {
     const record = context.state.economy.resources[countryId]!;
     record.stock[resourceId] = spare + safetyReserveUnits(record.consumption, resourceId, config());
+    // The capacity = stock − reserve + max(0, P − C): neutralize the flow
+    // term so the quota below is EXACTLY the stock spare × share (the
+    // demand-growth directive added the month's surplus flow to capacity).
+    record.production[resourceId] = record.consumption[resourceId] ?? 0;
   };
 
   /** Fills ONE country's stock so its SALE QUOTA (the market offer) is
@@ -163,7 +167,10 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     // ...and the REMAINING shortage stays — the market never invents
     // the missing 25 (§21: «سیستم حق ندارد +۸۰ کالای ساختگی ایجاد کند»).
     const produced = Math.round(record.production.food ?? 0);
-    expect(record.shortage.food ?? 0).toBe(gap - planned);
+    // The month-0 `gap` grew by the campaign month's DEMAND GROWTH (the
+    // demand directive: (1+perYear)^(51/12) ≈ ×1.14) — so the honest
+    // remainder is LARGER than the month-0 plan, never smaller.
+    expect(record.shortage.food ?? 0).toBeGreaterThanOrEqual(gap - planned);
     expect(record.shortage.food ?? 0).toBe(
       Math.max(0, Math.round((record.consumption.food ?? 0) - produced - planned))
     );
@@ -296,10 +303,15 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     }
     // The deficit is structural (production < consumption, no stock, no
     // imports) — the shortage must be present EVERY single month, tracking
-    // the honest flow (population growth may raise it by a unit or two),
-    // never a vanishing/reappearing flip-flop (the OLD bug).
+    // the honest flow, never a vanishing/reappearing flip-flop (the OLD
+    // bug). The drift across the window = the DEMAND GROWTH (the demand
+    // directive: the population base compounds (1+perYear)^(months/12) —
+    // the shortage climbs with it) plus rounding.
+    const firstFactor = consumptionGrowthFactorOf(config(), 200);
+    const lastFactor = consumptionGrowthFactorOf(config(), 205);
+    const driftBound = Math.ceil(Math.min(...shortages) * (lastFactor / firstFactor - 1)) + 3;
     expect(Math.min(...shortages)).toBeGreaterThan(0);
-    expect(Math.max(...shortages) - Math.min(...shortages)).toBeLessThanOrEqual(2);
+    expect(Math.max(...shortages) - Math.min(...shortages)).toBeLessThanOrEqual(driftBound);
     expect(Math.min(...shortages)).toBeGreaterThanOrEqual(gap);
     // The duration clock rose with it (§13's escalation input).
     expect(state.economy.resources[buyerId]!.shortageMonths.food ?? 0).toBeGreaterThanOrEqual(6);
@@ -317,7 +329,10 @@ describe('the contract trade (26-section spec: the market never invents goods)',
 
     let sawBufferedMonths = 0;
     let sawShortage = 0;
-    for (let month = 300; month <= 310; month += 1) {
+    // EARLY months (the demand-growth factor is ≈1 there): this test pins
+    // the BUFFER semantics — the years' compounding is the demand probe's
+    // subject, not this one's.
+    for (let month = 3; month <= 13; month += 1) {
       runEconomyCycle(state, context.map, config(), { applyStep: true, month });
       const shortage = state.economy.resources[buyerId]!.shortage.food ?? 0;
       const stock = state.economy.resources[buyerId]!.stock.food ?? 0;
@@ -369,7 +384,7 @@ describe('the contract trade (26-section spec: the market never invents goods)',
         const key = gridCellKey(countryId, gridId);
         if (economicBuildingAtCell(state, key) !== null) continue;
         if (cellIsUnderConstruction(state, key)) continue;
-        const quality = cellQualityOf(model, cellIndex, def.resource, cfg);
+        const quality = cellQualityOf(model, cellIndex, def.resource ?? '', cfg);
         if (quality > bestQuality) {
           bestQuality = quality;
           bestKey = key;
@@ -410,7 +425,13 @@ describe('the contract trade (26-section spec: the market never invents goods)',
         for (const resourceId of strategicResourceIds(cfg)) {
           for (const offer of marketOffersOf(state, 'probe-buyer', resourceId, cfg)) {
             expect(offer.amount).toBe(remainingSaleOfferOf(state, offer.countryId, resourceId, cfg));
-            expect(offer.amount).toBeLessThanOrEqual(availableSurplusOf(state, offer.countryId, resourceId, cfg));
+            // The offer's honest ceiling: the stock spare ABOVE the reserve PLUS
+            // this month's production-surplus flow (the demand directive) — it
+            // can never promise more than the seller really holds or produces.
+            expect(offer.amount).toBeLessThanOrEqual(
+              availableSurplusOf(state, offer.countryId, resourceId, cfg) +
+                Math.max(0, Math.round((state.economy.resources[offer.countryId]!.production[resourceId] ?? 0) - (state.economy.resources[offer.countryId]!.consumption[resourceId] ?? 0)))
+            );
           }
         }
         // (c) no negative stock, no NaN anywhere.

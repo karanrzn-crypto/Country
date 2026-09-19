@@ -65,12 +65,22 @@ export const ECONOMY_SCHEMA: FieldSchema = {
       fields: {
         productionScale: positiveNumber,
         // The market sale-quota rule (sellers' fixed, buyer-independent
-        // offers — the sale-quantity directive).
+        // offers — the sale-quantity directive) + the AI re-request cooldown.
         market: {
           type: 'object',
           allowUnknown: false,
           fields: {
-            saleQuotaShare: { type: 'number', min: 0, max: 1 }
+            saleQuotaShare: { type: 'number', min: 0, max: 1 },
+            requestCooldownMonths: { type: 'number', min: 0, max: 120, integer: true }
+          }
+        },
+        // Year-over-year demand growth (the demand directive — config).
+        consumptionGrowth: {
+          type: 'object',
+          allowUnknown: false,
+          fields: {
+            perYear: { type: 'number', min: 0, max: 1 },
+            maxFactor: { type: 'number', min: 1, max: 20 }
           }
         },
         // The economic-budget production modifier (50 = neutral, §budget).
@@ -159,7 +169,10 @@ export const ECONOMY_SCHEMA: FieldSchema = {
             fields: {
               id: idField,
               name: nameField,
-              resource: idField,
+              // 'military' buildings are infrastructure only — no resource
+              // output yet (the military directive); omitted → economic.
+              kind: { type: 'optional', inner: { type: 'enum', values: ['economic', 'military'] } },
+              resource: { type: 'optional', inner: idField },
               output: { type: 'number', min: 0 },
               cost: { type: 'number', min: 0 },
               // ONE-TIME construction materials (industrial units, §4).

@@ -47,6 +47,8 @@ export interface CoreGameApi {
   economyStartConstruction(countryId: string, typeId: string, cellKey: string): boolean;
   economyBuildMode(typeId: string | null): boolean;
   economyConfirmConstruction(countryId: string): boolean;
+  /** The president decides ONE export request (approve/reject). */
+  economyDecideExportRequest(requestId: string, approve: boolean): boolean;
   readonly ui: UIManager | null;
   readonly bus: EventBus;
   readonly log: Logger;
@@ -107,4 +109,6 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
   bus.register('economy.startConstruction', (cmd) => game.economyStartConstruction(cmd.countryId, cmd.typeId, cmd.cellKey));
   bus.register('economy.buildMode', (cmd) => game.economyBuildMode(cmd.typeId));
   bus.register('economy.confirmConstruction', (cmd) => game.economyConfirmConstruction(cmd.countryId));
+  bus.register('economy.approveExportRequest', (cmd) => game.economyDecideExportRequest(cmd.requestId, true));
+  bus.register('economy.rejectExportRequest', (cmd) => game.economyDecideExportRequest(cmd.requestId, false));
 }

@@ -96,12 +96,21 @@ export interface DomesticBaselineConfig {
  * from the industrial-goods stock) + workforce (a CAPACITY held while the
  * project builds, released on completion). Extractive buildings (oil, iron)
  * also hold a FINITE reserve (§8) that depletes with every produced unit.
+ *
+ * MILITARY buildings (kind 'military') share the SAME construction system,
+ * the SAME one-facility-per-region rule and the SAME costs — they produce
+ * NO resource yet (the military infrastructure directive: buildings and
+ * placement only); `resource` is omitted and `output` is 0.
  */
 export interface BuildingDef {
   readonly id: string;
   readonly name: string;
-  /** Which good this building produces (config resource id). */
-  readonly resource: string;
+  /** 'economic' (default) produces its good; 'military' is infrastructure
+   *  only (no resource output yet) — both occupy exactly ONE region. */
+  readonly kind?: 'economic' | 'military';
+  /** Which good this building produces (config resource id) — omitted for
+   *  military infrastructure buildings. */
+  readonly resource?: string;
   /** BASE monthly units added while active (before all modifiers). */
   readonly output: number;
   /** ONE-TIME money cost, deducted from the treasury at start. */
@@ -243,14 +252,33 @@ export interface StartingStockConfig {
 /**
  * THE MARKET SALE QUOTA (the sale-quantity directive): every country puts
  * up a FIXED, LIMITED monthly amount of each good for sale — a config SHARE
- * of its real export capacity (stock above the safety reserve). The number
- * is derived ONLY from the seller's own state, NEVER from any buyer's
- * shortage or need; a buyer's demand can never inflate it.
+ * of its real export capacity (stock above the safety reserve PLUS the
+ * month's real production surplus flow). The number is derived ONLY from
+ * the seller's own state, NEVER from any buyer's shortage or need; a
+ * buyer's demand can never inflate it.
  */
 export interface MarketConfig {
   /** Share of the real export capacity a country offers for sale (0..1;
    *  0.5 → a country with 1,000 spare units puts up 500/month). */
   readonly saleQuotaShare: number;
+  /** After a REJECTED export request, the buyer waits THIS many months
+   *  before asking the same seller for the same good again. */
+  readonly requestCooldownMonths: number;
+}
+
+/**
+ * YEAR-OVER-YEAR CONSUMPTION GROWTH (the demand directive): the population
+ * demand base of EVERY good compounds (1 + perYear)^(months/12) — demand
+ * grows with the years so production-heavy countries do NOT all drift into
+ * permanent exporting (the supply/demand balance stays alive). Stateless:
+ * derived from the absolute campaign month, so saves need no new fields.
+ * `maxFactor` caps the compounding so no economy collapses under it.
+ */
+export interface ConsumptionGrowthConfig {
+  /** Yearly growth of the population demand base (0.06 → +6 %/year). */
+  readonly perYear: number;
+  /** The compounding ceiling (4 → demand never exceeds ×4 the base). */
+  readonly maxFactor: number;
 }
 
 /**
@@ -272,6 +300,8 @@ export interface StrategicResourcesConfig {
   readonly productionScale: number;
   /** The market sale-quota rule (§market — the sellers' fixed offers). */
   readonly market: MarketConfig;
+  /** Year-over-year demand growth (§consumptionGrowth — the years' hunger). */
+  readonly consumptionGrowth: ConsumptionGrowthConfig;
   /** The economic-budget production modifier (§budget — 50 = neutral). */
   readonly economicBudget: EconomicBudgetConfig;
   /** Anti-famine safety buffer (§5): months of consumption kept out of

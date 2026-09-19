@@ -46,6 +46,7 @@ export type SectionId =
   | 'economy'
   | 'contracts'
   | 'budget'
+  | 'military'
   | 'politics'
   | 'decisions'
   | 'events'
@@ -57,6 +58,7 @@ const SECTION_LABELS: Readonly<Record<SectionId, string>> = {
   economy: 'اقتصاد',
   contracts: 'قراردادها',
   budget: 'بودجه',
+  military: 'نظامی',
   politics: 'سیاست',
   decisions: 'تصمیم‌ها',
   events: 'رویدادها',
@@ -69,6 +71,7 @@ const TAB_ORDER: readonly SectionId[] = [
   'economy',
   'contracts',
   'budget',
+  'military',
   'politics',
   'decisions',
   'events',
@@ -206,6 +209,7 @@ export class PresidentDashboard {
     this.refreshOverview(countryId, month);
     this.refreshEconomy(countryId);
     this.refreshContracts(countryId);
+    this.refreshMilitary(countryId);
     this.refreshBudget(countryId);
     this.refreshPolitics(countryId);
     this.refreshDecisions(countryId, month);
@@ -247,6 +251,7 @@ export class PresidentDashboard {
     this.sections.set('economy', this.buildEconomy(body));
     this.sections.set('contracts', this.buildContracts(body));
     this.sections.set('budget', this.buildBudget(body));
+    this.sections.set('military', this.buildMilitary(body));
     this.sections.set('politics', this.buildPolitics(body));
     this.sections.set('decisions', this.buildDecisions(body));
     this.sections.set('events', this.buildEvents(body));
@@ -339,6 +344,16 @@ export class PresidentDashboard {
    */
   private buildContracts(container: UIElement): UIElement {
     const section = this.section(container, 'pd-contracts');
+    // THE EXPORT REQUESTS (the export-request directive §3) — pending
+    // formal requests from other countries to BUY the player's goods, read
+    // straight from `state.economy.exportRequests`; each pending request
+    // carries the president's two choices: موافقت / مخالفت.
+    const requestsTitle = this.create('div', 'pd-subtitle');
+    requestsTitle.setText('درخواست‌های صادرات');
+    section.appendChild(requestsTitle);
+    const requestsList = this.create('div', 'pd-requests');
+    section.appendChild(requestsList);
+    this.track(requestsList, 'requests');
     const title = this.create('div', 'pd-subtitle');
     title.setText('قراردادهای تجاری');
     section.appendChild(title);
@@ -348,8 +363,133 @@ export class PresidentDashboard {
     return section;
   }
 
-  /** Rebuilds the contract list when anything about it actually changed. */
+  /**
+   * THE MILITARY PANEL (the military directive §4-§7) — the buildable
+   * MILITARY infrastructure (training camp / tank plant / air plant), the
+   * SAME construction pipeline the economy tab uses: ساخت activates the
+   * ONE build mode, a map click previews the region, تأیید starts the
+   * project (money + materials + workforce paid once, one facility per
+   * region — the SAME core rules).
+   */
+  private buildMilitary(container: UIElement): UIElement {
+    const section = this.section(container, 'pd-military');
+    const title = this.create('div', 'pd-subtitle');
+    title.setText('ساختمان‌های نظامی');
+    section.appendChild(title);
+    const note = this.create('div', 'pd-build-hint');
+    note.setText(
+      'تأسیسات نظامی با همان سیستم ساخت‌وساز اقتصادی ساخته می‌شوند؛ هر منطقه فقط یک تأسیسات اصلی (نظامی یا اقتصادی) می‌تواند داشته باشد.'
+    );
+    section.appendChild(note);
+    const list = this.create('div', 'pd-construction');
+    section.appendChild(list);
+    this.track(list, 'militaryBuildables');
+    return section;
+  }
+
+  /** Rebuilds the military tab: active military projects + the buildables. */
+  private refreshMilitary(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const militaryDefs = config.buildings.filter((candidate) => candidate.kind === 'military');
+    const construction = state.economy.construction[countryId];
+    const projects = (construction?.projects ?? []).filter((project) =>
+      militaryDefs.some((candidate) => candidate.id === project.typeId)
+    );
+    const treasury = Math.floor(state.economy.treasury[countryId] ?? 0);
+    const record = state.economy.resources[countryId];
+    const materialsStock = Math.round(record?.stock.industrial ?? 0);
+    const heldWorkforce = workforceUsedBy(state, countryId, config);
+    const workforceCapacity = workforceCapacityOf(state, countryId, config);
+    const allProjects = construction?.projects ?? [];
+    const gridIdOf = (cellKey: string): string => cellKey.slice(cellKey.indexOf('#') + 1);
+    const speed = constructionSpeedFactorOf(state, countryId);
+    const signature =
+      JSON.stringify(projects.map((project) => [project.id, project.typeId, project.progress, project.cellKey])) +
+      `#${treasury}#${materialsStock}#${heldWorkforce}#${workforceCapacity}#${allProjects.length}#${state.map.buildMode ?? ''}`;
+    if (signature === this.dynamicSignatures.get('militaryBuildables')) return;
+    this.dynamicSignatures.set('militaryBuildables', signature);
+    this.rebuild('militaryBuildables', this.parents.get('militaryBuildables'), () => {
+      const rows: UIElement[] = [];
+      if (state.map.buildMode !== null && militaryDefs.some((candidate) => candidate.id === state.map.buildMode)) {
+        const def = militaryDefs.find((candidate) => candidate.id === state.map.buildMode);
+        const hint = this.create('div', 'pd-build-hint');
+        hint.setText(
+          `حالت ساخت فعال: ${def?.name ?? state.map.buildMode} — یک منطقهٔ خالی از کشور خود را روی نقشه انتخاب کنید`
+        );
+        const cancel = this.create('button', 'pd-build-cancel');
+        cancel.setText('لغو ساخت');
+        cancel.onClick(() => this.send({ type: 'economy.buildMode', typeId: null }));
+        hint.appendChild(cancel);
+        rows.push(hint);
+      }
+      for (const project of projects) {
+        const def = militaryDefs.find((candidate) => candidate.id === project.typeId);
+        if (def === undefined) continue;
+        const card = this.create('div', 'pd-project');
+        const head = this.create('div', 'pd-project-head');
+        const name = this.create('span', 'pd-project-name');
+        name.setText(`${def.name} — منطقه ${gridIdOf(project.cellKey)}`);
+        head.appendChild(name);
+        const progress = this.create('span', 'pd-project-progress');
+        progress.setText(
+          `باقی‌مانده: ${faNum(projectMonthsRemaining(project.progress, def.buildMonths, speed))} ماه`
+        );
+        head.appendChild(progress);
+        card.appendChild(head);
+        const status = this.create('div', 'pd-project-status running');
+        status.setText('در حال ساخت');
+        card.appendChild(status);
+        rows.push(card);
+      }
+      for (const def of militaryDefs) {
+        const row = this.create('div', 'pd-buildable');
+        const info = this.create('div', 'pd-buildable-info');
+        const name = this.create('span', 'pd-buildable-name');
+        name.setText(def.name);
+        info.appendChild(name);
+        const detail = this.create('div', 'pd-buildable-detail');
+        detail.setText(
+          `هزینه: ${faNum(def.cost)} پول · ${faNum(def.materials)} مصالح · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه`
+        );
+        info.appendChild(detail);
+        row.appendChild(info);
+        const build = this.create('button', 'pd-build');
+        const atCap = allProjects.length >= config.construction.maxProjects;
+        if (state.map.buildMode === def.id) {
+          build.setText('در حال انتخاب منطقه…');
+          build.setAttribute('disabled', 'true');
+        } else if (atCap) {
+          build.setText('ظرفیت ساخت پُر است');
+          build.setAttribute('disabled', 'true');
+        } else if (treasury < def.cost) {
+          build.setText(`پول کافی نیست (${faNum(def.cost)})`);
+          build.setAttribute('disabled', 'true');
+        } else if (materialsStock < def.materials) {
+          build.setText(`مصالح کافی نیست (${faNum(def.materials)})`);
+          build.setAttribute('disabled', 'true');
+        } else if (heldWorkforce + def.workforce > workforceCapacity) {
+          build.setText(`نیروی کار کافی نیست (${faNum(def.workforce)})`);
+          build.setAttribute('disabled', 'true');
+        } else {
+          build.setText('ساخت');
+          build.onClick(() => {
+            this.send({ type: 'economy.buildMode', typeId: def.id });
+            this.send({ type: 'ui.closeScreen', screenId: 'president' });
+          });
+        }
+        row.appendChild(build);
+        rows.push(row);
+      }
+      return rows;
+    });
+  }
+
+  /** Rebuilds the export-request list + the contract list on real change. */
   private refreshContracts(countryId: string): void {
+    this.rebuildRequests(countryId);
     const context = this.context;
     if (context === undefined || context === null) return;
     const config = context.data.economyData.strategicResources;
@@ -376,6 +516,97 @@ export class PresidentDashboard {
       }
       for (const contract of contracts) {
         rows.push(this.contractRow(state, config, contract, countryId));
+      }
+      return rows;
+    });
+  }
+
+  /**
+   * THE EXPORT REQUESTS (the export-request directive §3) — pending
+   * requests first: «کشور X می‌خواهد ماهانه N واحد [good] از کشور شما
+   * خریداری کند.» + the president's موافقت / مخالفت; decided requests
+   * follow as the decision history. Read straight from the real State —
+   * approve/reject send the core commands (the guard lives in Game, not
+   * the UI).
+   */
+  private rebuildRequests(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const requests = (state.economy.exportRequests ?? []).filter(
+      (entry) => entry.sellerId === countryId
+    );
+    const resourceName = (id: string): string =>
+      config.resources.find((resource) => resource.id === id)?.name ?? id;
+    const signature =
+      requests
+        .map((entry) => [entry.id, entry.status, entry.amountPerMonth].join(':'))
+        .join('|') + `#${countryId}`;
+    if (signature === this.dynamicSignatures.get('requests')) return;
+    this.dynamicSignatures.set('requests', signature);
+    this.rebuild('requests', this.parents.get('requests'), () => {
+      const rows: UIElement[] = [];
+      if (requests.length === 0) {
+        const empty = this.create('div', 'pd-trade-empty');
+        empty.setText('هیچ درخواست صادراتی باز یا بسته‌ای وجود ندارد.');
+        rows.push(empty);
+        return rows;
+      }
+      const pending = requests.filter((entry) => entry.status === 'pending');
+      const decided = requests.filter((entry) => entry.status !== 'pending');
+      for (const request of pending) {
+        const card = this.create('div', 'pd-request pending');
+        const head = this.create('div', 'pd-request-head');
+        const buyer = this.create('span', 'pd-request-name');
+        buyer.setText(state.countries.countries[request.buyerId]?.name ?? request.buyerId);
+        head.appendChild(buyer);
+        const chip = this.create('span', 'pd-request-status pending');
+        chip.setText('در انتظار پاسخ');
+        head.appendChild(chip);
+        card.appendChild(head);
+        const body = this.create('div', 'pd-request-body');
+        body.setText(
+          `کشور ${state.countries.countries[request.buyerId]?.name ?? request.buyerId} می‌خواهد ماهانه ${faNum(request.amountPerMonth)} واحد ${resourceName(request.resourceId)} از کشور شما خریداری کند.`
+        );
+        card.appendChild(body);
+        const price = this.create('div', 'pd-request-detail');
+        price.setText(
+          `قیمت هر واحد: ${faNum(request.price, request.price % 1 !== 0 ? 1 : 0)} · درآمد ماهانهٔ تقریبی: ${faNum(Math.round(request.amountPerMonth * request.price))}`
+        );
+        card.appendChild(price);
+        const actions = this.create('div', 'pd-request-actions');
+        const approve = this.create('button', 'pd-request-approve');
+        approve.setText('موافقت');
+        approve.onClick(() =>
+          this.send({ type: 'economy.approveExportRequest', requestId: request.id })
+        );
+        actions.appendChild(approve);
+        const reject = this.create('button', 'pd-request-reject');
+        reject.setText('مخالفت');
+        reject.onClick(() =>
+          this.send({ type: 'economy.rejectExportRequest', requestId: request.id })
+        );
+        actions.appendChild(reject);
+        card.appendChild(actions);
+        rows.push(card);
+      }
+      for (const request of decided) {
+        const card = this.create('div', `pd-request ${request.status}`);
+        const head = this.create('div', 'pd-request-head');
+        const buyer = this.create('span', 'pd-request-name');
+        buyer.setText(state.countries.countries[request.buyerId]?.name ?? request.buyerId);
+        head.appendChild(buyer);
+        const chip = this.create('span', `pd-request-status ${request.status}`);
+        chip.setText(request.status === 'approved' ? 'موافقت شد' : 'مخالفت شد');
+        head.appendChild(chip);
+        card.appendChild(head);
+        const body = this.create('div', 'pd-request-detail');
+        body.setText(
+          `${faNum(request.amountPerMonth)} واحد ${resourceName(request.resourceId)} / ماه`
+        );
+        card.appendChild(body);
+        rows.push(card);
       }
       return rows;
     });
@@ -746,6 +977,9 @@ export class PresidentDashboard {
       workHead.setText(`ظرفیت ساخت: ${faNum(projects.length)}/${faNum(config.construction.maxProjects)} · نیروی کار ساخت: ${faNum(heldWorkforce)} از ${faNum(workforceCapacity)} · مصالح (کالاهای صنعتی): ${faNum(materialsStock)}`);
       rows.push(workHead);
       for (const def of config.buildings) {
+        // MILITARY buildings live in the نظامی tab (the military directive
+        // §4) — the economy tab lists the production buildings only.
+        if (def.kind === 'military' || def.resource === undefined) continue;
         const row = this.create('div', 'pd-buildable');
         const info = this.create('div', 'pd-buildable-info');
         const name = this.create('span', 'pd-buildable-name');
@@ -904,25 +1138,34 @@ export class PresidentDashboard {
           const row = this.create('div', 'pd-purchase-row');
           const label = this.create('span', 'pd-purchase-seller');
           // THE SELLER'S OWN FIXED SALE QUANTITY (the sale-quantity
-          // directive §2/§5/§8) — not this country's need.
+          // directive §2/§5/§8) — not this country's need. The number the
+          // row shows is the SELLER'S real, variable offer — never the
+          // buyer's want.
           label.setText(`${countryName(seller.countryId)} — عرضه فروش: ${faNum(seller.amount)} واحد در ماه`);
           row.appendChild(label);
-          const sign = this.create('button', 'pd-buy');
           // A MONTHLY CONTRACT (§6): the buyer's want capped by the
           // seller's remaining offer — demand beyond the quota buys
           // nothing extra, and the rest of the quota stays for later deals
-          // (signing reserves it, §16).
-          const amount = Math.min(seller.amount, Math.max(1, Math.ceil(entry.need)));
-          sign.setText(`قرارداد ماهانه ${faNum(amount)}`);
-          sign.onClick(() =>
-            this.send({
-              type: 'economy.signContract',
-              countryId,
-              sellerId: seller.countryId,
-              resourceId: entry.resourceId,
-              amountPerMonth: amount
-            })
-          );
+          // (signing reserves it, §16). A good the player does not NEED
+          // shows no purchase amount at all (the sale-quantity directive:
+          // a "1" on every row read as if every seller sold one unit).
+          const sign = this.create('button', 'pd-buy');
+          if (entry.need <= 0) {
+            sign.setText('بدون نیاز خرید');
+            sign.setAttribute('disabled', 'true');
+          } else {
+            const amount = Math.min(seller.amount, Math.ceil(entry.need));
+            sign.setText(`قرارداد ماهانه ${faNum(amount)}`);
+            sign.onClick(() =>
+              this.send({
+                type: 'economy.signContract',
+                countryId,
+                sellerId: seller.countryId,
+                resourceId: entry.resourceId,
+                amountPerMonth: amount
+              })
+            );
+          }
           row.appendChild(sign);
           block.appendChild(row);
         }

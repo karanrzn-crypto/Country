@@ -105,4 +105,9 @@ export type GameCommand =
   | { readonly type: 'economy.buildMode'; readonly typeId: string | null }
   /** CONFIRM the build preview (spec §21): starts the construction on the
    *  previewed cell (the player saw the quality + estimated output). */
-  | { readonly type: 'economy.confirmConstruction'; readonly countryId: string };
+  | { readonly type: 'economy.confirmConstruction'; readonly countryId: string }
+  /** The president's DECISION on ONE export request (the export-request
+   *  directive §3): approve signs the monthly contract (AI buyer ← player
+   *  seller), reject settles the request with nothing created. */
+  | { readonly type: 'economy.approveExportRequest'; readonly requestId: string }
+  | { readonly type: 'economy.rejectExportRequest'; readonly requestId: string };

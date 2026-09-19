@@ -595,6 +595,37 @@ describe('save migrations (v1 → … → v19)', () => {
     expect(economy.resources.country_0.shortageMonths).toEqual({});
   });
 
+  it('v19→v20: the EXPORT REQUESTS + MILITARY economy — the empty request book appears', () => {
+    const v19 = {
+      state: {
+        economy: {
+          treasury: { country_0: 5000 },
+          contracts: [],
+          resources: {
+            country_0: {
+              stock: { food: 900 }, production: {}, consumption: {}, imports: {}, exports: {},
+              shortage: {}, shortageMonths: {}, tradeIncome: 0, tradeExpense: 0
+            }
+          },
+          finance: { country_0: { lastTaxIncome: 90, lastTradeIncome: 0, lastArmyExpense: 10, lastGovernmentExpense: 5, lastInfrastructureExpense: 2, lastBalance: 73 } },
+          construction: { country_0: { projects: [] } },
+          buildings: { country_0: { b1: { id: 'b1', typeId: 'training_camp', cellKey: 'country_0#A1' } } },
+          economyLevel: { country_0: 50 }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v19, 19, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, any> } }).state.economy;
+    // The additive request book appears EMPTY — old saves never held a
+    // pending export request (the export-request directive).
+    expect(economy.exportRequests).toEqual([]);
+    // A v19 save may already carry military buildings (the config now
+    // defines the types) — the migration preserves them untouched.
+    expect(economy.buildings.country_0.b1).toMatchObject({ typeId: 'training_camp' });
+  });
+
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {
     const { data } = applyMigrations(v1, 1, 2);
     const migrated = data as { state: Record<string, unknown> };

@@ -37,6 +37,7 @@
 import type { GameState } from '../state/GameState';
 import type { StrategicMapModel } from '../world/map/MapTypes';
 import type { StrategicResourcesConfig } from './types';
+import type { TradeRequest } from './resourceTypes';
 import { resourceDisplayStatusOf, safetyReserveUnits } from './resources';
 import { countryPotentialFactor } from './quality';
 import {
@@ -45,7 +46,9 @@ import {
   signContract,
   cancelContract,
   activeContractsOf,
-  unitPriceOf
+  unitPriceOf,
+  playerCountryIdOf,
+  requestExport
 } from './contracts';
 import type { Random } from '../utils/Random';
 import { roundTo } from '../utils/math';
@@ -86,7 +89,13 @@ export function aiSecureConstructionMaterials(
   if (price <= 0) return false;
   // The sellers of industrial goods, largest REAL available surplus first
   // (§3/§16 — offers come from real surplus, never from a buyer's need).
-  const sellers = marketOffersOf(state, countryId, 'industrial', config);
+  // The PLAYER's country is NEVER a direct-deal seller (the export-request
+  // directive §3): its goods move only through contracts the president
+  // signed — the AI secures its materials from AI sellers only.
+  const player = playerCountryIdOf(state);
+  const sellers = marketOffersOf(state, countryId, 'industrial', config).filter(
+    (seller) => seller.countryId !== player
+  );
   let stillMissing = missing;
   for (const seller of sellers) {
     if (stillMissing <= 0) break;
@@ -203,8 +212,19 @@ export function aiBuildingTypeId(
  *     surplus only), sized min(need, offer) and checked against the
  *     treasury (signContract guards capacity + first month's bill).
  *
+ * THE EXPORT-REQUEST RULE (the export-request directive §3): when the best
+ * seller of the needed good is the PLAYER's country, the AI does NOT sign
+ * — it FILES A FORMAL EXPORT REQUEST the president approves (a contract
+ * forms) or rejects (nothing happens). Pending duplicates and rejected
+ * requests in their cooldown are refused by requestExport's own guards.
+ * AI-to-AI trade stays direct — the world market keeps working.
+ *
  * Deterministic ordering: config resource order for the need scan, the
  * market's largest-offer-first order for the seller pick.
+ *
+ * @returns the export request it just filed against the player's country
+ *          (for the caller's event), or null for a direct AI-to-AI
+ *          signature / no action this month.
  */
 export function aiTradeStep(
   state: GameState,
@@ -213,9 +233,9 @@ export function aiTradeStep(
   month: number,
   rng: Random,
   newId: (kind: string) => string
-): void {
+): TradeRequest | null {
   const record = state.economy.resources[countryId];
-  if (record === undefined) return;
+  if (record === undefined) return null;
 
   // —— ۱. cancel import contracts the country no longer needs ——
   for (const contract of activeContractsOf(state, countryId)) {
@@ -232,7 +252,7 @@ export function aiTradeStep(
 
   // —— ۲. at most ONE new contract this month, for the largest uncovered
   //      shortage that no active contract already serves (§23) ——
-  if (!rng.chance(AI_CONTRACT_CHANCE)) return;
+  if (!rng.chance(AI_CONTRACT_CHANCE)) return null;
   let neededResource: string | null = null;
   let worst = 0;
   for (const resource of config.resources) {
@@ -242,11 +262,25 @@ export function aiTradeStep(
       neededResource = resource.id;
     }
   }
-  if (neededResource === null) return;
-  if (hasActiveImportContract(state, countryId, neededResource)) return;
+  if (neededResource === null) return null;
+  if (hasActiveImportContract(state, countryId, neededResource)) return null;
   const offers = marketOffersOf(state, countryId, neededResource, config);
-  if (offers.length === 0) return; // no real seller — the shortage stays (§25)
+  if (offers.length === 0) return null; // no real seller — the shortage stays (§25)
   const best = offers[0];
+  // The PLAYER's goods need the PRESIDENT'S CONSENT — file a request.
+  if (best.countryId === playerCountryIdOf(state)) {
+    const filed = requestExport(
+      state,
+      countryId,
+      best.countryId,
+      neededResource,
+      Math.min(worst, best.amount),
+      month,
+      config,
+      newId
+    );
+    return filed.ok ? filed.request : null;
+  }
   signContract(
     state,
     countryId,
@@ -257,4 +291,5 @@ export function aiTradeStep(
     config,
     newId
   );
+  return null;
 }

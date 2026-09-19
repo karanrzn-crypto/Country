@@ -110,7 +110,12 @@
     ],
     "productionScale": 1.92,
     "market": {
-      "saleQuotaShare": 0.5
+      "saleQuotaShare": 0.5,
+      "requestCooldownMonths": 6
+    },
+    "consumptionGrowth": {
+      "perYear": 0.03,
+      "maxFactor": 4
     },
     "economicBudget": {
       "productionPerPoint": 0.006
@@ -258,6 +263,39 @@
         "workforce": 400,
         "reserveUnits": 0,
         "buildMonths": 12
+      },
+      {
+        "id": "training_camp",
+        "name": "اردوگاه آموزش سرباز",
+        "kind": "military",
+        "output": 0,
+        "cost": 1200,
+        "materials": 150,
+        "workforce": 180,
+        "reserveUnits": 0,
+        "buildMonths": 8
+      },
+      {
+        "id": "tank_plant",
+        "name": "کارخانه تانک و تجهیزات زمینی",
+        "kind": "military",
+        "output": 0,
+        "cost": 2600,
+        "materials": 350,
+        "workforce": 260,
+        "reserveUnits": 0,
+        "buildMonths": 12
+      },
+      {
+        "id": "air_plant",
+        "name": "کارخانه تجهیزات هوایی",
+        "kind": "military",
+        "output": 0,
+        "cost": 3200,
+        "materials": 450,
+        "workforce": 300,
+        "reserveUnits": 0,
+        "buildMonths": 14
       }
     ],
     "finance": {

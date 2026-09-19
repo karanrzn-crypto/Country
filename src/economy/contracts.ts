@@ -33,7 +33,7 @@
  */
 
 import type { GameState } from '../state/GameState';
-import type { TradeContract } from './resourceTypes';
+import type { TradeContract, TradeRequest } from './resourceTypes';
 import type { StrategicResourcesConfig } from './types';
 import { safetyReserveUnits } from './resources';
 import { roundTo } from '../utils/math';
@@ -96,9 +96,29 @@ export function availableSurplusOf(
 }
 
 /**
- * The EXPORT CAPACITY of ONE country for ONE good — the physical spare
- * stock above the safety reserve (commitments NOT yet subtracted). The
- * raw material the sale quota is cut from. Whole units.
+ * The PLAYER's country id — or null when no campaign country is confirmed
+ * yet. The export-request rule keys off this: an AI can never SIGN a
+ * contract that sells the player's goods; it must ASK (a TradeRequest the
+ * president approves or rejects).
+ */
+export function playerCountryIdOf(state: GameState): string | null {
+  return state.player.countryConfirmed ? state.player.countryId : null;
+}
+
+/**
+ * The EXPORT CAPACITY of ONE country for ONE good (the sale-quantity
+ * directive's raw material) — the physical spare stock above the safety
+ * reserve PLUS the month's real PRODUCTION SURPLUS FLOW:
+ *
+ *     capacity = stock − reserve + max(0, production − consumption)
+ *
+ * The flow term is what makes a fresh-campaign market REAL (the stock-only
+ * formula offered 0-1 units everywhere at month 0: starting stockpiles sit
+ * exactly AT the safety buffer) and what makes the offers breathe — the
+ * number moves from month to month with the seller's own production and
+ * consumption. The flow can never OVER-commit: the monthly execution finds
+ * the seller's spare AFTER this month's production landed, which is always
+ * ≥ the flow-inclusive signing capacity. Whole units.
  */
 export function exportCapacityOf(
   state: GameState,
@@ -108,11 +128,13 @@ export function exportCapacityOf(
 ): number {
   const record = state.economy.resources[sellerId];
   if (record === undefined) return 0;
-  return Math.max(
+  const stock = Math.floor(record.stock[resourceId] ?? 0);
+  const reserve = safetyReserveUnits(record.consumption, resourceId, config);
+  const flow = Math.max(
     0,
-    Math.floor(record.stock[resourceId] ?? 0) -
-      safetyReserveUnits(record.consumption, resourceId, config)
+    Math.round((record.production[resourceId] ?? 0) - (record.consumption[resourceId] ?? 0))
   );
+  return Math.max(0, stock - reserve + flow);
 }
 
 /**
@@ -209,7 +231,8 @@ export type SignContractResult =
         | 'self-contract'
         | 'bad-amount'
         | 'no-capacity'
-        | 'no-funds';
+        | 'no-funds'
+        | 'player-seller-forbidden';
     };
 
 /**
@@ -224,7 +247,12 @@ export type SignContractResult =
  *    fixed quota minus what active contracts already claim — a buyer's
  *    need never inflates it, and Σ commitments can never exceed the quota);
  *  - the buyer can pay the FIRST month's bill (money is checked again at
- *    every execution — a broke buyer simply receives less, §9).
+ *    every execution — a broke buyer simply receives less, §9);
+ *  - THE PLAYER'S GOODS ARE NEVER SOLD WITHOUT CONSENT (the export-request
+ *    directive §3): when the seller is the confirmed PLAYER country, only
+ *    the export-request approval path ({@link approveExportRequest}, via
+ *    `viaRequest`) may sign — an AI (or any other route) is refused with
+ *    'player-seller-forbidden'.
  *
  * The contract starts ACTIVE; its FIRST delivery arrives in the next
  * monthly cycle (§12's order — a mid-month signature commits the FUTURE
@@ -238,12 +266,17 @@ export function signContract(
   amountPerMonth: number,
   month: number,
   config: StrategicResourcesConfig,
-  newId: (kind: string) => string
+  newId: (kind: string) => string,
+  viaRequest = false
 ): SignContractResult {
   if (!config.resources.some((resource) => resource.id === resourceId)) {
     return { ok: false, reason: 'unknown-resource' };
   }
   if (sellerId === buyerId) return { ok: false, reason: 'self-contract' };
+  const player = playerCountryIdOf(state);
+  if (!viaRequest && sellerId === player) {
+    return { ok: false, reason: 'player-seller-forbidden' };
+  }
   if (
     state.economy.resources[buyerId] === undefined ||
     state.economy.resources[sellerId] === undefined ||
@@ -298,6 +331,173 @@ export function cancelContract(
   contract.status = 'cancelled';
   contract.cancelledMonth = month;
   return 'ok';
+}
+
+// —————— THE FORMAL EXPORT REQUESTS (the export-request directive) ——————
+
+export type RequestExportResult =
+  | { readonly ok: true; readonly request: TradeRequest }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | 'unknown-resource'
+        | 'unknown-country'
+        | 'self-request'
+        | 'bad-amount'
+        | 'no-capacity'
+        | 'not-the-player'
+        | 'duplicate'
+        | 'cooldown';
+    };
+
+/**
+ * Files ONE formal export request against the PLAYER's country (the
+ * export-request directive §3): `buyerId` (an AI) asks `sellerId` (the
+ * player) to sell `amountPerMonth` units monthly. Guards:
+ *  - the good and both countries exist; never a self-request;
+ *  - the SELLER IS THE CONFIRMED PLAYER country (AI-to-AI trade signs
+ *    directly — the request flow exists for the president's consent);
+ *  - the amount is positive AND ≤ the seller's REMAINING SALE OFFER
+ *    (honest sizing — a request beyond the seller's quota is refused);
+ *  - no PENDING duplicate for the same buyer+seller+good;
+ *  - a REJECTED request for the same triple blocks re-asking for
+ *    `market.requestCooldownMonths` (no monthly pestering).
+ *
+ * The request does NOT move anything — it waits for the president.
+ */
+export function requestExport(
+  state: GameState,
+  buyerId: string,
+  sellerId: string,
+  resourceId: string,
+  amountPerMonth: number,
+  month: number,
+  config: StrategicResourcesConfig,
+  newId: (kind: string) => string
+): RequestExportResult {
+  if (!config.resources.some((resource) => resource.id === resourceId)) {
+    return { ok: false, reason: 'unknown-resource' };
+  }
+  if (sellerId === buyerId) return { ok: false, reason: 'self-request' };
+  if (
+    state.economy.resources[buyerId] === undefined ||
+    state.economy.resources[sellerId] === undefined
+  ) {
+    return { ok: false, reason: 'unknown-country' };
+  }
+  if (sellerId !== playerCountryIdOf(state)) return { ok: false, reason: 'not-the-player' };
+  const amount = Math.floor(amountPerMonth);
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, reason: 'bad-amount' };
+  if (remainingSaleOfferOf(state, sellerId, resourceId, config) < amount) {
+    return { ok: false, reason: 'no-capacity' };
+  }
+  const requests = state.economy.exportRequests ?? [];
+  if (
+    requests.some(
+      (entry) =>
+        entry.status === 'pending' &&
+        entry.buyerId === buyerId &&
+        entry.sellerId === sellerId &&
+        entry.resourceId === resourceId
+    )
+  ) {
+    return { ok: false, reason: 'duplicate' };
+  }
+  if (exportRequestCooldownActive(state, buyerId, sellerId, resourceId, month, config)) {
+    return { ok: false, reason: 'cooldown' };
+  }
+  const request: TradeRequest = {
+    id: newId('request'),
+    buyerId,
+    sellerId,
+    resourceId,
+    amountPerMonth: amount,
+    price: unitPriceOf(config, resourceId),
+    status: 'pending',
+    createdAtMonth: month
+  };
+  state.economy.exportRequests.push(request);
+  return { ok: true, request };
+}
+
+/**
+ * TRUE while a REJECTED request for the same buyer+seller+good still holds
+ * the cooldown (the president said no — the asking country waits
+ * `market.requestCooldownMonths` before asking again).
+ */
+export function exportRequestCooldownActive(
+  state: GameState,
+  buyerId: string,
+  sellerId: string,
+  resourceId: string,
+  month: number,
+  config: StrategicResourcesConfig
+): boolean {
+  const cooldown = Math.max(0, Math.round(config.market.requestCooldownMonths));
+  if (cooldown === 0) return false;
+  return (state.economy.exportRequests ?? []).some(
+    (entry) =>
+      entry.status === 'rejected' &&
+      entry.buyerId === buyerId &&
+      entry.sellerId === sellerId &&
+      entry.resourceId === resourceId &&
+      month - (entry.decidedMonth ?? entry.createdAtMonth) < cooldown
+  );
+}
+
+export type DecideRequestResult =
+  | {
+      readonly ok: true;
+      readonly contract?: TradeContract;
+      readonly reason?: 'no-capacity';
+    }
+  | { readonly ok: false; readonly reason: 'unknown-request' | 'not-pending' | 'sign-refused' };
+
+/**
+ * The president's DECISION on ONE export request (the export-request
+ * directive §3). Approving re-checks the seller's remaining offer at the
+ * decision month and signs the REAL monthly contract (`viaRequest` — the
+ * only path that may sell the player's goods); if the seller's capacity
+ * shrank below the requested amount the approval fails closed with
+ * 'no-capacity' (no partial commitment is invented) — the request stays
+ * pending so the president can reject it later. Rejecting settles the
+ * request ('rejected') — nothing was ever created or moved.
+ */
+export function decideExportRequest(
+  state: GameState,
+  requestId: string,
+  approve: boolean,
+  month: number,
+  config: StrategicResourcesConfig,
+  newId: (kind: string) => string
+): DecideRequestResult {
+  const request = (state.economy.exportRequests ?? []).find((entry) => entry.id === requestId);
+  if (request === undefined) return { ok: false, reason: 'unknown-request' };
+  if (request.status !== 'pending') return { ok: false, reason: 'not-pending' };
+  if (!approve) {
+    request.status = 'rejected';
+    request.decidedMonth = month;
+    return { ok: true };
+  }
+  if (remainingSaleOfferOf(state, request.sellerId, request.resourceId, config) <
+    request.amountPerMonth) {
+    return { ok: true, reason: 'no-capacity' };
+  }
+  const signed = signContract(
+    state,
+    request.buyerId,
+    request.sellerId,
+    request.resourceId,
+    request.amountPerMonth,
+    month,
+    config,
+    newId,
+    true
+  );
+  if (!signed.ok) return { ok: false, reason: 'sign-refused' };
+  request.status = 'approved';
+  request.decidedMonth = month;
+  return { ok: true, contract: signed.contract };
 }
 
 /**

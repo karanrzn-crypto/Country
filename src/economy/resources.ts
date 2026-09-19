@@ -338,6 +338,11 @@ export function singleBuildingOutput(
 ): SingleBuildingOutput {
   const def = config.buildings.find((candidate) => candidate.id === building.typeId);
   if (def === undefined) return { resource: 'food', amount: 0, extraction: 0 };
+  // MILITARY infrastructure (the military directive): the building stands,
+  // occupies its region and shows on the map — it produces NO resource yet.
+  if (def.kind === 'military' || def.resource === undefined) {
+    return { resource: '', amount: 0, extraction: 0 };
+  }
   const cellIndex = findGridCell(model, building.cellKey);
   const quality = cellQualityOf(model, cellIndex, def.resource, config);
   const potential = countryPotentialFactor(model, countryId, def.resource, config);
@@ -416,8 +421,11 @@ export function buildPreviewInfoOf(
   const cellIndex = findGridCell(model, cellKey);
   if (cellIndex < 0) return null;
   const gridId = model.features.gridIds[cellIndex] ?? '';
-  const quality = cellQualityOf(model, cellIndex, def.resource, config);
-  const potential = countryPotentialFactor(model, countryId, def.resource, config);
+  // Military buildings have NO resource — the preview shows the neutral
+  // land quality and a zero output (infrastructure, not production).
+  const resourceId = def.resource ?? '';
+  const quality = cellQualityOf(model, cellIndex, resourceId, config);
+  const potential = countryPotentialFactor(model, countryId, resourceId, config);
   // The preview shows the REAL monthly output under the CURRENT budget
   // (the budget directive §2) — the same combined factor the cycle's
   // buildings use (level × budget), so what the player sees is what the
@@ -515,29 +523,56 @@ export function cellEconomyTintOf(
 // ———————————————————————— consumption: population × military ————————————————
 
 /**
+ * The YEAR-OVER-YEAR DEMAND FACTOR (the demand directive) at ONE campaign
+ * month: (1 + perYear)^(months/12) capped at maxFactor. Stateless — derived
+ * from the absolute month, so saves need no new fields and old + new saves
+ * behave identically. Month 0 → ×1; with perYear 0.06 the demand base is
+ * ×1.79 at year 10, ×3.2 at year 20 (capped at maxFactor).
+ */
+export function consumptionGrowthFactorOf(
+  config: StrategicResourcesConfig,
+  month: number
+): number {
+  const growth = config.consumptionGrowth;
+  if (growth === undefined) return 1;
+  const perYear = Math.max(0, growth.perYear);
+  const cap = Math.max(1, growth.maxFactor);
+  if (perYear === 0 || month <= 0) return 1;
+  const factor = Math.pow(1 + perYear, Math.max(0, month) / 12);
+  return roundTo(Math.min(cap, factor), 6);
+}
+
+/**
  * Monthly consumption of ONE country, derived from LIVE state (spec §6 —
  * every unit has a clear reason and NO country with population consumes
  * zero):
  *  - EVERY good carries a population base (perMillionPopulation) — food,
  *    iron, oil and industrial goods all scale with the people, so a
  *    populated country never records a bogus zero consumption;
- *  - military units add fuel and equipment wear (perMilitaryUnit).
+ *  - the population base compounds with the YEAR-OVER-YEAR demand growth
+ *    (the demand directive — config.consumptionGrowth): needs climb with
+ *    the campaign's years so supply and demand both keep moving and
+ *    production-heavy countries do NOT all drift into permanent exports;
+ *  - military units add fuel and equipment wear (perMilitaryUnit) at the
+ *    flat per-unit rate (wear does not inflate).
  */
 export function countryResourceConsumption(
   state: GameState,
   countryId: string,
-  config: StrategicResourcesConfig
+  config: StrategicResourcesConfig,
+  month = 0
 ): Record<string, number> {
   const consumption: Record<string, number> = {};
   const population = state.countries.countries[countryId]?.population ?? 0;
   const units = liveUnits(state.military).filter((unit) => unit.countryId === countryId).length;
+  const demandFactor = consumptionGrowthFactorOf(config, month);
 
   for (const resource of config.resources) {
     const def = config.consumption[resource.id];
     if (def === undefined) continue;
     let amount = 0;
     if (def.perMillionPopulation !== undefined) {
-      amount += (population / 1_000_000) * def.perMillionPopulation;
+      amount += (population / 1_000_000) * def.perMillionPopulation * demandFactor;
     }
     if (def.perMilitaryUnit !== undefined) {
       amount += units * def.perMilitaryUnit;

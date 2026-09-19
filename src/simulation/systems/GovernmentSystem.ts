@@ -125,7 +125,20 @@ export class GovernmentSystem implements SimulationSystemDef {
     //    one new contract per month, never duplicates for one need.)
     if (state.player.countryId !== countryId && context.map !== undefined) {
       this.processAiEconomy(state, countryId, config, month, rng, (kind) => ids.next(kind), context.map);
-      aiTradeStep(state, countryId, config, month, rng, (kind) => ids.next(kind));
+      // The export-request directive §3: when the AI's best seller is the
+      // PLAYER's country, aiTradeStep files a formal REQUEST instead of a
+      // contract — the president is notified and decides in «قراردادها».
+      const filed = aiTradeStep(state, countryId, config, month, rng, (kind) => ids.next(kind));
+      if (filed !== null) {
+        events.emit('economy.exportRequested', {
+          requestId: filed.id,
+          buyerId: filed.buyerId,
+          sellerId: filed.sellerId,
+          resourceId: filed.resourceId,
+          amountPerMonth: filed.amountPerMonth,
+          price: filed.price
+        });
+      }
     }
 
     // —— 3. public opinion → presidential approval ——
@@ -224,7 +237,7 @@ export class GovernmentSystem implements SimulationSystemDef {
         // industrial units are bought from real sellers — no purchase, no
         // project (a broke country simply skips construction this month).
         if (aiSecureConstructionMaterials(state, countryId, config, def.materials)) {
-          const cell = this.pickBestCell(state, mapModel, countryId, def.resource, config, rng);
+          const cell = this.pickBestCell(state, mapModel, countryId, def.resource ?? '', config, rng);
           if (cell !== null) {
             startProject(state, countryId, config, def.id, cell, month, () => newId('building'));
           }

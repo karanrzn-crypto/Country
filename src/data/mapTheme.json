@@ -168,7 +168,10 @@
       "farm": "#3f9b4f",
       "oil_field": "#2f6fb8",
       "iron_mine": "#a06a2c",
-      "factory": "#d8b825"
+      "factory": "#d8b825",
+      "training_camp": "#7a8f3c",
+      "tank_plant": "#8e3b3b",
+      "air_plant": "#4a7fa5"
     },
     "strategicLow": "#efe9d6",
     "strategicHigh": "#8e2418",

@@ -21,7 +21,7 @@ import type { Game } from '../../../core/Game';
 import type { SystemContext } from '../../../core/GameContext';
 import { runEconomyCycle, taxIncomeOf, armyExpenseOf, governmentExpenseOf, infrastructureExpenseOf } from '../../../economy/economyCycle';
 import { resourceDisplayStatusOf, safetyReserveUnits } from '../../../economy/resources';
-import { marketOffersOf, unitPriceOf, signContract, executeMonthlyContracts } from '../../../economy/contracts';
+import { marketOffersOf, unitPriceOf, signContract, executeMonthlyContracts, exportCapacityOf } from '../../../economy/contracts';
 import { startProject, stepProjects, constructionSpeedFactorOf } from '../../../economy/construction';
 import type { StrategicResourcesConfig } from '../../../economy/types';
 
@@ -145,6 +145,9 @@ describe('simple economy (14-section spec)', () => {
     const reserve = safetyReserveUnits(sellerRecord.consumption, 'iron', config);
     // 200 REAL spare units → the seller's FIXED sale quota is 100 (half).
     sellerRecord.stock.iron = reserve + 200;
+    // The capacity also carries the month's surplus FLOW (the demand
+    // directive) — neutralize it here so the quota below is EXACTLY 100.
+    sellerRecord.production.iron = sellerRecord.consumption.iron ?? 0;
     state.economy.treasury[buyerId] = 100000; // plenty of money
 
     // 5,000/month against a 100-unit quota → NO-CAPACITY (the market can
@@ -174,26 +177,26 @@ describe('simple economy (14-section spec)', () => {
     if (!broke.ok) expect(broke.reason).toBe('no-funds');
   });
 
-  it('T6 the market offers only the sellers\' FIXED sale quotas — spare above reserve × the config share, minus commitments (§2/§3/§16)', () => {
+  it('T6 the market offers only the sellers\' FIXED sale quotas — capacity × the config share, minus commitments (§2/§3/§16 + the demand directive)', () => {
     const state = context.state;
     const buyerId = playerCountryId;
     const offers = marketOffersOf(state, buyerId, 'oil', config);
     for (const offer of offers) {
       const record = state.economy.resources[offer.countryId]!;
-      const spare = Math.max(0, Math.floor((record.stock.oil ?? 0) - safetyReserveUnits(record.consumption, 'oil', config)));
-      // The offer is the seller's OWN quota: spare × saleQuotaShare (no
-      // contracts are active in this check, so nothing is committed yet).
-      expect(offer.amount).toBe(Math.floor(spare * config.market.saleQuotaShare));
+      // The offer is the seller's OWN quota: capacity (stock spare above
+      // the reserve PLUS the month's real surplus flow) × saleQuotaShare —
+      // never any buyer's need (no contracts are active in this check, so
+      // nothing is committed yet).
+      const capacity = exportCapacityOf(state, offer.countryId, 'oil', config);
+      expect(offer.amount).toBe(Math.floor(capacity * config.market.saleQuotaShare));
+      void record;
     }
-    // A country never appears as its own seller; a country with NO spare
-    // stock never appears at all (§3 — no fake sellers).
+    // A country never appears as its own seller; a country with NO real
+    // capacity never appears at all (§3 — no fake sellers).
     expect(offers.some((offer) => offer.countryId === buyerId)).toBe(false);
     for (const id of ids()) {
       if (id === buyerId) continue;
-      const record = state.economy.resources[id]!;
-      const spare = Math.floor((record.stock.oil ?? 0) -
-        safetyReserveUnits(record.consumption, 'oil', config));
-      if (spare <= 0) {
+      if (exportCapacityOf(state, id, 'oil', config) <= 0) {
         expect(offers.some((offer) => offer.countryId === id)).toBe(false);
       }
     }

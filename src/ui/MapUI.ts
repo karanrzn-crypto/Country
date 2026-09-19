@@ -593,6 +593,10 @@ export class MapUI {
             const def = config.buildings.find((candidate) => candidate.id === atCell.typeId);
             const building = context.state.economy.buildings[atCell.countryId]?.[atCell.buildingId];
             const produced = config.resources.find((candidate) => candidate.id === def?.resource);
+            // The military directive §7: the region panel NAMES the kind —
+            // a military facility is visible as exactly that.
+            const facilityLabel =
+              def?.kind === 'military' ? 'تأسیسات نظامی' : 'ساختمان اقتصادی';
             // The building's REAL output (quality × potential × level ×
             // diminishing, reserve-capped) — never the flat config number.
             const amount = building !== undefined
@@ -605,7 +609,7 @@ export class MapUI {
                   buildingIndexOfType(context.state, atCell.countryId, atCell.buildingId)
                 ).amount
               : Math.round((def?.output ?? 0) * economyLevelBuildingFactor(context.state, atCell.countryId, config));
-            addRow('ساختمان اقتصادی', def?.name ?? atCell.typeId);
+            addRow(facilityLabel, def?.name ?? atCell.typeId);
             if (produced !== undefined && amount > 0) {
               addRow(`تولید ${produced.name}`, `+${faNum(amount)} / ماه`);
             }
@@ -624,11 +628,11 @@ export class MapUI {
                   constructionSpeedFactorOf(context.state, inBuild.countryId)
                 )
               : 0;
-            addRow('ساختمان اقتصادی', def?.name ?? inBuild.typeId);
+            addRow(def?.kind === 'military' ? 'تأسیسات نظامی' : 'ساختمان اقتصادی', def?.name ?? inBuild.typeId);
             addRow('وضعیت', 'در حال ساخت');
             addRow('زمان باقی‌مانده', `${faNum(remaining)} ماه`);
           } else {
-            addRow('ساختمان اقتصادی', 'بدون ساختمان اقتصادی');
+            addRow('تأسیسات منطقه', 'بدون ساختمان اقتصادی یا نظامی');
           }
         }
         addRow('ساختمان‌ها', info.buildingIds.length > 0 ? String(info.buildingIds.length) : 'هیچ');

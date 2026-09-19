@@ -464,7 +464,7 @@ describe('the hard economy (24-section spec: self-sufficiency is HARD)', () => {
         const key = gridCellKey(countryId, gridId);
         if (economicBuildingAtCell(state, key) !== null) continue;
         if (cellIsUnderConstruction(state, key)) continue;
-        const quality = cellQualityOf(model, cellIndex, def.resource, freshConfig);
+        const quality = cellQualityOf(model, cellIndex, def.resource ?? '', freshConfig);
         if (quality > bestQuality) {
           bestQuality = quality;
           bestKey = key;

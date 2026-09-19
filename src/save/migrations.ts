@@ -818,6 +818,29 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v19 → v20: the EXPORT REQUESTS + MILITARY economy (the new directive).
+    // AI countries may no longer sign contracts that sell the PLAYER's goods
+    // — they file formal export REQUESTS the president approves or rejects.
+    // The additive `economy.exportRequests: []` is injected (old saves never
+    // had a request); military BUILDINGS need no migration — building
+    // records carry a typeId and the config now defines the military types.
+    from: 19,
+    to: 20,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v19\u2192v20: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: Record<string, unknown> };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined && economy['exportRequests'] === undefined) {
+        economy['exportRequests'] = [];
+      }
+      return clone;
+    }
   }
 ];
 

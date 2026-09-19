@@ -416,6 +416,26 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               lastDelivery: { type: 'optional', inner: { type: 'number', min: 0 } }
             }
           }
+        },
+        // The PENDING EXPORT REQUESTS (the export-request directive): AI
+        // countries ask the PLAYER's country to sell to them — the president
+        // approves (a contract forms) or rejects (nothing happens).
+        exportRequests: {
+          type: 'array',
+          items: {
+            type: 'object',
+            fields: {
+              id: { type: 'string' },
+              sellerId: { type: 'string' },
+              buyerId: { type: 'string' },
+              resourceId: { type: 'string' },
+              amountPerMonth: { type: 'number', min: 1 },
+              price: { type: 'number', min: 0 },
+              status: { type: 'enum', values: ['pending', 'approved', 'rejected'] },
+              createdAtMonth: { type: 'number', min: 0 },
+              decidedMonth: { type: 'optional', inner: { type: 'number', min: 0 } }
+            }
+          }
         }
       }
     },

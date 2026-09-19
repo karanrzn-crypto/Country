@@ -15,6 +15,7 @@ import { MenuSystem } from './MenuSystem';
 import { MapUI } from './MapUI';
 import { PresidentDashboard } from './PresidentDashboard';
 import { PresidentStatusPanel } from './PresidentStatusPanel';
+import { faNum } from '../utils/format';
 
 /**
  * UI phase system (render phase). Assembles all UI foundations and wires
@@ -162,6 +163,35 @@ export class UIManager implements PhaseSystem {
           this.dashboard.refresh();
           // The map's cell panel + economy colors follow immediately (§2).
           this.mapUI.refreshInfo();
+        }
+      }),
+      // —— The EXPORT REQUESTS (the export-request directive §3): a country
+      //    asked to buy the player's goods — the president gets a CLEAR
+      //    message and decides in «قراردادها» (موافقت / مخالفت). ——
+      this.events.on('economy.exportRequested', ({ sellerId, buyerId, resourceId, amountPerMonth }) => {
+        if (sellerId === context.state.player.countryId && buyerId !== sellerId) {
+          const config = context.data.economyData.strategicResources;
+          const good = config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
+          const buyer = context.state.countries.countries[buyerId]?.name ?? buyerId;
+          this.notify(
+            'warn',
+            'درخواست صادرات',
+            `کشور ${buyer} می‌خواهد ماهانه ${faNum(amountPerMonth)} واحد ${good} از کشور شما خریداری کند — در برگهٔ «قراردادها» پاسخ دهید.`
+          );
+          this.dashboard.refresh();
+        }
+      }),
+      this.events.on('economy.exportRequestDecided', ({ sellerId, buyerId, approved }) => {
+        if (sellerId === context.state.player.countryId && buyerId !== sellerId) {
+          const buyer = context.state.countries.countries[buyerId]?.name ?? buyerId;
+          this.notify(
+            approved ? 'info' : 'warn',
+            'درخواست صادرات',
+            approved
+              ? `درخواست ${buyer} موافقت شد — قرارداد صادراتی ماهانه شکل گرفت.`
+              : `درخواست ${buyer} مخالفت شد — هیچ قراردادی ساخته نشد.`
+          );
+          this.dashboard.refresh();
         }
       })
     );

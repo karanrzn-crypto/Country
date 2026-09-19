@@ -67,6 +67,7 @@ import {
   strategicResourceIds,
   countryResourceProduction,
   countryResourceConsumption,
+  consumptionGrowthFactorOf,
   buildingProductionOf,
   spendBuildingReserves,
   specializedBaselineProduction,
@@ -187,6 +188,17 @@ export function runEconomyCycle(
   const productionCache = new Map<string, Record<string, number>>();
   const stockAtMonthStart = new Map<string, Record<string, number>>();
   const extractions = new Map<string, Record<string, number>>();
+  // THE YEARS' GROWTH (the demand directive): supply AND demand grow with
+  // the campaign's years. The SAME compounding factor scales the domestic
+  // BASELINE production (the geography's farms/mines modernize with the
+  // population) and the population demand base (countryResourceConsumption,
+  // step ۵) — the year-one export/import MIX therefore SURVIVES the years
+  // instead of drifting into an all-exporter world, while the absolute
+  // volumes keep climbing. The DEPOSITS stay fixed (geology does not grow
+  // — oil and iron become relatively scarcer and trade stays essential)
+  // and BUILDINGS stay absolute (new construction is the growth MARGIN the
+  // presidents control).
+  const growth = consumptionGrowthFactorOf(config, options.month ?? 0);
   for (const countryId of order) {
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
     const record = state.economy.resources[countryId]!;
@@ -206,7 +218,9 @@ export function runEconomyCycle(
     }
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
     for (const [resourceId, amount] of Object.entries(baseline)) {
-      record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount * budgetFactor);
+      record.production[resourceId] = Math.round(
+        (record.production[resourceId] ?? 0) + amount * budgetFactor * growth
+      );
     }
     extractions.set(countryId, buildings.extraction);
     if (applyStep) {
@@ -233,7 +247,9 @@ export function runEconomyCycle(
   // —— ۵. مصرف کالاها (spec §5/§11/§13/§14) → stock −= consumption + THE shortage ——
   for (const countryId of order) {
     const record = state.economy.resources[countryId]!;
-    record.consumption = countryResourceConsumption(state, countryId, config);
+    // The demand directive: the population base compounds with the
+    // campaign's years — THIS month's absolute month drives the factor.
+    record.consumption = countryResourceConsumption(state, countryId, config, options.month ?? 0);
     if (applyStep) {
       // The extraction reserves (spec §8) are spent ONCE the production
       // landed — the reserve caps what the building actually pulled out.

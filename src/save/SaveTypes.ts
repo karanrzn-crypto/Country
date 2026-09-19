@@ -20,8 +20,14 @@ export const SAVE_VERSION_ECONOMY_HARD_MODE = 18;
  *  gone; the market offers derive live from each seller's REAL available
  *  surplus. Adds `economy.contracts: []` (no pre-seeded contracts). */
 export const SAVE_VERSION_ECONOMY_CONTRACTS = 19;
+/** Version of the EXPORT-REQUEST + MILITARY economy (the new directive):
+ *  AI countries file formal export REQUESTS against the player's country
+ *  (the president approves or rejects) — adds `economy.exportRequests: []`;
+ *  military buildings (training camp, tank plant, air plant) join the SAME
+ *  building records + config, needing no extra state fields. */
+export const SAVE_VERSION_ECONOMY_REQUESTS_MILITARY = 20;
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = SAVE_VERSION_ECONOMY_CONTRACTS;
+export const SAVE_VERSION = SAVE_VERSION_ECONOMY_REQUESTS_MILITARY;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */

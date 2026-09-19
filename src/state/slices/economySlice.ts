@@ -22,7 +22,8 @@ import type {
   CountryFinanceState,
   CountryConstructionState,
   BuildingRecord,
-  TradeContract
+  TradeContract,
+  TradeRequest
 } from '../../economy/resourceTypes';
 
 export interface EconomySlice {
@@ -72,6 +73,13 @@ export interface EconomySlice {
    * seller's real export capacity (§16).
    */
   contracts: TradeContract[];
+  /**
+   * The world's PENDING EXPORT REQUESTS (the export-request directive):
+   * AI countries asking the PLAYER's country to sell — the president
+   * approves (a contract forms) or rejects (nothing happens). ONE global
+   * list; decided records stay (the panel shows the decision history).
+   */
+  exportRequests: TradeRequest[];
 }
 
 export function addStockpile(

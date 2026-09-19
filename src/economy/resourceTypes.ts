@@ -112,6 +112,38 @@ export function emptyCountryResourceState(): CountryResourceState {
   };
 }
 
+/**
+ * ONE FORMAL EXPORT REQUEST (the export-request directive §3): a country
+ * (typically an AI) asks the PLAYER's country to SELL it a good — the
+ * president sees a clear message («کشور X می‌خواهد ماهانه N واحد … خریداری
+ * کند») and either APPROVES (a real TradeContract forms; monthly deliveries
+ * + income follow under the ordinary contract system) or REJECTS (nothing
+ * is created, nothing moves). Records live in `state.economy.exportRequests`
+ * (ONE global list — the قراردادها panel reads the real State, §8).
+ * Fully JSON-safe.
+ */
+export interface TradeRequest {
+  readonly id: string;
+  /** The country that WANTS to buy (would pay monthly). */
+  readonly buyerId: string;
+  /** The country asked to SELL — for pending requests this is the player's
+   *  country (AI-to-AI trade signs directly, no approval flow). */
+  readonly sellerId: string;
+  /** Which good (config resource id). */
+  readonly resourceId: string;
+  /** Requested units PER MONTH (≤ the seller's remaining sale offer at
+   *  request time; re-checked at approval). */
+  readonly amountPerMonth: number;
+  /** Money per unit offered (the BASE price at request time). */
+  readonly price: number;
+  /** pending → approved | rejected (decided by the president). */
+  status: 'pending' | 'approved' | 'rejected';
+  /** The absolute month the request was created. */
+  readonly createdAtMonth: number;
+  /** Set when the president decides (approve or reject). */
+  decidedMonth?: number;
+}
+
 // ————————————————————————————— finance (money) ——————————————————————————————
 
 /**
