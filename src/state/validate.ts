@@ -436,6 +436,26 @@ export const GAME_STATE_SCHEMA: FieldSchema = {
               decidedMonth: { type: 'optional', inner: { type: 'number', min: 0 } }
             }
           }
+        },
+        // The ACTIVE ECONOMIC EVENTS per country (the events directive §5):
+        // temporary production cuts with their remaining months. Saves
+        // predating v21 carry {} — the migration/heal injects it.
+        events: {
+          type: 'record',
+          values: {
+            type: 'array',
+            items: {
+              type: 'object',
+              fields: {
+                id: { type: 'string' },
+                typeId: { type: 'string' },
+                resourceId: { type: 'string' },
+                factor: { type: 'number', min: 0, max: 1 },
+                monthsRemaining: { type: 'number', min: 0, max: 120 },
+                startedMonth: { type: 'number', min: 0 }
+              }
+            }
+          }
         }
       }
     },

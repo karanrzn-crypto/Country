@@ -114,11 +114,47 @@
       "requestCooldownMonths": 6
     },
     "consumptionGrowth": {
-      "perYear": 0.03,
+      "graceYears": 5,
+      "perYear": 0.05,
       "maxFactor": 4
     },
     "economicBudget": {
       "productionPerPoint": 0.006
+    },
+    "storage": {
+      "maxMonths": 8,
+      "floor": {
+        "food": 600,
+        "iron": 200,
+        "oil": 150,
+        "industrial": 600
+      },
+      "aiFutureMonths": 3,
+      "aiStockpileChance": 0.2
+    },
+    "economicEvents": {
+      "checkChance": 0.05,
+      "maxConcurrent": 1,
+      "events": [
+        {
+          "id": "refinery_breakdown",
+          "short": "خرابی پالایشگاه نفت",
+          "message": "پالایشگاه نفت کشور شما دچار مشکل شده است — تولید نفت تا پایان رویداد کمتر است و کشور باید واردات کند یا از ذخیره استفاده کند.",
+          "resource": "oil",
+          "factor": 0.5,
+          "durationMonths": 4,
+          "weight": 1
+        },
+        {
+          "id": "famine",
+          "short": "قحطی",
+          "message": "به دلیل کاهش تولید غذا، کشور با کمبود مواد غذایی مواجه شده است — واردات غذا ضروری می‌شود.",
+          "resource": "food",
+          "factor": 0.6,
+          "durationMonths": 5,
+          "weight": 1
+        }
+      ]
     },
     "startingStock": {
       "months": {

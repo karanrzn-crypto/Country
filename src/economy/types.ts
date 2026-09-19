@@ -267,15 +267,23 @@ export interface MarketConfig {
 }
 
 /**
- * YEAR-OVER-YEAR CONSUMPTION GROWTH (the demand directive): the population
- * demand base of EVERY good compounds (1 + perYear)^(months/12) — demand
- * grows with the years so production-heavy countries do NOT all drift into
- * permanent exporting (the supply/demand balance stays alive). Stateless:
- * derived from the absolute campaign month, so saves need no new fields.
- * `maxFactor` caps the compounding so no economy collapses under it.
+ * YEAR-OVER-YEAR CONSUMPTION GROWTH (the demand directive + its growth
+ * refinement): the population demand base of EVERY good stays at its BASE
+ * level for the first `graceYears` years (the opening must not be too hard
+ * — the president gets time to develop the country), THEN begins to grow
+ * GRADUALLY — (1 + perYear) compounded per month after the grace, so each
+ * year's need is larger than the last and no sudden jump ever happens
+ * (population + development raise the domestic need over a long game).
+ * Stateless: derived from the absolute campaign month, so saves need no
+ * new fields and old + new saves behave identically. `maxFactor` caps the
+ * compounding so no economy collapses under it.
  */
 export interface ConsumptionGrowthConfig {
-  /** Yearly growth of the population demand base (0.06 → +6 %/year). */
+  /** Years the consumption stays at its BASE level before growing
+   *  (the growth refinement §1: سال ۱ تا ۵ مصرف پایه). Default 0. */
+  readonly graceYears?: number;
+  /** Yearly growth of the population demand base AFTER the grace
+   *  (0.05 → +5 %/year, compounding monthly). */
   readonly perYear: number;
   /** The compounding ceiling (4 → demand never exceeds ×4 the base). */
   readonly maxFactor: number;
@@ -294,6 +302,61 @@ export interface EconomicBudgetConfig {
   readonly productionPerPoint: number;
 }
 
+/**
+ * THE WAREHOUSE / STORAGE (the storage directive §2): how much of each good
+ * a country can hold FOR THE FUTURE — countries may buy MORE than this
+ * month's consumption (stockpiling for construction, lean months, trade),
+ * but never beyond the warehouse. Optional (undefined → unbounded, legacy
+ * configs): every reader falls back to "no cap".
+ */
+export interface StorageConfig {
+  /** Months of the country's OWN consumption the warehouse holds
+   *  (capacity = maxMonths × monthly consumption, scaled per country). */
+  readonly maxMonths: number;
+  /** The absolute per-good floor for tiny countries (units). */
+  readonly floor: Readonly<Record<string, number>>;
+  /** AI future-gathering: the stock-months an AI country builds toward
+   *  when it has no shortage and money to spare (the storage directive's
+   *  «AI کشورها نیز بتوانند برای آینده منابع جمع کنند»). */
+  readonly aiFutureMonths: number;
+  /** Monthly chance an AI country WITHOUT shortages tries one stockpile
+   *  purchase (kept low — gathering for the future never beats surviving). */
+  readonly aiStockpileChance: number;
+}
+
+/**
+ * ONE ECONOMIC EVENT DEFINITION (the events directive §5): a TEMPORARY
+ * production cut on ONE good — «پالایشگاه نفت خراب شده است» cuts the oil
+ * output, a famine cuts the food output — for `durationMonths` months,
+ * then the economy returns to normal BY ITSELF (nothing is permanent).
+ */
+export interface EconomicEventDef {
+  readonly id: string;
+  /** Persian short name (notifications + the active-events list). */
+  readonly short: string;
+  /** The full Persian notification message shown when the event starts. */
+  readonly message: string;
+  /** Which good's production the event cuts (config resource id). */
+  readonly resource: string;
+  /** The production multiplier while active (0.5 → half output). */
+  readonly factor: number;
+  /** How many months the event lasts, then the economy auto-recovers. */
+  readonly durationMonths: number;
+  /** Relative pick weight when the monthly roll fires (default 1). */
+  readonly weight?: number;
+}
+
+/** The ECONOMIC EVENTS system (the events directive §5) — config-driven. */
+export interface EconomicEventsConfig {
+  /** Monthly chance ONE country STARTS an event (0.05 → every ~20 months
+   *  per country on average — «هر ماه یا هر چند ماه»). */
+  readonly checkChance: number;
+  /** At most THIS many events on ONE country at once (no event storms). */
+  readonly maxConcurrent: number;
+  /** The event pool (each a temporary production cut). */
+  readonly events: readonly EconomicEventDef[];
+}
+
 /** Data-driven tuning of the simple economy (economy.json). */
 export interface StrategicResourcesConfig {
   /** Deposit quantity (1..100) → monthly production multiplier. */
@@ -304,6 +367,12 @@ export interface StrategicResourcesConfig {
   readonly consumptionGrowth: ConsumptionGrowthConfig;
   /** The economic-budget production modifier (§budget — 50 = neutral). */
   readonly economicBudget: EconomicBudgetConfig;
+  /** The WAREHOUSE capacity + AI future-gathering (the storage directive
+   *  §2). Optional: legacy configs without it keep an unbounded warehouse. */
+  readonly storage?: StorageConfig;
+  /** The TEMPORARY economic events (the events directive §5) — optional:
+   *  legacy configs without it simply never fire events. */
+  readonly economicEvents?: EconomicEventsConfig;
   /** Anti-famine safety buffer (§5): months of consumption kept out of
    *  exports — food its own (larger) reserve, others `reserveMonths`. */
   readonly safetyBuffer: { readonly foodMonths: number; readonly reserveMonths: number };

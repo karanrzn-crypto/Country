@@ -144,6 +144,31 @@ export interface TradeRequest {
   decidedMonth?: number;
 }
 
+// ————————————————————————————— economic events ——————————————————————————————
+
+/**
+ * ONE ACTIVE ECONOMIC EVENT (the events directive §5) — a TEMPORARY
+ * production cut on ONE good of ONE country (a broken refinery halves the
+ * oil output; a famine cuts the food output). Lives in
+ * `state.economy.events[countryId]` (JSON-safe); the monthly event step
+ * decrements `monthsRemaining` and the event simply DISAPPEARS at zero —
+ * the next cycle pass produces at the normal rate again (nothing is ever
+ * permanently damaged, §5's «بعد از پایان، اقتصاد به حالت عادی برگردد»).
+ */
+export interface ActiveEconomicEvent {
+  readonly id: string;
+  /** The config EconomicEventDef id (e.g. `refinery_breakdown`). */
+  readonly typeId: string;
+  /** Which good's production is cut (config resource id). */
+  readonly resourceId: string;
+  /** The production multiplier while active (0.5 → half output). */
+  readonly factor: number;
+  /** Months LEFT before the economy auto-recovers. */
+  monthsRemaining: number;
+  /** The absolute month the event started (display/history). */
+  readonly startedMonth: number;
+}
+
 // ————————————————————————————— finance (money) ——————————————————————————————
 
 /**

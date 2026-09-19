@@ -523,11 +523,23 @@ export function cellEconomyTintOf(
 // ———————————————————————— consumption: population × military ————————————————
 
 /**
- * The YEAR-OVER-YEAR DEMAND FACTOR (the demand directive) at ONE campaign
- * month: (1 + perYear)^(months/12) capped at maxFactor. Stateless — derived
- * from the absolute month, so saves need no new fields and old + new saves
- * behave identically. Month 0 → ×1; with perYear 0.06 the demand base is
- * ×1.79 at year 10, ×3.2 at year 20 (capped at maxFactor).
+ * The YEAR-OVER-YEAR DEMAND FACTOR (the demand directive + its growth
+ * refinement) at ONE campaign month. THREE phases, one continuous curve:
+ *
+ *   سال ۱ تا ۵   → ×1 exactly (the grace period — the opening stays at the
+ *                  BASE consumption so the start of the game is not too
+ *                  hard and the president can develop the country);
+ *   سال ۶ به بعد → (1 + perYear) compounded over the months SINCE the
+ *                  grace ended — the growth starts small and every year's
+ *                  increase is larger than the last, but NEVER a sudden
+ *                  jump: the factor is exactly ×1 at the boundary and
+ *                  rises smoothly from there;
+ *   the cap      → maxFactor (no economy collapses under the compounding).
+ *
+ * Stateless — derived from the absolute month, so saves need no new fields
+ * and old + new saves behave identically. Month 0 → ×1; with graceYears 5
+ * and perYear 0.05 the base is ×1.22 at year 10, ×1.55 at year 15, ×1.98
+ * at year 20 (capped at maxFactor).
  */
 export function consumptionGrowthFactorOf(
   config: StrategicResourcesConfig,
@@ -538,7 +550,9 @@ export function consumptionGrowthFactorOf(
   const perYear = Math.max(0, growth.perYear);
   const cap = Math.max(1, growth.maxFactor);
   if (perYear === 0 || month <= 0) return 1;
-  const factor = Math.pow(1 + perYear, Math.max(0, month) / 12);
+  const graceMonths = Math.max(0, Math.round((growth.graceYears ?? 0) * 12));
+  if (month <= graceMonths) return 1;
+  const factor = Math.pow(1 + perYear, (month - graceMonths) / 12);
   return roundTo(Math.min(cap, factor), 6);
 }
 
@@ -600,6 +614,52 @@ export function safetyReserveUnits(
     ? config.safetyBuffer.foodMonths
     : config.safetyBuffer.reserveMonths;
   return Math.ceil(months * monthly);
+}
+
+// ———————————————————————— warehouse capacity (the storage directive) —————————
+
+/**
+ * The WAREHOUSE CAPACITY of ONE resource for ONE country (the storage
+ * directive §2): the stockpile a country can hold for the FUTURE —
+ *
+ *     capacity = max(floor[resource], storage.maxMonths × monthly consumption)
+ *
+ * The months term scales with the country's own need (a big population has
+ * big silos), the absolute floor keeps tiny countries able to stockpile
+ * construction materials. This cap bounds BUYING (contract deliveries and
+ * spot purchases) — domestic production is never truncated by it (a
+ * surplus producer simply sells the rest; the warehouse bounds what a
+ * country can HOARD, not what it can GROW). Config-driven — undefined
+ * storage config means an unbounded warehouse (legacy configs).
+ */
+export function warehouseCapacityOf(
+  consumption: Readonly<Record<string, number>>,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  const storage = config.storage;
+  if (storage === undefined) return Number.POSITIVE_INFINITY;
+  const monthly = Math.max(0, consumption[resourceId] ?? 0);
+  const monthsTerm = Math.ceil(storage.maxMonths * monthly);
+  const floor = Math.max(0, storage.floor[resourceId] ?? 0);
+  return Math.max(floor, monthsTerm);
+}
+
+/**
+ * The FREE WAREHOUSE SPACE of ONE country for ONE good right now —
+ * `capacity − current stock`, floored at zero. The ONE number the market's
+ * spot purchases, the contract executions and the UI's «فضای آزاد» all
+ * read, so a buyer can never buy more than its warehouse can actually hold.
+ */
+export function stockHeadroomOf(
+  record: Pick<CountryResourceState, 'stock' | 'consumption'>,
+  resourceId: string,
+  config: StrategicResourcesConfig
+): number {
+  const capacity = warehouseCapacityOf(record.consumption, resourceId, config);
+  if (!Number.isFinite(capacity)) return Number.POSITIVE_INFINITY;
+  const stock = Math.max(0, Math.floor(record.stock[resourceId] ?? 0));
+  return Math.max(0, Math.floor(capacity) - stock);
 }
 
 /**

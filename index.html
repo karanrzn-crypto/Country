@@ -103,8 +103,26 @@
       }
       .notification.warn { border-left-color: #ffb454; }
       .notification.error { border-left-color: #ff6b6b; }
+      /* The header row: title + the ضربدر (X) close button (§7). */
+      .notification .nt-header {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      }
       .notification .nt-title { font-weight: 700; }
       .notification .nt-message { color: #aeb8c8; }
+      .notification .nt-close {
+        font: inherit; color: #8a94a6; background: transparent;
+        border: none; cursor: pointer; padding: 0 4px;
+        font-size: 16px; line-height: 1; flex: 0 0 auto;
+      }
+      .notification .nt-close:hover { color: #ff6b6b; }
+      /* The action buttons (موافقت / مخالفت on export requests). */
+      .notification .nt-actions { display: flex; gap: 6px; margin-top: 6px; }
+      .notification .nt-action {
+        font: inherit; color: #e8edf5; background: #1a2333;
+        border: 1px solid #33415c; border-radius: 4px;
+        padding: 3px 10px; cursor: pointer; font-size: 12px;
+      }
+      .notification .nt-action:hover { background: #243149; border-color: #4a5f88; }
 
       .screen-layer {
         position: absolute; inset: 0;

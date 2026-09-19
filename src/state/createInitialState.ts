@@ -73,7 +73,8 @@ export function createInitialState(
     buildings: {} as EconomySlice['buildings'],
     economyLevel: {} as Record<string, number>,
     contracts: [] as EconomySlice['contracts'],
-    exportRequests: [] as EconomySlice['exportRequests']
+    exportRequests: [] as EconomySlice['exportRequests'],
+    events: {} as EconomySlice['events']
   };
 
   // —— military ——
@@ -182,6 +183,9 @@ export function createInitialState(
     // during the campaign (spec §6 — by presidents, never pre-seeded).
     if (economy.contracts === undefined) economy.contracts = [];
     if (economy.exportRequests === undefined) economy.exportRequests = [];
+    // No economic event is running at state creation (the events directive
+    // §5 — events START during the campaign, never before it).
+    if (economy.events === undefined) economy.events = {};
     state.government = buildGovernmentSlice(
       mapModel.countryOrder,
       countryNames,
@@ -248,6 +252,9 @@ export function healPhase2State(
     if (state.economy.contracts === undefined) state.economy.contracts = [];
     // Export requests (the export-request directive): same additive heal.
     if (state.economy.exportRequests === undefined) state.economy.exportRequests = [];
+    // Economic events (the events directive §5): saves predating v21 carry
+    // none — the heal injects the empty record (nothing was running).
+    if (state.economy.events === undefined) state.economy.events = {};
     if (state.political.countries[countryId] === undefined) {
       state.political.countries[countryId] = { stability: 0.6, legitimacy: 0.7, warExhaustion: 0 };
     }

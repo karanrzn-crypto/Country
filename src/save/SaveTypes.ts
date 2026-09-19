@@ -26,8 +26,13 @@ export const SAVE_VERSION_ECONOMY_CONTRACTS = 19;
  *  military buildings (training camp, tank plant, air plant) join the SAME
  *  building records + config, needing no extra state fields. */
 export const SAVE_VERSION_ECONOMY_REQUESTS_MILITARY = 20;
+/** Version of the STORAGE + ECONOMIC-EVENTS economy (the current directive):
+ *  warehouse capacity bounds buying (`storage` config — no state fields);
+ *  TEMPORARY economic events (broken refinery, famine) live per country in
+ *  `economy.events` — the migration injects the empty record {}. */
+export const SAVE_VERSION_ECONOMIC_EVENTS = 21;
 /** Current save schema version. Bump + add a migration for every break. */
-export const SAVE_VERSION = SAVE_VERSION_ECONOMY_REQUESTS_MILITARY;
+export const SAVE_VERSION = SAVE_VERSION_ECONOMIC_EVENTS;
 /** Version that introduced the strategic map slice (Part 1). */
 export const SAVE_VERSION_MAP_SLICE = 2;
 /** Version that introduced the country data slice (Part 2). */

@@ -49,15 +49,83 @@ import {
   unitPriceOf,
   playerCountryIdOf,
   requestExport,
-  remainingSaleOfferOf
+  remainingSaleOfferOf,
+  executeSpotPurchase
 } from './contracts';
+import { stockHeadroomOf } from './resources';
 import type { Random } from '../utils/Random';
-import { roundTo } from '../utils/math';
 
 /** The COVERAGE target of step ۲ (production ≥ consumption × THIS → built). */
 const COVERAGE_TARGET = 1.1;
 /** The export-depth ceiling of step ۳ (production ≥ consumption × THIS → stop). */
 const EXPORT_DEPTH_CAP = 2.0;
+/** The AI gathers for the future only while paying keeps THIS multiple of
+ *  the treasury intact (stockpiling never risks the state's solvency). */
+const AI_STOCKPILE_TREASURY_MARGIN = 2;
+
+/**
+ * ONE chance-gated FUTURE-STOCKPILE purchase for an AI country WITHOUT
+ * shortages (the storage directive §2): the good whose stock covers the
+ * fewest months (and is below the `storage.aiFutureMonths` target) is
+ * topped up through a ONE-TIME spot purchase from the largest AI seller —
+ * bounded by the warehouse headroom, the seller's remaining offer and the
+ * treasury margin. Deterministic: config resource order for the scan,
+ * largest-offer-first for the seller pick.
+ *
+ * @returns null always — a stockpile purchase files no export request.
+ */
+function aiFutureStockpile(
+  state: GameState,
+  countryId: string,
+  config: StrategicResourcesConfig,
+  month: number,
+  rng: Random
+): null {
+  const storage = config.storage;
+  if (storage === undefined || storage.aiFutureMonths <= 0) return null;
+  if (!rng.chance(Math.min(1, Math.max(0, storage.aiStockpileChance)))) return null;
+  const record = state.economy.resources[countryId];
+  if (record === undefined) return null;
+  // The THINNEST good: the fewest stock-months of coverage, scanned in
+  // config order (ties resolve deterministically).
+  let thinnest: string | null = null;
+  let thinnestMonths = Number.POSITIVE_INFINITY;
+  for (const resource of config.resources) {
+    const monthly = record.consumption[resource.id] ?? 0;
+    if (monthly <= 0) continue;
+    const months = (record.stock[resource.id] ?? 0) / monthly;
+    if (months < thinnestMonths) {
+      thinnestMonths = months;
+      thinnest = resource.id;
+    }
+  }
+  if (thinnest === null) return null;
+  const targetUnits = Math.ceil(storage.aiFutureMonths * (record.consumption[thinnest] ?? 0));
+  const headroom = Math.floor(stockHeadroomOf(record, thinnest, config));
+  const want = Math.min(targetUnits, headroom) - Math.floor(record.stock[thinnest] ?? 0);
+  if (want <= 0) return null;
+  // Only a healthy treasury stockpiles (never at survival's expense).
+  const price = unitPriceOf(config, thinnest);
+  if (price <= 0) return null;
+  const treasury = Math.max(0, state.economy.treasury[countryId] ?? 0);
+  const affordable = Math.floor(treasury / price / AI_STOCKPILE_TREASURY_MARGIN);
+  const amount = Math.min(want, affordable);
+  if (amount <= 0) return null;
+  // AI-to-AI only — the player's goods never move without the president
+  // (the export-request directive §3).
+  const player = playerCountryIdOf(state);
+  const sellers = marketOffersOf(state, countryId, thinnest, config).filter(
+    (seller) => seller.countryId !== player
+  );
+  for (const seller of sellers) {
+    const offer = Math.min(amount, seller.amount);
+    if (offer <= 0) continue;
+    const bought = executeSpotPurchase(state, countryId, seller.countryId, thinnest, offer, config);
+    if (bought.ok) break;
+  }
+  void month;
+  return null;
+}
 
 /**
  * The monthly chance an AI country TRIES to sign ONE import contract
@@ -69,12 +137,12 @@ const AI_CONTRACT_CHANCE = 0.35;
 /**
  * Secures a country's CONSTRUCTION MATERIALS on the world market (spec §16
  * — «از بازار جهانی وارد کند»): the missing industrial-goods units are
- * BOUGHT directly from real sellers at the base price (real units + real
- * money move IMMEDIATELY — the construction needs the materials in stock
- * now; a country with no money or no seller secures nothing). TRUE when
- * the full amount is in stock after the purchase. This is what keeps
- * material-poor countries able to build — their import bill is the honest
- * price of construction.
+ * BOUGHT directly from real sellers at the base price through ONE-TIME
+ * SPOT PURCHASES (real units + real money move IMMEDIATELY — the
+ * construction needs the materials in stock now; a country with no money
+ * or no seller secures nothing). TRUE when the full amount is in stock
+ * after the purchase. This is what keeps material-poor countries able to
+ * build — their import bill is the honest price of construction.
  */
 export function aiSecureConstructionMaterials(
   state: GameState,
@@ -86,8 +154,6 @@ export function aiSecureConstructionMaterials(
   if (record === undefined) return false;
   const missing = Math.ceil(neededUnits - (record.stock.industrial ?? 0));
   if (missing <= 0) return true;
-  const price = unitPriceOf(config, 'industrial');
-  if (price <= 0) return false;
   // The sellers of industrial goods, largest REAL available surplus first
   // (§3/§16 — offers come from real surplus, never from a buyer's need).
   // The PLAYER's country is NEVER a direct-deal seller (the export-request
@@ -101,21 +167,12 @@ export function aiSecureConstructionMaterials(
   for (const seller of sellers) {
     if (stillMissing <= 0) break;
     const treasury = Math.max(0, state.economy.treasury[countryId] ?? 0);
-    const affordable = Math.floor(treasury / price);
+    const affordable = Math.floor(treasury / unitPriceOf(config, 'industrial'));
     const amount = Math.max(0, Math.min(stillMissing, seller.amount, affordable));
     if (amount <= 0) continue;
-    const sellerRecord = state.economy.resources[seller.countryId]!;
-    const cost = roundTo(amount * price, 2);
-    // REAL units + REAL money move, immediately (a one-time direct deal —
-    // NOT a contract; the ledger lines are never booked here, the money
-    // has already left/arrived — no double-count, §11).
-    sellerRecord.stock.industrial = Math.round((sellerRecord.stock.industrial ?? 0) - amount);
-    record.stock.industrial = Math.round((record.stock.industrial ?? 0) + amount);
-    state.economy.treasury[countryId] = roundTo((state.economy.treasury[countryId] ?? 0) - cost, 4);
-    state.economy.treasury[seller.countryId] = roundTo((state.economy.treasury[seller.countryId] ?? 0) + cost, 4);
-    record.imports.industrial = Math.round((record.imports.industrial ?? 0) + amount);
-    sellerRecord.exports.industrial = Math.round((sellerRecord.exports.industrial ?? 0) + amount);
-    stillMissing -= amount;
+    const bought = executeSpotPurchase(state, countryId, seller.countryId, 'industrial', amount, config);
+    if (!bought.ok) continue;
+    stillMissing -= bought.amount;
   }
   return stillMissing <= 0;
 }
@@ -263,7 +320,14 @@ export function aiTradeStep(
       neededResource = resource.id;
     }
   }
-  if (neededResource === null) return null;
+  if (neededResource === null) {
+    // —— ۳. NO shortage → gather for the FUTURE (the storage directive §2's
+    //      «AI کشورها نیز بتوانند برای آینده منابع جمع کنند»): one chance-
+    //      gated spot purchase topping the thinthest good up toward
+    //      `storage.aiFutureMonths` of stock, bounded by the warehouse and
+    //      a healthy treasury margin (never at the expense of survival).
+    return aiFutureStockpile(state, countryId, config, month, rng);
+  }
   if (hasActiveImportContract(state, countryId, neededResource)) return null;
   // THE EXPORT-REQUEST RULE (the export-request directive §3): when the
   // PLAYER's country has ANY remaining sale offer of the needed good, the

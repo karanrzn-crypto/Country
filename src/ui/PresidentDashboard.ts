@@ -9,7 +9,8 @@ import { OPINION_TOPICS, TAX_LEVEL_IDS, TAX_LEVEL_SPECS } from '../government/ty
 import { decisionBlockReason } from '../government/DecisionEngine';
 import { politicalPowerDistribution } from '../state/slices/governmentSlice';
 import { networkSummary } from '../world/cityareas/CityAreaPathfinding';
-import { resourceDisplayStatusOf } from '../economy/resources';
+import { resourceDisplayStatusOf, stockHeadroomOf, warehouseCapacityOf } from '../economy/resources';
+import { activeEventsOf } from '../economy/economicEvents';
 import {
   projectMonthsRemaining,
   constructionSpeedFactorOf,
@@ -285,29 +286,18 @@ export class PresidentDashboard {
 
   private buildEconomy(container: UIElement): UIElement {
     const section = this.section(container, 'pd-economy');
-    // The ECONOMY page (spec §12) — the whole country's money story at
-    // a glance: the §1 rows, the INCOME lines, the EXPENSE lines and the
-    // treasury change — followed by the resource cards, construction and
-    // the on-demand market. No GDP, no accounting tables.
+    // THE ASSETS (the assets directive §4) — the president is a head of
+    // state, not an accountant: the ONE «دارایی کشور» block shows exactly
+    // the numbers a decision needs (پول کشور · منابع ذخیره‌شده live in the
+    // resource cards below · درآمد ماهانه · هزینه ماهانه · تغییر خزانه)
+    // with NO per-line accounting breakdowns.
     const ledgerTitle = this.create('div', 'pd-subtitle');
-    ledgerTitle.setText('اقتصاد کشور');
+    ledgerTitle.setText('دارایی کشور');
     section.appendChild(ledgerTitle);
-    // The §1 rows — the good rows are CONFIG-driven (the world may carry
-    // any set of goods); the economy level and specialization ride along.
-    const ledgerKeys = ['پول خزانه', 'جمعیت', 'وضعیت اقتصاد', 'تخصص'];
-    for (const resource of this.economyConfig()?.resources ?? []) ledgerKeys.push(resource.name);
-    ledgerKeys.push('نرخ مالیات');
-    this.addRows(section, ledgerKeys, 'ledger.');
-    const incomeTitle = this.create('div', 'pd-subtitle');
-    incomeTitle.setText('درآمد (این ماه)');
-    section.appendChild(incomeTitle);
-    this.addRows(section, ['مالیات', 'تجارت'], 'income.');
-    const expenseTitle = this.create('div', 'pd-subtitle');
-    expenseTitle.setText('هزینه‌ها (این ماه)');
-    section.appendChild(expenseTitle);
-    this.addRows(section, ['ارتش', 'دولت', 'زیرساخت', 'تغییر خزانه'], 'expense.');
+    this.addRows(section, ['پول کشور', 'درآمد ماهانه', 'هزینه ماهانه', 'تغییر خزانه', 'نرخ مالیات', 'جمعیت'], 'ledger.');
 
-    // RESOURCES — the three stockpiles with production/consumption per month.
+    // RESOURCES — the stored stockpiles (the directive §4's «منابع
+    // ذخیره‌شده») with production/consumption + the warehouse per card.
     const resourcesTitle = this.create('div', 'pd-subtitle');
     resourcesTitle.setText('منابع');
     section.appendChild(resourcesTitle);
@@ -315,16 +305,23 @@ export class PresidentDashboard {
     section.appendChild(resourcesList);
     this.track(resourcesList, 'resources');
     // Construction — one project card per active project (MONTHS remaining —
-    // the cost was paid once at start, spec §8) + the buildables.
+    // the cost was paid once at start, spec §8) + the buildables + the
+    // country's important buildings.
     const constructionTitle = this.create('div', 'pd-subtitle');
     constructionTitle.setText('ساخت‌وساز');
     section.appendChild(constructionTitle);
     const constructionList = this.create('div', 'pd-construction');
     section.appendChild(constructionList);
     this.track(constructionList, 'construction');
+    // The country's IMPORTANT BUILDINGS (the assets directive §4) — one
+    // compact summary of what the country already has.
+    const buildingsSummary = this.create('div', 'pd-buildings-summary');
+    section.appendChild(buildingsSummary);
+    this.track(buildingsSummary, 'buildingsSummary');
     // The MARKET (spec §18) — hidden until the player asks for it; then it
-    // shows ONLY the resources that are actually missing, with the real
-    // sellers of each. No always-open seller tables, no Buy-Cheapest.
+    // shows every good with the real sellers, the monthly contracts AND the
+    // spot purchases (the storage directive §2 — stockpiling for the
+    // future, bounded by the warehouse).
     const marketTitle = this.create('div', 'pd-subtitle pd-market-title');
     marketTitle.setText('بازار منابع');
     marketTitle.setAttribute('style', 'display:none;');
@@ -453,7 +450,7 @@ export class PresidentDashboard {
         info.appendChild(name);
         const detail = this.create('div', 'pd-buildable-detail');
         detail.setText(
-          `هزینه: ${faNum(def.cost)} پول · ${faNum(def.materials)} مصالح · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه`
+          `برای ساخت این ساختمان نیاز داری: ${faNum(def.cost)} پول + ${faNum(def.materials)} واحد مصالح ساختمانی · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه`
         );
         info.appendChild(detail);
         row.appendChild(info);
@@ -469,7 +466,7 @@ export class PresidentDashboard {
           build.setText(`پول کافی نیست (${faNum(def.cost)})`);
           build.setAttribute('disabled', 'true');
         } else if (materialsStock < def.materials) {
-          build.setText(`مصالح کافی نیست (${faNum(def.materials)})`);
+          build.setText(`مصالح ساختمانی کافی نیست (نیاز ${faNum(def.materials)} — موجودی ${faNum(materialsStock)})`);
           build.setAttribute('disabled', 'true');
         } else if (heldWorkforce + def.workforce > workforceCapacity) {
           build.setText(`نیروی کار کافی نیست (${faNum(def.workforce)})`);
@@ -732,6 +729,15 @@ export class PresidentDashboard {
     const list = this.create('div', 'pd-event-list');
     section.appendChild(list);
     this.track(list, 'events');
+    // THE ACTIVE ECONOMIC EVENTS (the events directive §5) — temporary
+    // production shocks running RIGHT NOW (broken refinery, famine) with
+    // the months left before the automatic recovery.
+    const economicTitle = this.create('div', 'pd-subtitle');
+    economicTitle.setText('رویدادهای اقتصادی فعال');
+    section.appendChild(economicTitle);
+    const economicList = this.create('div', 'pd-event-list');
+    section.appendChild(economicList);
+    this.track(economicList, 'economicEvents');
     return section;
   }
 
@@ -799,45 +805,71 @@ export class PresidentDashboard {
   private refreshEconomy(countryId: string): void {
     const context = this.context;
     if (context === undefined || context === null) return;
-    // The §12 ledger — every number straight from the ONE finance record.
+    // THE ASSETS (the assets directive §4) — five plain numbers, straight
+    // from the ONE finance record: money, monthly income, monthly expense,
+    // the treasury change and the tax rate. No accounting breakdowns.
     const state = context.state;
-    const config = context.data.economyData.strategicResources;
     const finance = state.economy.finance[countryId];
     const treasury = state.economy.treasury[countryId] ?? 0;
     const country = state.countries.countries[countryId];
     const government = state.government.countries[countryId];
     const taxRate = government !== undefined ? TAX_LEVEL_SPECS[government.budget.tax].rate : 0;
-    const record = state.economy.resources[countryId];
-    this.rows.get('ledger.پول خزانه')?.setText(faNum(Math.round(treasury)));
-    this.rows.get('ledger.جمعیت')?.setText(faPopulation(country?.population ?? 0));
-    // The 0-100 ECONOMY LEVEL (spec §3) + the country's strongest good
-    // (spec §4) — both read straight from state/config, never stored twice.
-    const level = Math.round(state.economy.economyLevel[countryId] ?? config.economyLevel.start);
-    this.rows.get('ledger.وضعیت اقتصاد')?.setText(`${faNum(level)} از ۱۰۰`);
-    const production = record?.production ?? {};
-    const best = [...config.resources].sort(
-      (a, b) => (production[b.id] ?? 0) - (production[a.id] ?? 0)
-    )[0];
-    const bestAmount = best !== undefined ? Math.round(production[best.id] ?? 0) : 0;
-    this.rows.get('ledger.تخصص')?.setText(
-      best !== undefined && bestAmount > 0 ? `${best.name} (+${faNum(bestAmount)} / ماه)` : '—'
-    );
-    for (const resource of config.resources) {
-      const stock = Math.round(record?.stock[resource.id] ?? 0);
-      this.rows.get(`ledger.${resource.name}`)?.setText(faNum(stock));
+    this.rows.get('ledger.پول کشور')?.setText(faNum(Math.round(treasury)));
+    if (finance !== undefined) {
+      const income = Math.round(finance.lastTaxIncome + finance.lastTradeIncome);
+      const expense = Math.round(
+        finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense
+      );
+      this.rows.get('ledger.درآمد ماهانه')?.setText(faSigned(income));
+      this.rows.get('ledger.هزینه ماهانه')?.setText(faSigned(-expense));
+      this.rows.get('ledger.تغییر خزانه')?.setText(faSigned(Math.round(finance.lastBalance)));
+    } else {
+      this.rows.get('ledger.درآمد ماهانه')?.setText('—');
+      this.rows.get('ledger.هزینه ماهانه')?.setText('—');
+      this.rows.get('ledger.تغییر خزانه')?.setText('—');
     }
     this.rows.get('ledger.نرخ مالیات')?.setText(percent(taxRate));
-    if (finance !== undefined) {
-      this.rows.get('income.مالیات')?.setText(faSigned(Math.round(finance.lastTaxIncome)));
-      this.rows.get('income.تجارت')?.setText(faSigned(Math.round(finance.lastTradeIncome)));
-      this.rows.get('expense.ارتش')?.setText(faSigned(-Math.round(finance.lastArmyExpense)));
-      this.rows.get('expense.دولت')?.setText(faSigned(-Math.round(finance.lastGovernmentExpense)));
-      this.rows.get('expense.زیرساخت')?.setText(faSigned(-Math.round(finance.lastInfrastructureExpense)));
-      this.rows.get('expense.تغییر خزانه')?.setText(faSigned(Math.round(finance.lastBalance)));
-    }
+    this.rows.get('ledger.جمعیت')?.setText(faPopulation(country?.population ?? 0));
     this.rebuildResources(countryId);
     this.rebuildConstruction(countryId);
+    this.rebuildBuildingsSummary(countryId);
     this.rebuildMarket(countryId);
+  }
+
+  /**
+   * The country's IMPORTANT BUILDINGS (the assets directive §4) — one
+   * compact line per building type the country has COMPLETED (مزرعه ×۲ ·
+   * معدن آهن ×۱ …), read straight from `state.economy.buildings`. Empty
+   * state → a quiet single line, never an empty box.
+   */
+  private rebuildBuildingsSummary(countryId: string): void {
+    const context = this.context;
+    if (context === undefined || context === null) return;
+    const config = context.data.economyData.strategicResources;
+    const state = context.state;
+    const buildings = state.economy.buildings[countryId] ?? {};
+    const counts = new Map<string, number>();
+    for (const building of Object.values(buildings)) {
+      counts.set(building.typeId, (counts.get(building.typeId) ?? 0) + 1);
+    }
+    const signature = [...counts.entries()].map(([id, count]) => `${id}:${count}`).sort().join('|');
+    if (signature === this.dynamicSignatures.get('buildingsSummary')) return;
+    this.dynamicSignatures.set('buildingsSummary', signature);
+    this.rebuild('buildingsSummary', this.parents.get('buildingsSummary'), () => {
+      const rows: UIElement[] = [];
+      const title = this.create('div', 'pd-buildable-detail');
+      if (counts.size === 0) {
+        title.setText('ساختمان‌های کشور: هنوز ساختمانی ساخته نشده است.');
+      } else {
+        const parts = [...counts.entries()].map(([typeId, count]) => {
+          const def = config.buildings.find((candidate) => candidate.id === typeId);
+          return `${def?.name ?? typeId} ×${faNum(count)}`;
+        });
+        title.setText(`ساختمان‌های کشور: ${parts.join(' · ')}`);
+      }
+      rows.push(title);
+      return rows;
+    });
   }
 
   /**
@@ -892,24 +924,31 @@ export class PresidentDashboard {
         }
         card.appendChild(head);
 
-        // — the §16 card: stock, production, consumption + a shortage line —
+        // — the §16 card: stock, production, consumption + the WAREHOUSE
+        //    (the storage directive §2: how much more the country can hold) —
+        const headroom = stockHeadroomOf(record, resourceId, config);
+        const capacity = warehouseCapacityOf(record.consumption, resourceId, config);
         const lines: string[] = [
           `موجودی: ${faNum(stock)}`,
           `تولید: +${faNum(production)} / ماه`,
           `مصرف: ${faNum(consumption)} / ماه`
         ];
+        if (Number.isFinite(capacity)) {
+          lines.push(`ظرفیت انبار: ${faNum(Math.floor(capacity))} (فضای آزاد: ${faNum(headroom)})`);
+        }
         if (shortage > 0) lines.push(`کمبود: ${faNum(shortage)}`);
         for (const line of lines) {
           const detail = this.create('div', 'pd-resource-detail');
           detail.setText(line);
           card.appendChild(detail);
         }
-        if (shortage > 0) {
-          const buy = this.create('button', 'pd-resource-buy');
-          buy.setText('خرید منابع');
-          buy.onClick(() => this.openMarket(resourceId));
-          card.appendChild(buy);
-        }
+        // THE MARKET IS ALWAYS REACHABLE (the storage directive §2): the
+        // country may buy MORE than this month's need — stockpiling for
+        // construction and the future is a normal, bounded move.
+        const buy = this.create('button', 'pd-resource-buy');
+        buy.setText('خرید منابع');
+        buy.onClick(() => this.openMarket(resourceId));
+        card.appendChild(buy);
         rows.push(card);
       }
       return rows;
@@ -985,10 +1024,11 @@ export class PresidentDashboard {
         rows.push(card);
       }
       // — the buildable buildings (bottom) — the FULL cost block BEFORE
-      //   building (spec §4): money + materials + workforce + months + the
-      //   base output; ساخت starts the placement mode —
+      //   building (spec §4): money + MATERIALS (the materials directive
+      //   §3 — named, counted and sourced, never a vague «مصالح») +
+      //   workforce + months + the base output; ساخت starts placement —
       const workHead = this.create('div', 'pd-buildable-detail');
-      workHead.setText(`ظرفیت ساخت: ${faNum(projects.length)}/${faNum(config.construction.maxProjects)} · نیروی کار ساخت: ${faNum(heldWorkforce)} از ${faNum(workforceCapacity)} · مصالح (کالاهای صنعتی): ${faNum(materialsStock)}`);
+      workHead.setText(`ظرفیت ساخت: ${faNum(projects.length)}/${faNum(config.construction.maxProjects)} · نیروی کار ساخت: ${faNum(heldWorkforce)} از ${faNum(workforceCapacity)} · مصالح ساختمانی (از کالاهای صنعتی انبار): ${faNum(materialsStock)}`);
       rows.push(workHead);
       for (const def of config.buildings) {
         // MILITARY buildings live in the نظامی tab (the military directive
@@ -1002,7 +1042,7 @@ export class PresidentDashboard {
         const effect = `تولید پایه +${faNum(def.output)} ${this.resourceName(config, def.resource)} / ماه`;
         const detail = this.create('div', 'pd-buildable-detail');
         detail.setText(
-          `هزینه: ${faNum(def.cost)} پول · ${faNum(def.materials)} مصالح · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه → ${effect}`
+          `برای ساخت این ساختمان نیاز داری: ${faNum(def.cost)} پول + ${faNum(def.materials)} واحد مصالح ساختمانی · نیروی کار ${faNum(def.workforce)} · مدت ساخت ${faNum(def.buildMonths)} ماه → ${effect}`
         );
         info.appendChild(detail);
         row.appendChild(info);
@@ -1021,7 +1061,7 @@ export class PresidentDashboard {
           build.setText(`پول کافی نیست (${faNum(def.cost)})`);
           build.setAttribute('disabled', 'true');
         } else if (noMaterials) {
-          build.setText(`مصالح کافی نیست (${faNum(def.materials)})`);
+          build.setText(`مصالح ساختمانی کافی نیست (نیاز ${faNum(def.materials)} — موجودی ${faNum(materialsStock)})`);
           build.setAttribute('disabled', 'true');
         } else if (noWorkforce) {
           build.setText(`نیروی کار کافی نیست (${faNum(def.workforce)})`);
@@ -1094,14 +1134,14 @@ export class PresidentDashboard {
     // directive): EVERY tradable good is listed — each seller row carries
     // the amount THAT country has put up for sale (its real quota, derived
     // only from its own stock/reserve/commitments) — visible and computable
-    // with NO reference to this country's needs. The buyer's recorded
-    // shortage is shown as the BUYER's want («نیاز شما»), and the buy
-    // button signs min(want, the seller's remaining offer) — demand above
-    // the offer cannot inflate it; the remainder stays with the seller for
-    // later deals.
+    // with NO reference to this country's needs. TWO ways to buy (the
+    // storage directive §2): the MONTHLY CONTRACT for a real flow need, and
+    // the ONE-TIME SPOT PURCHASE that stockpiles units for the FUTURE
+    // (construction materials, lean months) — bounded by the WAREHOUSE.
     const entries = config.resources.map((resource) => ({
       resourceId: resource.id,
-      need: Math.max(0, Math.round(record.shortage[resource.id] ?? 0))
+      need: Math.max(0, Math.round(record.shortage[resource.id] ?? 0)),
+      headroom: stockHeadroomOf(record, resource.id, config)
     }));
     // The focused resource first, then the hungriest needs; Array.sort is
     // stable, so equal keys keep the config order (deterministic).
@@ -1110,17 +1150,18 @@ export class PresidentDashboard {
       const focusedB = b.resourceId === this.marketFocus ? 0 : 1;
       return focusedA - focusedB || b.need - a.need;
     });
+    const treasury = Math.floor(state.economy.treasury[countryId] ?? 0);
 
     const signature = `${this.marketFocus ?? 'all'}|${entries.map((entry) => {
       const offers = marketOffersOf(state, countryId, entry.resourceId, config);
-      return `${entry.resourceId}:${Math.round(entry.need)}:[${offers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
-    }).join('|')}#${countryId}`;
+      return `${entry.resourceId}:${Math.round(entry.need)}:${Math.round(entry.headroom)}:[${offers.map((s) => `${s.countryId}=${s.amount}`).join(',')}]`;
+    }).join('|')}#${countryId}#${treasury}`;
     if (signature === this.dynamicSignatures.get('market')) return;
     this.dynamicSignatures.set('market', signature);
     this.rebuild('market', this.parents.get('market'), () => {
       const rows: UIElement[] = [];
       const note = this.create('div', 'pd-purchase-hint');
-      note.setText('مقدار فروش هر کشور ثابت و محدود است — مستقل از نیاز شما؛ خرید فقط تا همان سهمیه انجام می‌شود.');
+      note.setText('هر کشور سهمیهٔ فروش خودش را می‌فروشد؛ «خرید فوری» همین حالا به انبار شما اضافه می‌شود (تا ظرفیت انبار) و «قرارداد ماهانه» هر ماه می‌رسد.');
       rows.push(note);
       for (const entry of entries) {
         const resource = config.resources.find((candidate) => candidate.id === entry.resourceId);
@@ -1140,7 +1181,12 @@ export class PresidentDashboard {
         );
         head.appendChild(name);
         const hint = this.create('span', 'pd-purchase-hint');
-        hint.setText(`قیمت هر واحد ${faNum(price, price % 1 !== 0 ? 1 : 0)}`);
+        hint.setText(
+          `قیمت هر واحد ${faNum(price, price % 1 !== 0 ? 1 : 0)}` +
+            (Number.isFinite(entry.headroom)
+              ? ` · فضای آزاد انبار شما: ${faNum(Math.round(entry.headroom))}`
+              : '')
+        );
         head.appendChild(hint);
         block.appendChild(head);
         if (offers.length === 0) {
@@ -1157,12 +1203,8 @@ export class PresidentDashboard {
           // buyer's want.
           label.setText(`${countryName(seller.countryId)} — عرضه فروش: ${faNum(seller.amount)} واحد در ماه`);
           row.appendChild(label);
-          // A MONTHLY CONTRACT (§6): the buyer's want capped by the
-          // seller's remaining offer — demand beyond the quota buys
-          // nothing extra, and the rest of the quota stays for later deals
-          // (signing reserves it, §16). A good the player does not NEED
-          // shows no purchase amount at all (the sale-quantity directive:
-          // a "1" on every row read as if every seller sold one unit).
+          // — the MONTHLY CONTRACT (§6): the buyer's want capped by the
+          //    seller's remaining offer — a flow need served monthly. —
           const sign = this.create('button', 'pd-buy');
           if (entry.need <= 0) {
             sign.setText('بدون نیاز خرید');
@@ -1181,6 +1223,35 @@ export class PresidentDashboard {
             );
           }
           row.appendChild(sign);
+          // — the SPOT PURCHASE (the storage directive §2): a one-time
+          //    stockpile move NOW, bounded by the seller's remaining offer,
+          //    the WAREHOUSE space and the treasury. The core re-checks
+          //    every guard (executeSpotPurchase) — the button only previews
+          //    what should fit. —
+          const affordable = price > 0 ? Math.floor(treasury / price) : 0;
+          const spotAmount = Math.floor(
+            Math.min(seller.amount, entry.headroom, affordable)
+          );
+          const spot = this.create('button', 'pd-buy pd-spot');
+          if (spotAmount <= 0) {
+            if (entry.headroom <= 0) spot.setText('انبار پر است');
+            else if (affordable <= 0) spot.setText('پول کافی نیست');
+            else spot.setText('سهمیهٔ فروش خالی است');
+            spot.setAttribute('disabled', 'true');
+          } else {
+            const cost = Math.round(spotAmount * price);
+            spot.setText(`خرید فوری ${faNum(spotAmount)} (${faNum(cost)} پول)`);
+            spot.onClick(() =>
+              this.send({
+                type: 'economy.spotPurchase',
+                countryId,
+                sellerId: seller.countryId,
+                resourceId: entry.resourceId,
+                amount: spotAmount
+              })
+            );
+          }
+          row.appendChild(spot);
           block.appendChild(row);
         }
         rows.push(block);
@@ -1399,6 +1470,38 @@ export class PresidentDashboard {
           button.onClick(() => this.send({ type: 'government.resolveEvent', countryId, instanceId, choiceId }));
           block.appendChild(button);
         }
+        rows.push(block);
+      }
+      return rows;
+    });
+    // THE ACTIVE ECONOMIC EVENTS (the events directive §5) — read straight
+    // from `state.economy.events` (no UI-side shadow state): short name,
+    // the good being cut, the factor and the months until auto-recovery.
+    const config = context.data.economyData.strategicResources;
+    const active = activeEventsOf(context.state, countryId);
+    const signature = active.map((event) => `${event.id}:${event.monthsRemaining}`).join('|');
+    if (signature === this.dynamicSignatures.get('economicEvents')) return;
+    this.dynamicSignatures.set('economicEvents', signature);
+    this.rebuild('economicEvents', this.parents.get('economicEvents'), () => {
+      const rows: UIElement[] = [];
+      if (active.length === 0) {
+        const empty = this.create('div', 'pd-empty');
+        empty.setText('هیچ رویداد اقتصادی فعالی وجود ندارد — تولید عادی است.');
+        rows.push(empty);
+        return rows;
+      }
+      for (const event of active) {
+        const def = config.economicEvents?.events.find((candidate) => candidate.id === event.typeId);
+        const good = config.resources.find((resource) => resource.id === event.resourceId)?.name ?? event.resourceId;
+        const block = this.create('div', 'pd-event pd-economic-event');
+        const title = this.create('div', 'pd-event-title');
+        title.setText(`${def?.short ?? event.typeId} — تولید ${good} کم شده است`);
+        const description = this.create('div', 'pd-event-desc');
+        description.setText(
+          `${def?.message ?? ''} (تولید ×${faNum(event.factor)} · ${faNum(event.monthsRemaining)} ماه تا بازگشت به حالت عادی)`
+        );
+        block.appendChild(title);
+        block.appendChild(description);
         rows.push(block);
       }
       return rows;

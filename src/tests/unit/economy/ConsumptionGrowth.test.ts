@@ -37,18 +37,28 @@ describe('the year-over-year demand growth (demand directive)', () => {
     config = context.data.economyData.strategicResources;
   });
 
-  it('Y1 the factor is exact, stateless and capped: (1+perYear)^(months/12)', () => {
+  it('Y1 the grace period keeps the BASE for 5 years, then the growth starts gradually', () => {
     expect(consumptionGrowthFactorOf(config, 0)).toBe(1);
+    // THE GRACE (the growth refinement §1): سال ۱ تا ۵ مصرف پایه — the
+    // factor is EXACTLY ×1 for every month of the first 5 years.
+    expect(consumptionGrowthFactorOf(config, 12)).toBe(1);
+    expect(consumptionGrowthFactorOf(config, 59)).toBe(1);
+    expect(consumptionGrowthFactorOf(config, 60)).toBe(1);
+    // سال ۶ به بعد: the growth starts SMALL and continuous — the boundary
+    // month is exactly ×1 (no jump), then (1+perYear) compounds monthly.
     const perYear = config.consumptionGrowth.perYear as number;
-    const year5 = Math.pow(1 + perYear, 60 / 12);
-    expect(consumptionGrowthFactorOf(config, 60)).toBeCloseTo(year5, 4);
+    expect(consumptionGrowthFactorOf(config, 61)).toBeCloseTo(Math.pow(1 + perYear, 1 / 12), 4);
+    expect(consumptionGrowthFactorOf(config, 72)).toBeCloseTo(1 + perYear, 4);
     // Monotonic in the month, capped at maxFactor.
-    expect(consumptionGrowthFactorOf(config, 61)).toBeGreaterThan(consumptionGrowthFactorOf(config, 60));
+    expect(consumptionGrowthFactorOf(config, 73)).toBeGreaterThan(consumptionGrowthFactorOf(config, 72));
     const capped = consumptionGrowthFactorOf(config, 12_000);
     expect(capped).toBe(config.consumptionGrowth.maxFactor);
     // Zero growth stays flat (config-off safety).
     const off = { ...config, consumptionGrowth: { perYear: 0, maxFactor: 4 } };
     expect(consumptionGrowthFactorOf(off, 240)).toBe(1);
+    // A config WITHOUT the grace grows from month 1 (legacy behavior).
+    const noGrace = { ...config, consumptionGrowth: { perYear: 0.05, maxFactor: 4 } };
+    expect(consumptionGrowthFactorOf(noGrace, 60)).toBeCloseTo(Math.pow(1.05, 5), 4);
   });
 
   it('Y2 the monthly cycle compounds the demand into the REAL records', () => {
@@ -63,8 +73,9 @@ describe('the year-over-year demand growth (demand directive)', () => {
     };
     const early = consumptionAt(2);
     const late = consumptionAt(122);
-    expect(late).toBeGreaterThan(early); // demand really climbs with the years
-    // ≈ ×1.04^10 over the decade (± population rounding) — significant.
+    expect(late).toBeGreaterThan(early); // demand really climbs after the grace
+    // Month 122 sits 62 months past the grace → ×1.05^(62/12) ≈ ×1.29
+    // over that span (± population rounding) — significant.
     expect(late / early).toBeGreaterThanOrEqual(1.25);
   });
 
@@ -143,15 +154,14 @@ describe('the year-over-year demand growth (demand directive)', () => {
     }
 
     // —— THE MANDATORY CHECKPOINTS (the directive's years 1 / 5 / 10 / 20) ——
-    // (a) Consumption grew SIGNIFICANTLY year over year — the year-20 mean
-    //     is ≥ 1.5× the year-1 mean (not a one-shot start-of-game bump).
+    // (a) THE GRACE: year 5's mean is still ≈ the year-1 BASE (within the
+    //     population drift) — the opening stays easy. THEN the growth: the
+    //     year-20 mean is ≥ 1.5× the year-1 mean, year 10 already above.
     const first = consumptionByYear.get(1)!;
     const last = consumptionByYear.get(20)!;
     expect(last).toBeGreaterThanOrEqual(first * 1.5);
-    for (const [year, value] of [[5, consumptionByYear.get(5)!], [10, consumptionByYear.get(10)!]] as const) {
-      expect(value).toBeGreaterThan(first); // every checkpoint grew further
-      void year;
-    }
+    expect(consumptionByYear.get(5)!).toBeLessThanOrEqual(first * 1.2); // flat grace
+    expect(consumptionByYear.get(10)!).toBeGreaterThan(first); // growth began
     // (b) NOT everyone became an exporter (the reported bug): the food
     //     exporter count FALLS from its year-1 level and importers exist.
     expect(exportersByYear.get(20)!).toBeLessThan(ids.length - 2);

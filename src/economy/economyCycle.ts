@@ -75,6 +75,7 @@ import {
   satisfactionPenaltyTotalOf
 } from './resources';
 import { executeMonthlyContracts } from './contracts';
+import { economicEventFactorOf } from './economicEvents';
 import { emptyCountryResourceState, emptyCountryFinanceState } from './resourceTypes';
 import { roundTo } from '../utils/math';
 
@@ -199,6 +200,7 @@ export function runEconomyCycle(
   // and BUILDINGS stay absolute (new construction is the growth MARGIN the
   // presidents control).
   const growth = consumptionGrowthFactorOf(config, options.month ?? 0);
+  const buildingDefById = new Map(config.buildings.map((def) => [def.id, def] as const));
   for (const countryId of order) {
     const deposits = countryResourceProduction(mapModel, countryId, config, productionCache);
     const record = state.economy.resources[countryId]!;
@@ -207,22 +209,40 @@ export function runEconomyCycle(
       startStock[resourceId] = Math.max(0, Math.round(record.stock[resourceId] ?? 0));
     }
     stockAtMonthStart.set(countryId, startStock);
+    // THE ECONOMIC EVENTS (the events directive §5/§6): every production
+    // path of a good under an active event (broken refinery → oil, famine
+    // → food) is scaled by the event's factor — the REAL output drops, the
+    // shortage becomes real and imports/storage have to answer. The factor
+    // is READ here (one reader, the events module owns the lifecycle).
+    const eventFactorOf = (resourceId: string): number =>
+      economicEventFactorOf(state, countryId, resourceId);
     const budgetFactor = economicBudgetProductionFactor(state, countryId, config);
     const buildings = buildingProductionOf(state, mapModel, countryId, config);
     record.production = {};
     for (const [resourceId, amount] of Object.entries(deposits)) {
-      record.production[resourceId] = Math.round(amount * budgetFactor);
+      record.production[resourceId] = Math.round(amount * budgetFactor * eventFactorOf(resourceId));
     }
     for (const [resourceId, amount] of Object.entries(buildings.totals)) {
-      record.production[resourceId] = Math.round((record.production[resourceId] ?? 0) + amount);
+      record.production[resourceId] = Math.round(
+        (record.production[resourceId] ?? 0) + amount * eventFactorOf(resourceId)
+      );
     }
     const baseline = specializedBaselineProduction(mapModel, countryId, config);
     for (const [resourceId, amount] of Object.entries(baseline)) {
       record.production[resourceId] = Math.round(
-        (record.production[resourceId] ?? 0) + amount * budgetFactor * growth
+        (record.production[resourceId] ?? 0) + amount * budgetFactor * growth * eventFactorOf(resourceId)
       );
     }
-    extractions.set(countryId, buildings.extraction);
+    // The extraction (the units the reserve REALLY loses) follows the
+    // event-scaled output — a refinery running at half speed draws half.
+    const scaledExtraction: Record<string, number> = {};
+    const countryBuildings = state.economy.buildings[countryId];
+    for (const [buildingId, units] of Object.entries(buildings.extraction)) {
+      const def = buildingDefById.get(countryBuildings?.[buildingId]?.typeId ?? '');
+      const factor = def?.resource !== undefined ? eventFactorOf(def.resource) : 1;
+      scaledExtraction[buildingId] = Math.round(units * factor);
+    }
+    extractions.set(countryId, scaledExtraction);
     if (applyStep) {
       for (const resourceId of resourceIds) {
         const produced = record.production[resourceId] ?? 0;

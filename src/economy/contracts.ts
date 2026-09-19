@@ -35,7 +35,7 @@
 import type { GameState } from '../state/GameState';
 import type { TradeContract, TradeRequest } from './resourceTypes';
 import type { StrategicResourcesConfig } from './types';
-import { safetyReserveUnits } from './resources';
+import { safetyReserveUnits, stockHeadroomOf } from './resources';
 import { roundTo } from '../utils/math';
 
 /** The BASE unit price of ONE resource (spec §7 — config, no tiers). */
@@ -207,6 +207,92 @@ export function activeContractsOf(state: GameState, countryId: string): TradeCon
   return activeContracts(state).filter(
     (contract) => contract.buyerId === countryId || contract.sellerId === countryId
   );
+}
+
+// —————— THE SPOT PURCHASE (the storage directive §2) ——————
+
+export type SpotPurchaseResult =
+  | { readonly ok: true; readonly amount: number; readonly cost: number }
+  | {
+      readonly ok: false;
+      readonly reason:
+        | 'unknown-resource'
+        | 'unknown-country'
+        | 'self-deal'
+        | 'bad-amount'
+        | 'no-capacity'
+        | 'no-space'
+        | 'no-funds';
+    };
+
+/**
+ * ONE-TIME SPOT PURCHASE (the storage directive §2) — the buyer takes
+ * `amount` units of the good from ONE seller's REAL stock NOW, pays the
+ * base price once, and the units land in the buyer's warehouse for the
+ * FUTURE (construction materials, lean months — buying is no longer
+ * limited to this month's consumption). Guards (everything checked BEFORE
+ * anything moves — negative stocks/treasuries are unrepresentable):
+ *  - the good and both countries exist; a country never buys from itself;
+ *  - the amount is a positive whole number;
+ *  - the seller's REMAINING SALE OFFER covers the amount (the same quota
+ *    the market displays — a spot deal can never bypass what the seller
+ *    put up for sale);
+ *  - the buyer's WAREHOUSE has space for the amount (stockpiling is
+ *    bounded — خرید بی‌نهایت نیست);
+ *  - the buyer can pay in full.
+ *
+ * Money moves directly (the ONE honest transfer — no ledger trade lines,
+ * the same convention as the construction payment and the AI's material
+ * deals: nothing is booked twice, §11/§13). The records' import/export
+ * lines receive the units so the §12 view sees this month's real flows.
+ */
+export function executeSpotPurchase(
+  state: GameState,
+  buyerId: string,
+  sellerId: string,
+  resourceId: string,
+  amountPerRequest: number,
+  config: StrategicResourcesConfig
+): SpotPurchaseResult {
+  if (!config.resources.some((resource) => resource.id === resourceId)) {
+    return { ok: false, reason: 'unknown-resource' };
+  }
+  if (sellerId === buyerId) return { ok: false, reason: 'self-deal' };
+  if (
+    state.economy.resources[buyerId] === undefined ||
+    state.economy.resources[sellerId] === undefined ||
+    state.economy.finance[buyerId] === undefined ||
+    state.economy.finance[sellerId] === undefined
+  ) {
+    return { ok: false, reason: 'unknown-country' };
+  }
+  const amount = Math.floor(amountPerRequest);
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, reason: 'bad-amount' };
+  if (remainingSaleOfferOf(state, sellerId, resourceId, config) < amount) {
+    return { ok: false, reason: 'no-capacity' };
+  }
+  const buyerRecord = state.economy.resources[buyerId]!;
+  if (stockHeadroomOf(buyerRecord, resourceId, config) < amount) {
+    return { ok: false, reason: 'no-space' };
+  }
+  const price = unitPriceOf(config, resourceId);
+  if (price <= 0) return { ok: false, reason: 'unknown-resource' };
+  const cost = roundTo(amount * price, 2);
+  if ((state.economy.treasury[buyerId] ?? 0) < cost) {
+    return { ok: false, reason: 'no-funds' };
+  }
+  const sellerRecord = state.economy.resources[sellerId]!;
+  // REAL units + REAL money move, exactly once (§10 — a purchase is a
+  // transfer; the treasury is written HERE and never again for this deal).
+  sellerRecord.stock[resourceId] =
+    Math.max(0, Math.round((sellerRecord.stock[resourceId] ?? 0) - amount));
+  buyerRecord.stock[resourceId] =
+    Math.round((buyerRecord.stock[resourceId] ?? 0) + amount);
+  state.economy.treasury[buyerId] = roundTo((state.economy.treasury[buyerId] ?? 0) - cost, 4);
+  state.economy.treasury[sellerId] = roundTo((state.economy.treasury[sellerId] ?? 0) + cost, 4);
+  buyerRecord.imports[resourceId] = Math.round((buyerRecord.imports[resourceId] ?? 0) + amount);
+  sellerRecord.exports[resourceId] = Math.round((sellerRecord.exports[resourceId] ?? 0) + amount);
+  return { ok: true, amount, cost };
 }
 
 /** TRUE when `countryId` already holds an ACTIVE IMPORT contract for the
@@ -594,9 +680,14 @@ export function executeMonthlyContracts(
     }
     const budget = importBudget.get(contract.buyerId) ?? 0;
     const affordable = contract.price > 0 ? Math.floor(budget / contract.price) : contract.amountPerMonth;
+    // THE WAREHOUSE (the storage directive §2): the buyer's free space caps
+    // the delivery — a country may stockpile for the future, but the
+    // warehouse fills up and then the delivery honestly shrinks to what
+    // fits (the seller keeps the rest; the buyer pays only for what moved).
+    const headroom = stockHeadroomOf(buyerRecord, contract.resourceId, config);
     const delivered = Math.max(
       0,
-      Math.min(contract.amountPerMonth, spare, affordable)
+      Math.min(contract.amountPerMonth, spare, affordable, headroom)
     );
     if (delivered <= 0) {
       contract.lastDelivery = 0;

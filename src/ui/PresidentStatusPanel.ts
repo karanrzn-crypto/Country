@@ -103,10 +103,10 @@ export class PresidentStatusPanel {
     this.root.appendChild(this.identity);
 
     // —— fixed sections (top → bottom) ——
-    // The SIMPLE money (spec §3/§12): treasury + the income lines (tax /
-    // trade) + the THREE expense lines + the balance + the resource summary.
-    // No GDP/inflation/unemployment, no customs, no budget pot.
-    this.addSection('economy', 'اقتصاد', ['خزانه', 'مالیات', 'تجارت', 'ارتش', 'دولت', 'زیرساخت', 'تراز ماهانه', 'منابع']);
+    // THE ASSETS (the assets directive §4): money, ONE income number, ONE
+    // expense number, the balance + the resource summary. The president is
+    // not an accountant — no per-line breakdowns, no GDP/customs/inflation.
+    this.addSection('economy', 'اقتصاد', ['خزانه', 'درآمد ماهانه', 'هزینه ماهانه', 'تراز ماهانه', 'منابع']);
     this.addSection('military', 'نظامی', ['قدرت', 'یگان‌های فعال', 'سربازان', 'در نبرد', 'در حال حرکت', 'جنگ‌ها']);
     this.addSection('politics', 'سیاست', [
       'محبوبیت',
@@ -253,18 +253,22 @@ export class PresidentStatusPanel {
   private refreshEconomy(context: SystemContext, countryId: string): void {
     const economy = this.section('economy');
     if (economy === null) return;
+    // THE ASSETS (the assets directive §4) — the president is not an
+    // accountant: money, ONE income number, ONE expense number, the monthly
+    // change and the resource summary. No per-line breakdowns.
     const finance = context.state.economy.finance[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     economy.rows.get('خزانه')?.setText(faNum(Math.round(treasury)));
     if (finance !== undefined) {
-      economy.rows.get('مالیات')?.setText(faSigned(Math.round(finance.lastTaxIncome)));
-      economy.rows.get('تجارت')?.setText(faSigned(Math.round(finance.lastTradeIncome)));
-      economy.rows.get('ارتش')?.setText(faSigned(-Math.round(finance.lastArmyExpense)));
-      economy.rows.get('دولت')?.setText(faSigned(-Math.round(finance.lastGovernmentExpense)));
-      economy.rows.get('زیرساخت')?.setText(faSigned(-Math.round(finance.lastInfrastructureExpense)));
+      const income = Math.round(finance.lastTaxIncome + finance.lastTradeIncome);
+      const expense = Math.round(
+        finance.lastArmyExpense + finance.lastGovernmentExpense + finance.lastInfrastructureExpense
+      );
+      economy.rows.get('درآمد ماهانه')?.setText(faSigned(income));
+      economy.rows.get('هزینه ماهانه')?.setText(faSigned(-expense));
       economy.rows.get('تراز ماهانه')?.setText(`${faSigned(Math.round(finance.lastBalance))} ماهانه`);
     } else {
-      for (const row of ['مالیات', 'تجارت', 'ارتش', 'دولت', 'زیرساخت', 'تراز ماهانه']) {
+      for (const row of ['درآمد ماهانه', 'هزینه ماهانه', 'تراز ماهانه']) {
         economy.rows.get(row)?.setText('—');
       }
     }

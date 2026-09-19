@@ -44,6 +44,9 @@ export interface CoreGameApi {
   governmentResolveEvent(countryId: string, instanceId: string, choiceId: string): boolean;
   economySignContract(countryId: string, sellerId: string, resourceId: string, amountPerMonth: number): boolean;
   economyCancelContract(countryId: string, contractId: string): boolean;
+  /** ONE-TIME SPOT PURCHASE (the storage directive §2) — real units +
+   *  real money move now, bounded by the seller's quota + the warehouse. */
+  economySpotPurchase(countryId: string, sellerId: string, resourceId: string, amount: number): boolean;
   economyStartConstruction(countryId: string, typeId: string, cellKey: string): boolean;
   economyBuildMode(typeId: string | null): boolean;
   economyConfirmConstruction(countryId: string): boolean;
@@ -106,6 +109,9 @@ export function registerCoreCommandHandlers(game: CoreGameApi): void {
     game.economySignContract(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amountPerMonth)
   );
   bus.register('economy.cancelContract', (cmd) => game.economyCancelContract(cmd.countryId, cmd.contractId));
+  bus.register('economy.spotPurchase', (cmd) =>
+    game.economySpotPurchase(cmd.countryId, cmd.sellerId, cmd.resourceId, cmd.amount)
+  );
   bus.register('economy.startConstruction', (cmd) => game.economyStartConstruction(cmd.countryId, cmd.typeId, cmd.cellKey));
   bus.register('economy.buildMode', (cmd) => game.economyBuildMode(cmd.typeId));
   bus.register('economy.confirmConstruction', (cmd) => game.economyConfirmConstruction(cmd.countryId));

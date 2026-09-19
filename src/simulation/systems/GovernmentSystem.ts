@@ -35,6 +35,7 @@ import type { StrategicResourcesConfig } from '../../economy/types';
 import type { StrategicMapModel } from '../../world/map/MapTypes';
 import { runEconomyCycle } from '../../economy/economyCycle';
 import { stepProjects, startProject, workforceCapacityOf, workforceUsedBy } from '../../economy/construction';
+import { stepEconomicEvents } from '../../economy/economicEvents';
 import { aiBuildingTypeId, aiSecureConstructionMaterials, aiTradeStep } from '../../economy/aiEconomy';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../../economy/resources';
 import { cellQualityOf } from '../../economy/quality';
@@ -139,6 +140,33 @@ export class GovernmentSystem implements SimulationSystemDef {
           price: filed.price
         });
       }
+    }
+
+    // —— 2.5 THE ECONOMIC EVENTS (the events directive §5/§6): age the
+    //      active ones (auto-recovery at zero) and MAYBE start ONE
+    //      temporary production cut — the president is notified, the next
+    //      cycle pass applies the factor to the REAL production. ——
+    const eventOutcome = stepEconomicEvents(state, countryId, config, month, rng, (kind) => ids.next(kind));
+    for (const event of eventOutcome.started) {
+      const def = config.economicEvents?.events.find((candidate) => candidate.id === event.typeId);
+      events.emit('economy.economicEventStarted', {
+        countryId,
+        typeId: event.typeId,
+        resourceId: event.resourceId,
+        factor: event.factor,
+        monthsRemaining: event.monthsRemaining,
+        short: def?.short ?? event.typeId,
+        message: def?.message ?? ''
+      });
+    }
+    for (const event of eventOutcome.ended) {
+      const def = config.economicEvents?.events.find((candidate) => candidate.id === event.typeId);
+      events.emit('economy.economicEventEnded', {
+        countryId,
+        typeId: event.typeId,
+        resourceId: event.resourceId,
+        short: def?.short ?? event.typeId
+      });
     }
 
     // —— 3. public opinion → presidential approval ——

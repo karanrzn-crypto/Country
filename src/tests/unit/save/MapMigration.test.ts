@@ -626,6 +626,40 @@ describe('save migrations (v1 → … → v19)', () => {
     expect(economy.buildings.country_0.b1).toMatchObject({ typeId: 'training_camp' });
   });
 
+  it('v20→v21: the STORAGE + ECONOMIC-EVENTS economy — the empty event record appears', () => {
+    const v20 = {
+      state: {
+        economy: {
+          treasury: { country_0: 5000 },
+          contracts: [],
+          exportRequests: [],
+          resources: {
+            country_0: {
+              stock: { food: 900 }, production: {}, consumption: {}, imports: {}, exports: {},
+              shortage: {}, shortageMonths: {}, tradeIncome: 0, tradeExpense: 0
+            }
+          },
+          finance: { country_0: { lastTaxIncome: 90, lastTradeIncome: 0, lastArmyExpense: 10, lastGovernmentExpense: 5, lastInfrastructureExpense: 2, lastBalance: 73 } },
+          construction: { country_0: { projects: [] } },
+          buildings: { country_0: {} },
+          economyLevel: { country_0: 50 }
+        }
+      },
+      runtime: { tick: 10, rngState: 1, ids: { counters: {} } }
+    };
+    const { data, version } = applyMigrations(v20, 20, SAVE_VERSION);
+    expect(version).toBe(SAVE_VERSION);
+    const economy = (data as { state: { economy: Record<string, any> } }).state.economy;
+    // The additive event record appears EMPTY — old saves never had a
+    // running economic event (the events directive §5: events START during
+    // the campaign, never before it).
+    expect(economy.events).toEqual({});
+    // Everything else survived untouched (warehouse capacity is config-only
+    // — no state fields were added for it).
+    expect(economy.treasury.country_0).toBe(5000);
+    expect(economy.exportRequests).toEqual([]);
+  });
+
   it('a migrated v1 state gains a schema-valid map slice (explicit v1→v2 stop)', () => {
     const { data } = applyMigrations(v1, 1, 2);
     const migrated = data as { state: Record<string, unknown> };

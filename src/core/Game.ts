@@ -38,7 +38,7 @@ import {
   distancePointToPath
 } from '../world/cityareas/CityConnections';
 import { syncCountryCapitals } from '../state/slices/countrySlice';
-import { signContract, cancelContract, decideExportRequest } from '../economy/contracts';
+import { signContract, cancelContract, decideExportRequest, executeSpotPurchase } from '../economy/contracts';
 import { startProject } from '../economy/construction';
 import { economicBuildingAtCell, cellIsUnderConstruction } from '../economy/resources';
 import { AssetRegistry } from '../assets/AssetRegistry';
@@ -1200,6 +1200,40 @@ export class Game {
       return false;
     }
     this.events.emit('economy.contractCancelled', { contractId, countryId });
+    return true;
+  }
+
+  /**
+   * ONE-TIME SPOT PURCHASE (the storage directive §2): the buyer country
+   * takes `amount` units of the good from the seller's REAL stock NOW —
+   * pays once, stockpiles for the future (construction materials, lean
+   * months). All the honest guards live in the core (`executeSpotPurchase`:
+   * the seller's displayed quota, the buyer's warehouse space, the full
+   * payment); nothing moves unless every check passes.
+   */
+  economySpotPurchase(countryId: string, sellerId: string, resourceId: string, amount: number): boolean {
+    this.assertInitialized();
+    const result = executeSpotPurchase(
+      this.state,
+      countryId,
+      sellerId,
+      resourceId,
+      amount,
+      this.data.economyData.strategicResources
+    );
+    if (!result.ok) {
+      this.log.debug(
+        `spotPurchase blocked: ${result.reason} (${countryId} ← ${sellerId}, ${resourceId} ×${amount})`
+      );
+      return false;
+    }
+    this.events.emit('economy.spotPurchased', {
+      buyerId: countryId,
+      sellerId,
+      resourceId,
+      amount: result.amount,
+      cost: result.cost
+    });
     return true;
   }
 

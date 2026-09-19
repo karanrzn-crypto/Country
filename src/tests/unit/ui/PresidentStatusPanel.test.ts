@@ -98,17 +98,18 @@ describe('PresidentStatusPanel (quick overview)', () => {
     expect(textOf(identity)).toContain(context.state.countries.countries[countryId].name);
 
     // Economy rows read the REAL finance state (no invented UI numbers).
+    // The assets directive §4: the president sees ONE income number, ONE
+    // expense number — no per-line accounting breakdowns.
     const finance = context.state.economy.finance[countryId];
     const treasury = context.state.economy.treasury[countryId] ?? 0;
     const economyText = sectionText('اقتصاد');
     expect(economyText).toContain('خزانه');
     expect(economyText).toContain(faNum(Math.round(treasury)));
     expect(finance).toBeDefined();
-    expect(economyText).toContain('مالیات');
-    expect(economyText).toContain('تجارت');
-    expect(economyText).toContain('ارتش');
-    expect(economyText).toContain('دولت');
-    expect(economyText).toContain('زیرساخت');
+    expect(economyText).toContain('درآمد ماهانه');
+    expect(economyText).toContain('هزینه ماهانه');
+    expect(economyText).toContain('تراز ماهانه');
+    expect(economyText).not.toContain('مالیات');
 
     // Military: strength cache + war count (0 in a fresh world).
     const militaryText = sectionText('نظامی');

@@ -9,7 +9,7 @@ import type { PlayerModeSystem } from '../player/PlayerModeSystem';
 import { ScreenManager } from './ScreenManager';
 import { HUDSystem } from './HUDSystem';
 import { NotificationSystem } from './NotificationSystem';
-import type { NotificationLevel } from './NotificationSystem';
+import type { NotificationLevel, NotificationOptions } from './NotificationSystem';
 import { DialogSystem } from './DialogSystem';
 import { MenuSystem } from './MenuSystem';
 import { MapUI } from './MapUI';
@@ -167,8 +167,9 @@ export class UIManager implements PhaseSystem {
       }),
       // —— The EXPORT REQUESTS (the export-request directive §3): a country
       //    asked to buy the player's goods — the president gets a CLEAR
-      //    message and decides in «قراردادها» (موافقت / مخالفت). ——
-      this.events.on('economy.exportRequested', ({ sellerId, buyerId, resourceId, amountPerMonth }) => {
+      //    message and decides IN THE NOTIFICATION (موافقت / مخالفت — the
+      //    notifications directive §7) or in «قراردادها». ——
+      this.events.on('economy.exportRequested', ({ sellerId, buyerId, resourceId, amountPerMonth, requestId }) => {
         if (sellerId === context.state.player.countryId && buyerId !== sellerId) {
           const config = context.data.economyData.strategicResources;
           const good = config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
@@ -176,7 +177,19 @@ export class UIManager implements PhaseSystem {
           this.notify(
             'warn',
             'درخواست صادرات',
-            `کشور ${buyer} می‌خواهد ماهانه ${faNum(amountPerMonth)} واحد ${good} از کشور شما خریداری کند — در برگهٔ «قراردادها» پاسخ دهید.`
+            `کشور ${buyer} درخواست خرید ${faNum(amountPerMonth)} واحد ${good} در ماه را دارد.`,
+            {
+              actions: [
+                {
+                  label: 'موافقت',
+                  onClick: () => this.commands.send({ type: 'economy.approveExportRequest', requestId })
+                },
+                {
+                  label: 'مخالفت',
+                  onClick: () => this.commands.send({ type: 'economy.rejectExportRequest', requestId })
+                }
+              ]
+            }
           );
           this.dashboard.refresh();
         }
@@ -193,6 +206,33 @@ export class UIManager implements PhaseSystem {
                 ? `درخواست ${buyer} موافقت شد — قرارداد صادراتی ماهانه شکل گرفت.`
                 : `عرضهٔ فروش شما از زمان درخواست کم شده — موافقت با درخواست ${buyer} ممکن نشد.`
           );
+          this.dashboard.refresh();
+        }
+      }),
+      // —— THE ECONOMIC EVENTS (the events directive §5/§7): a temporary
+      //    production shock starts (the president is told WHY and for how
+      //    long) and the recovery is announced when it ends. ——
+      this.events.on('economy.economicEventStarted', ({ countryId, short, message, monthsRemaining }) => {
+        if (countryId === context.state.player.countryId) {
+          this.notify(
+            'warn',
+            'رویداد اقتصادی',
+            `${message} (${faNum(monthsRemaining)} ماه)` || short
+          );
+        }
+        this.dashboard.refresh();
+      }),
+      this.events.on('economy.economicEventEnded', ({ countryId, short }) => {
+        if (countryId === context.state.player.countryId) {
+          this.notify('info', 'رویداد اقتصادی', `${short} به پایان رسید — اقتصاد به حالت عادی بازگشت.`);
+        }
+        this.dashboard.refresh();
+      }),
+      this.events.on('economy.spotPurchased', ({ buyerId, sellerId, resourceId, amount }) => {
+        if (buyerId === context.state.player.countryId && sellerId !== buyerId) {
+          const config = context.data.economyData.strategicResources;
+          const good = config.resources.find((resource) => resource.id === resourceId)?.name ?? resourceId;
+          this.notify('info', 'خرید فوری', `${faNum(amount)} واحد ${good} به انبار اضافه شد.`);
           this.dashboard.refresh();
         }
       })
@@ -286,8 +326,8 @@ export class UIManager implements PhaseSystem {
 
   // —— external surface ——
 
-  notify(level: NotificationLevel, title: string, message: string): void {
-    this.notifications.push(level, title, message, this.frameCounter);
+  notify(level: NotificationLevel, title: string, message: string, options: NotificationOptions = {}): void {
+    this.notifications.push(level, title, message, this.frameCounter, options);
     this.events.emit('ui.notification', { level, title, message });
   }
 

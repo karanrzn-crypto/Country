@@ -92,6 +92,17 @@ export type GameCommand =
       readonly countryId: string;
       readonly contractId: string;
     }
+  /** ONE-TIME SPOT PURCHASE (the storage directive §2): the buyer takes
+   *  `amount` units from the seller's REAL stock NOW and stockpiles them
+   *  (construction materials, the future) — bounded by the seller's
+   *  remaining sale offer, the buyer's WAREHOUSE space and full payment. */
+  | {
+      readonly type: 'economy.spotPurchase';
+      readonly countryId: string;
+      readonly sellerId: string;
+      readonly resourceId: string;
+      readonly amount: number;
+    }
   /** Start ONE building construction project (money cost paid once) on a
    *  specific grid cell of the caller's own country (spec §1). */
   | {

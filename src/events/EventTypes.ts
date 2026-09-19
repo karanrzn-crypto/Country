@@ -247,6 +247,35 @@ export interface GameEventMap {
      *  offer shrank below the requested amount since the filing). */
     readonly capacityOk: boolean;
   };
+  /** ONE ONE-TIME SPOT PURCHASE executed (the storage directive §2) —
+   *  real units + real money moved buyer ← seller immediately. */
+  'economy.spotPurchased': {
+    readonly buyerId: string;
+    readonly sellerId: string;
+    readonly resourceId: string;
+    readonly amount: number;
+    readonly cost: number;
+  };
+  /** ONE ECONOMIC EVENT STARTED (the events directive §5) — a temporary
+   *  production cut; the president is notified, the economy auto-recovers
+   *  after `monthsRemaining`. */
+  'economy.economicEventStarted': {
+    readonly countryId: string;
+    readonly typeId: string;
+    readonly resourceId: string;
+    readonly factor: number;
+    readonly monthsRemaining: number;
+    readonly short: string;
+    readonly message: string;
+  };
+  /** ONE ECONOMIC EVENT ENDED (the events directive §5) — the economy is
+   *  back to its normal production. */
+  'economy.economicEventEnded': {
+    readonly countryId: string;
+    readonly typeId: string;
+    readonly resourceId: string;
+    readonly short: string;
+  };
 }
 
 export type GameEventName = keyof GameEventMap;

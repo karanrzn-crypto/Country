@@ -575,6 +575,14 @@ describe('the contract trade (26-section spec: the market never invents goods)',
     for (const id of order) state.economy.treasury[id] = 1_000_000;
     // Two buyers split the 300 quota: 200 + 100 — both signed...
     const buyers = order.slice(1, 3);
+    // THE WAREHOUSE (the storage directive §2): empty food warehouses with
+    // a floor-sized capacity (600) — the QUOTA split, not the storage cap,
+    // is what this test measures.
+    for (const id of buyers) {
+      const record = state.economy.resources[id]!;
+      record.stock.food = 0;
+      record.consumption.food = Math.max(record.consumption.food ?? 0, 50);
+    }
     expect(signContract(state, buyers[0], sellerId, 'food', 200, 50, config(), () => 'q3a').ok).toBe(true);
     expect(signContract(state, buyers[1], sellerId, 'food', 100, 50, config(), () => 'q3b').ok).toBe(true);
     expect(committedExportUnitsOf(state, sellerId, 'food')).toBe(300);

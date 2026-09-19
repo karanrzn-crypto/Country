@@ -102,6 +102,38 @@ describe('NotificationSystem', () => {
     expect(notifications.size).toBe(3);
     expect(container.childCount).toBe(3);
   });
+
+  it('the ضربدر (X) close button removes the notification instantly (§7)', () => {
+    const { container, notifications } = make();
+    notifications.push('warn', 'درخواست صادرات', 'کشور X درخواست خرید دارد.', 0);
+    expect(notifications.size).toBe(1);
+    // The close button is the .nt-close child of the .nt-header row.
+    const note = container.children[0]!;
+    const header = note.children.find((child) => child.className === 'nt-header')!;
+    const close = header.children.find((child) => child.className === 'nt-close')! as InMemoryUIElement;
+    close.click();
+    expect(notifications.size).toBe(0);
+    expect(container.childCount).toBe(0);
+  });
+
+  it('action buttons fire their callback and remove the notification', () => {
+    const { container, notifications } = make();
+    let approved: string | null = null;
+    notifications.push('warn', 'درخواست صادرات', 'کشور X درخواست خرید ۵۰ واحد غذا در ماه را دارد.', 0, {
+      actions: [
+        { label: 'موافقت', onClick: () => { approved = 'yes'; } },
+        { label: 'مخالفت', onClick: () => { approved = 'no'; } }
+      ]
+    });
+    const note = container.children[0]!;
+    const actionsRow = note.children.find((child) => child.className === 'nt-actions')!;
+    const approveButton = actionsRow.children[0]! as InMemoryUIElement;
+    expect(approveButton.text).toBe('موافقت');
+    approveButton.click();
+    expect(approved).toBe('yes');
+    expect(notifications.size).toBe(0);
+    expect(container.childCount).toBe(0);
+  });
 });
 
 describe('HUD model (pure)', () => {

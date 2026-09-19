@@ -841,6 +841,28 @@ const BUILT_IN_MIGRATIONS: readonly SaveMigration[] = [
       }
       return clone;
     }
+  },
+  {
+    // v20 → v21: the STORAGE + ECONOMIC-EVENTS economy (the current
+    // directive). Warehouse capacity is CONFIG-only (no state fields); the
+    // temporary economic events (broken refinery, famine) live per country
+    // in `economy.events` — the additive empty record {} is injected (old
+    // saves never had a running event).
+    from: 20,
+    to: 21,
+    migrate: (data) => {
+      if (data === null || typeof data !== 'object') {
+        throw new SaveError('Migration v20\u2192v21: save payload is not an object');
+      }
+      const clone = JSON.parse(JSON.stringify(data)) as {
+        state?: { economy?: Record<string, unknown> };
+      };
+      const economy = clone.state?.economy;
+      if (economy !== undefined && economy['events'] === undefined) {
+        economy['events'] = {};
+      }
+      return clone;
+    }
   }
 ];
 

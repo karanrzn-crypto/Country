@@ -23,7 +23,8 @@ import type {
   CountryConstructionState,
   BuildingRecord,
   TradeContract,
-  TradeRequest
+  TradeRequest,
+  ActiveEconomicEvent
 } from '../../economy/resourceTypes';
 
 export interface EconomySlice {
@@ -80,6 +81,13 @@ export interface EconomySlice {
    * list; decided records stay (the panel shows the decision history).
    */
   exportRequests: TradeRequest[];
+  /**
+   * The ACTIVE ECONOMIC EVENTS per strategic country id (the events
+   * directive §5): temporary production cuts (broken refinery, famine)
+   * with their remaining months. The event step owns the lifecycle; the
+   * cycle only reads the factor when computing production.
+   */
+  events: Record<string, ActiveEconomicEvent[]>;
 }
 
 export function addStockpile(

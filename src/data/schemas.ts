@@ -74,11 +74,14 @@ export const ECONOMY_SCHEMA: FieldSchema = {
             requestCooldownMonths: { type: 'number', min: 0, max: 120, integer: true }
           }
         },
-        // Year-over-year demand growth (the demand directive — config).
+        // Year-over-year demand growth (the demand directive — config):
+        // `graceYears` keeps consumption at its BASE for the opening years,
+        // then perYear compounds gradually (no sudden jump).
         consumptionGrowth: {
           type: 'object',
           allowUnknown: false,
           fields: {
+            graceYears: { type: 'optional', inner: { type: 'number', min: 0, max: 50 } },
             perYear: { type: 'number', min: 0, max: 1 },
             maxFactor: { type: 'number', min: 1, max: 20 }
           }
@@ -89,6 +92,51 @@ export const ECONOMY_SCHEMA: FieldSchema = {
           allowUnknown: false,
           fields: {
             productionPerPoint: { type: 'number', min: 0, max: 0.05 }
+          }
+        },
+        // The WAREHOUSE (the storage directive §2) — countries may buy more
+        // than this month's consumption but never beyond the warehouse.
+        storage: {
+          type: 'optional',
+          inner: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              maxMonths: { type: 'number', min: 0, max: 120 },
+              floor: { type: 'record', values: { type: 'number', min: 0 } },
+              aiFutureMonths: { type: 'number', min: 0, max: 24 },
+              aiStockpileChance: { type: 'number', min: 0, max: 1 }
+            }
+          }
+        },
+        // The TEMPORARY economic events (the events directive §5): each a
+        // production cut on ONE good for a few months, then auto-recovery.
+        economicEvents: {
+          type: 'optional',
+          inner: {
+            type: 'object',
+            allowUnknown: false,
+            fields: {
+              checkChance: { type: 'number', min: 0, max: 1 },
+              maxConcurrent: { type: 'number', min: 0, max: 5, integer: true },
+              events: {
+                type: 'array',
+                minLength: 1,
+                items: {
+                  type: 'object',
+                  allowUnknown: false,
+                  fields: {
+                    id: idField,
+                    short: nameField,
+                    message: { type: 'string' },
+                    resource: idField,
+                    factor: { type: 'number', min: 0, max: 1 },
+                    durationMonths: { type: 'number', min: 1, max: 120, integer: true },
+                    weight: { type: 'optional', inner: { type: 'number', min: 0, max: 100 } }
+                  }
+                }
+              }
+            }
           }
         },
         specialization: {

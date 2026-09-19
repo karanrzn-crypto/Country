@@ -177,6 +177,12 @@ describe('wider simple economy (11-section spec)', () => {
       safetyReserveUnits(sellerRecord.consumption, 'oil', config);
     const tradeBuyerId = ids().find((id) => id !== countryId)!;
     state.economy.treasury[tradeBuyerId] = 1_000_000;
+    // THE WAREHOUSE (the storage directive §2): this buyer is a HUGE oil
+    // consumer (capacity = 8 × 700 = 5600) with an empty tank farm, so the
+    // delivery below is bounded by the CONTRACT, not by storage.
+    const buyerRecordT4 = state.economy.resources[tradeBuyerId]!;
+    buyerRecordT4.consumption.oil = 700;
+    buyerRecordT4.stock.oil = 0;
     const sale = signContract(state, tradeBuyerId, countryId, 'oil', 5000, 50, config, () => 'r4');
     expect(sale.ok).toBe(true);
     runEconomyCycle(state, context.map, config, { applyStep: true, month: 51 });
